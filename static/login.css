@@ -63,8 +63,8 @@ body::after {
 .shell {
   min-height: 100%;
   display: grid;
-  grid-template-columns: 1.2fr 520px;
-  gap: 28px;
+  grid-template-columns: 1fr 640px;
+  gap: 32px;
   padding: 44px 46px;
   align-items: stretch;
 }
@@ -236,7 +236,7 @@ body::after {
 }
 
 .panel__content {
-  padding: 22px 34px 30px 34px;
+  padding: 26px 42px 34px 42px;
 }
 
 .panel__header {

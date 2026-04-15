@@ -51,7 +51,7 @@ export default function LoginPage() {
   }, [role]);
 
   return (
-    <main className="min-h-full grid grid-cols-1 gap-7 px-5 py-7 lg:min-h-screen lg:grid-cols-[1.2fr_520px] lg:gap-7 lg:px-12 lg:py-11">
+    <main className="min-h-full grid grid-cols-1 gap-7 px-5 py-7 lg:min-h-screen lg:grid-cols-[1fr_640px] lg:gap-8 lg:px-12 lg:py-11 xl:grid-cols-[1fr_700px]">
       <section aria-label="Product overview" className="flex min-w-0 flex-col justify-between">
         <div className="pt-1">
           <div className="inline-flex items-center gap-2.5">
@@ -67,7 +67,8 @@ export default function LoginPage() {
               A Smarter Way to Invest, Manage, or Rent
             </span>
             <span aria-hidden="true">
-              A Smarter Way to{" "}
+              A Smarter Way to
+              <br />
               <span className="relative inline-block align-baseline">
                 {headlineWords.map((item, idx) => (
                   <span
@@ -130,7 +131,7 @@ export default function LoginPage() {
           </button>
         </div>
 
-        <div className="px-7 pb-8 pt-6 sm:px-[34px]">
+        <div className="px-7 pb-9 pt-7 sm:px-[42px]">
           <div className="flex items-start gap-3">
             <div aria-hidden="true" className="mt-1 text-[18px] opacity-90">
               →
