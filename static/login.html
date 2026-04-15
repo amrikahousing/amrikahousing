@@ -1,0 +1,187 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Sign in</title>
+    <link rel="stylesheet" href="./login.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <section class="hero" aria-label="Product overview">
+        <div class="brand">
+          <div class="brand__mark" aria-hidden="true"></div>
+          <div class="brand__name">Amrika Housing</div>
+        </div>
+
+        <h1 class="hero__title">
+          <span class="srOnly">A Smarter Way to Invest, Manage, or Rent</span>
+          <span aria-hidden="true">
+            A Smarter Way to
+            <span class="rotator" aria-hidden="true">
+              <span class="rotator__word rotator__word--invest isActive">Invest</span>
+              <span class="rotator__word rotator__word--manage">Manage</span>
+              <span class="rotator__word rotator__word--rent">Rent</span>
+              <span class="rotator__sizer">Invest</span>
+            </span>
+          </span>
+        </h1>
+        <p class="hero__subtitle">
+          Fast property operations for managers, renters, and investors<br />
+          in one secure workspace.
+        </p>
+
+        <div class="callout" role="note" aria-label="Value proposition">
+          <div class="callout__kicker">BUILT FOR FOCUSED DECISIONS</div>
+          <div class="callout__body">
+            Track leasing, maintenance, accounting, and investment opportunities with fewer
+            clicks.
+          </div>
+        </div>
+      </section>
+
+      <section class="panel" aria-label="Sign in">
+        <div class="panel__chrome">
+          <button class="iconBtn" type="button" aria-label="Menu">
+            <span aria-hidden="true">≡</span>
+          </button>
+        </div>
+
+        <div class="panel__content">
+          <div class="panel__header">
+            <div class="panel__lead" aria-hidden="true">→</div>
+            <div>
+              <h2 class="panel__title">Sign in</h2>
+              <p class="panel__desc">Signing in as <span id="roleLabel">Property Manager</span></p>
+            </div>
+          </div>
+
+          <form class="form" action="#" method="post" autocomplete="on">
+            <input type="hidden" name="role" id="roleInput" value="property_manager" />
+            <fieldset class="roleSwitch">
+              <legend class="srOnly">Select role</legend>
+              <label class="roleSwitch__item">
+                <input class="roleSwitch__radio" type="radio" name="roleChoice" value="investor" />
+                <span class="roleSwitch__pill">Investor</span>
+              </label>
+              <label class="roleSwitch__item">
+                <input
+                  class="roleSwitch__radio"
+                  type="radio"
+                  name="roleChoice"
+                  value="property_manager"
+                  checked
+                />
+                <span class="roleSwitch__pill">Manager</span>
+              </label>
+              <label class="roleSwitch__item">
+                <input class="roleSwitch__radio" type="radio" name="roleChoice" value="renter" />
+                <span class="roleSwitch__pill">Renter</span>
+              </label>
+            </fieldset>
+
+            <label class="field">
+              <span class="field__label">Email</span>
+              <input
+                class="field__input"
+                type="email"
+                name="email"
+                placeholder="you@company.com"
+                autocomplete="email"
+                required
+              />
+            </label>
+
+            <label class="field">
+              <span class="field__label">Password</span>
+              <span class="field__wrap">
+                <input
+                  id="password"
+                  class="field__input"
+                  type="password"
+                  name="password"
+                  placeholder="Enter your password"
+                  autocomplete="current-password"
+                  required
+                />
+                <button
+                  id="togglePassword"
+                  class="field__icon"
+                  type="button"
+                  aria-label="Show password"
+                >
+                  <span aria-hidden="true">👁</span>
+                </button>
+              </span>
+            </label>
+
+            <button class="primaryBtn" type="submit">Sign in</button>
+            <button class="secondaryBtn" type="button">Sign in with Passkey</button>
+
+            <div class="links">
+              <a href="#" class="link">Forgot password?</a>
+              <a href="#" class="link">Create an account</a>
+            </div>
+
+            <p class="fineprint">
+              This site is protected by reCAPTCHA and the Google
+              <a class="link link--muted" href="#">Privacy Policy</a>,
+              <a class="link link--muted" href="#">Terms of Service</a> apply.
+            </p>
+          </form>
+        </div>
+      </section>
+    </main>
+
+    <script>
+      (function () {
+        const input = document.getElementById("password");
+        const btn = document.getElementById("togglePassword");
+        if (!input || !btn) return;
+        btn.addEventListener("click", () => {
+          const isHidden = input.type === "password";
+          input.type = isHidden ? "text" : "password";
+          btn.setAttribute("aria-label", isHidden ? "Hide password" : "Show password");
+        });
+      })();
+    </script>
+    <script>
+      (function () {
+        const labelEl = document.getElementById("roleLabel");
+        const inputEl = document.getElementById("roleInput");
+        if (!labelEl || !inputEl) return;
+
+        function labelForRole(role) {
+          if (role === "investor") return "Investor";
+          if (role === "renter") return "Renter";
+          return "Property Manager";
+        }
+
+        const radios = Array.from(document.querySelectorAll('input[name="roleChoice"]'));
+        radios.forEach((r) => {
+          r.addEventListener("change", () => {
+            if (!r.checked) return;
+            inputEl.value = r.value;
+            labelEl.textContent = labelForRole(r.value);
+          });
+        });
+      })();
+    </script>
+    <script>
+      (function () {
+        const prefersReduced =
+          window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        if (prefersReduced) return;
+        const words = Array.from(document.querySelectorAll(".rotator__word"));
+        if (!words.length) return;
+        let idx = 0;
+        window.setInterval(() => {
+          words[idx].classList.remove("isActive");
+          idx = (idx + 1) % words.length;
+          words[idx].classList.add("isActive");
+        }, 1600);
+      })();
+    </script>
+  </body>
+</html>
+
