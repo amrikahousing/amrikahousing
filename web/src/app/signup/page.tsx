@@ -94,14 +94,17 @@ export default function SignupPage() {
     router.push("/dashboard");
   }
 
-  const fieldErrors = errors.fields;
+  const fieldErrors = errors.fields as unknown as Record<
+    string,
+    { message: string } | null | undefined
+  >;
   const globalError = errors.global?.[0]?.message ?? null;
   const displayError =
     clientError ??
-    (fieldErrors as Record<string, { message: string } | null>)?.emailAddress?.message ??
-    (fieldErrors as Record<string, { message: string } | null>)?.password?.message ??
-    (fieldErrors as Record<string, { message: string } | null>)?.firstName?.message ??
-    (fieldErrors as Record<string, { message: string } | null>)?.code?.message ??
+    fieldErrors.emailAddress?.message ??
+    fieldErrors.password?.message ??
+    fieldErrors.firstName?.message ??
+    fieldErrors.code?.message ??
     globalError;
 
   if (verifying) {
