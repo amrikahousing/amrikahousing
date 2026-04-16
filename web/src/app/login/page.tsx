@@ -7,7 +7,7 @@ export default function LoginPage() {
   const passwordId = useId();
   const [showPassword, setShowPassword] = useState(false);
   const [headlineIndex, setHeadlineIndex] = useState(0);
-  const [role, setRole] = useState<"investor" | "property_manager" | "renter">(
+  const [role, setRole] = useState<"property_manager" | "renter">(
     "property_manager",
   );
 
@@ -41,8 +41,6 @@ export default function LoginPage() {
 
   const roleLabel = useMemo(() => {
     switch (role) {
-      case "investor":
-        return "Investor";
       case "renter":
         return "Renter";
       default:
@@ -51,7 +49,7 @@ export default function LoginPage() {
   }, [role]);
 
   return (
-    <main className="min-h-full grid grid-cols-1 gap-7 px-5 py-7 lg:min-h-screen lg:grid-cols-[1fr_640px] lg:gap-8 lg:px-12 lg:py-11 xl:grid-cols-[1fr_700px]">
+    <main className="min-h-full grid grid-cols-1 gap-7 px-5 py-7 lg:min-h-screen lg:grid-cols-[1fr_420px] lg:gap-8 lg:px-12 lg:py-11 xl:grid-cols-[1fr_460px]">
       <section aria-label="Product overview" className="flex min-w-0 flex-col justify-between">
         <div className="pt-1">
           <div className="inline-flex items-center gap-2.5">
@@ -131,7 +129,7 @@ export default function LoginPage() {
           </button>
         </div>
 
-        <div className="px-7 pb-9 pt-7 sm:px-[42px]">
+        <div className="px-5 pb-6 pt-5 sm:px-8">
           <div className="flex items-start gap-3">
             <div aria-hidden="true" className="mt-1 text-[18px] opacity-90">
               →
@@ -146,21 +144,7 @@ export default function LoginPage() {
 
           <fieldset className="mt-4">
             <legend className="sr-only">Select role</legend>
-            <div className="grid grid-cols-3 gap-2 rounded-xl border border-white/15 bg-white/5 p-1">
-              <label className="cursor-pointer">
-                <input
-                  className="peer sr-only"
-                  type="radio"
-                  name="role"
-                  value="investor"
-                  checked={role === "investor"}
-                  onChange={() => setRole("investor")}
-                />
-                <span className="block select-none rounded-[10px] px-3 py-2 text-center text-[12px] font-semibold tracking-[0.1px] text-white/80 transition-colors peer-checked:bg-white/15 peer-checked:text-white">
-                  Investor
-                </span>
-              </label>
-
+            <div className="grid grid-cols-2 gap-2 rounded-xl border border-white/15 bg-white/5 p-1">
               <label className="cursor-pointer">
                 <input
                   className="peer sr-only"
@@ -285,4 +269,3 @@ export default function LoginPage() {
     </main>
   );
 }
-
