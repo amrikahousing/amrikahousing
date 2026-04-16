@@ -1,6 +1,9 @@
 "use client";
 
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useEffect, useId, useMemo, useState } from "react";
+import { useSignIn } from "@clerk/nextjs";
 
 export default function LoginPage() {
   const emailId = useId();
@@ -10,6 +13,12 @@ export default function LoginPage() {
   const [role, setRole] = useState<"property_manager" | "renter">(
     "property_manager",
   );
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+
+  const { signIn, errors, fetchStatus } = useSignIn();
+  const router = useRouter();
+  const isLoading = fetchStatus === "fetching";
 
   const headlineWords = useMemo(
     () =>
@@ -48,6 +57,20 @@ export default function LoginPage() {
     }
   }, [role]);
 
+  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    const { error } = await signIn.password({ identifier: email, password });
+    if (!error) {
+      await signIn.finalize();
+      router.push("/dashboard");
+    }
+  }
+
+  const fieldError =
+    errors.fields.identifier?.message ?? errors.fields.password?.message ?? null;
+  const globalError = errors.global?.[0]?.message ?? null;
+  const displayError = fieldError ?? globalError;
+
   return (
     <main className="min-h-full grid grid-cols-1 gap-7 px-5 py-7 lg:min-h-screen lg:grid-cols-[1fr_420px] lg:gap-8 lg:px-12 lg:py-11 xl:grid-cols-[1fr_460px]">
       <section aria-label="Product overview" className="flex min-w-0 flex-col justify-between">
@@ -65,8 +88,7 @@ export default function LoginPage() {
               A Smarter Way to Invest, Manage, or Rent
             </span>
             <span aria-hidden="true">
-              A Smarter Way to
-              <br />
+              A Smarter Way to{" "}
               <span className="relative inline-block align-baseline">
                 {headlineWords.map((item, idx) => (
                   <span
@@ -88,6 +110,9 @@ export default function LoginPage() {
               </span>
             </span>
           </h1>
+          <p className="mt-2 text-[clamp(20px,2.2vw,30px)] leading-[1.2] tracking-[-0.01em] text-[var(--accent)]">
+            Your home base starts here.
+          </p>
           <p className="mt-3.5 max-w-[560px] text-[14px] leading-[1.55] text-white/70">
             Fast property operations for managers, renters, and investors
             <br />
@@ -175,8 +200,7 @@ export default function LoginPage() {
             </div>
           </fieldset>
 
-          <form className="mt-5 grid gap-3.5" action="#" method="post" autoComplete="on">
-            <input type="hidden" name="role" value={role} />
+          <form className="mt-5 grid gap-3.5" onSubmit={handleSubmit} autoComplete="on">
             <div className="grid gap-1.5">
               <label htmlFor={emailId} className="text-[12px] text-white/75">
                 Email
@@ -189,6 +213,8 @@ export default function LoginPage() {
                 placeholder="you@company.com"
                 autoComplete="email"
                 required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
               />
             </div>
 
@@ -205,6 +231,8 @@ export default function LoginPage() {
                   placeholder="Enter your password"
                   autoComplete="current-password"
                   required
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
                 />
                 <button
                   type="button"
@@ -217,11 +245,18 @@ export default function LoginPage() {
               </div>
             </div>
 
+            {displayError && (
+              <p role="alert" className="text-[12px] text-red-400">
+                {displayError}
+              </p>
+            )}
+
             <button
-              className="mt-0.5 w-full rounded-[10px] border border-white/15 bg-[linear-gradient(180deg,rgba(16,185,129,1),rgba(10,145,100,1))] px-3.5 py-3 font-semibold tracking-[0.1px] text-white/95 shadow-[0_22px_60px_rgba(16,185,129,0.22)] hover:brightness-[1.04]"
+              className="mt-0.5 w-full rounded-[10px] border border-white/15 bg-[linear-gradient(180deg,rgba(16,185,129,1),rgba(10,145,100,1))] px-3.5 py-3 font-semibold tracking-[0.1px] text-white/95 shadow-[0_22px_60px_rgba(16,185,129,0.22)] hover:brightness-[1.04] disabled:opacity-60 disabled:cursor-not-allowed"
               type="submit"
+              disabled={isLoading}
             >
-              Sign in
+              {isLoading ? "Signing in…" : "Sign in"}
             </button>
 
             <button
@@ -238,12 +273,12 @@ export default function LoginPage() {
               >
                 Forgot password?
               </a>
-              <a
-                href="#"
+              <Link
+                href="/signup"
                 className="text-[12px] text-white/85 underline underline-offset-[3px] decoration-white/35 hover:decoration-white/75"
               >
                 Create an account
-              </a>
+              </Link>
             </div>
 
             <p className="m-0 pt-1.5 text-[10px] leading-[1.45] text-white/60">
