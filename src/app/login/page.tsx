@@ -146,18 +146,9 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
   const headlineWords = useMemo(
     () =>
       [
-        {
-          word: "Invest",
-          className: "bg-gradient-to-r from-amber-300 to-orange-400",
-        },
-        {
-          word: "Manage",
-          className: "bg-gradient-to-r from-emerald-300 to-emerald-400",
-        },
-        {
-          word: "Rent",
-          className: "bg-gradient-to-r from-sky-300 to-sky-400",
-        },
+        { word: "Invest", className: "text-amber-400" },
+        { word: "Manage", className: "text-emerald-400" },
+        { word: "Rent", className: "text-sky-400" },
       ] as const,
     [],
   );
@@ -392,26 +383,26 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
         >
           <div className="relative text-slate-100">
             <div className="mb-8 flex items-center gap-2">
-              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-900 shadow-lg shadow-slate-500/20">
-                <BuildingIcon className="h-6 w-6 text-white" />
+              <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-700/80">
+                <BuildingIcon className="h-4 w-4 text-slate-300" />
               </div>
-              <div className="text-2xl font-bold tracking-[-0.025em]">
+              <div className="text-lg font-semibold tracking-[-0.01em] text-slate-200">
                 Amrika Housing
               </div>
             </div>
 
-            <h1 className="mb-5 text-[44px] font-bold leading-[1.05] tracking-[-0.025em]">
+            <h1 className="mb-5 text-[clamp(36px,4vw,52px)] font-normal leading-[1.15] tracking-[-0.025em]">
               <span className="sr-only">
                 A Smarter Way to Invest, Manage, or Rent
               </span>
-              <span aria-hidden="true">
-                <span className="text-slate-200/90">A Smarter Way to </span>
+              <span aria-hidden="true" className="whitespace-nowrap">
+                <span className="font-normal text-slate-400">A Smarter Way to </span>
                 <span className="relative inline-block align-baseline">
                   {headlineWords.map((item, idx) => (
                     <span
                       key={item.word}
                       className={[
-                        "absolute left-0 top-0 whitespace-nowrap bg-clip-text text-transparent transition-all duration-300 will-change-transform",
+                        "absolute left-0 top-0 whitespace-nowrap transition-all duration-300 will-change-transform",
                         item.className,
                         idx === headlineIndex
                           ? "translate-y-0 opacity-100"
@@ -430,7 +421,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
             <p className="mt-2 text-[clamp(20px,2.2vw,30px)] leading-[1.2] tracking-[-0.01em] text-[var(--accent)]">
               Your home base starts here.
             </p>
-            <p className="mt-3.5 max-w-md text-[14px] leading-[1.55] text-slate-300">
+            <p className="mt-3.5 max-w-md text-[14px] leading-[1.55] text-slate-400">
               Fast property operations for managers, renters, and investors in
               one secure workspace.
             </p>
@@ -441,11 +432,11 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
             aria-label="Value proposition"
             className="relative grid gap-3 text-slate-100"
           >
-            <div className="rounded-xl border border-white/20 bg-slate-900/40 p-4 backdrop-blur-sm">
-              <p className="text-xs uppercase tracking-wide text-emerald-300">
+            <div className="rounded-xl border border-white/10 bg-slate-900/50 p-4 backdrop-blur-sm">
+              <p className="text-xs uppercase tracking-widest text-emerald-300">
                 Built for focused decisions
               </p>
-              <p className="mt-2 text-sm text-slate-200">
+              <p className="mt-2 text-sm text-slate-300">
                 Track leasing, maintenance, accounting, and investment
                 opportunities with fewer clicks.
               </p>
@@ -455,11 +446,11 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
 
         <section
           aria-label={title}
-          className="flex items-center justify-center bg-slate-950/35 p-4 sm:p-6 lg:p-10"
+          className="flex items-start justify-center overflow-y-auto bg-slate-950/35 p-4 py-8 sm:items-center sm:p-6 lg:p-10"
         >
           <div className="w-full max-w-[520px] rounded-3xl bg-gradient-to-br from-emerald-400/70 via-emerald-500/10 to-sky-500/60 p-[1.2px] shadow-[0_18px_60px_rgba(15,23,42,0.95)]">
             <div className="w-full rounded-[1.6rem] border border-white/10 bg-slate-950/85 shadow-[0_18px_60px_rgba(15,23,42,0.95)] backdrop-blur-xl">
-              <div className="space-y-3 px-6 pb-5 pt-6 sm:space-y-4 sm:px-9 sm:pb-6 sm:pt-8">
+              <div className="space-y-2 px-6 pb-2 pt-4 sm:space-y-2 sm:px-9 sm:pb-3 sm:pt-5">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2 lg:hidden">
                     <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-900">
@@ -472,7 +463,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                 </div>
 
                 <div>
-                  <h2 className="flex items-center gap-2 text-[24px] leading-tight tracking-[-0.025em] text-slate-100 sm:text-[30px]">
+                  <h2 className="flex items-center gap-2 text-[20px] leading-tight tracking-[-0.025em] text-slate-100 sm:text-[24px]">
                     <KeyIcon className="h-6 w-6 text-emerald-400" />
                     {title}
                   </h2>
@@ -528,10 +519,10 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                 ) : null}
               </div>
 
-              <div className="px-6 pb-6 sm:px-9 sm:pb-8">
+              <div className="px-6 pb-4 sm:px-9 sm:pb-5">
                 {mode === "signin" ? (
                   <form
-                    className="space-y-5"
+                    className="space-y-2.5"
                     onSubmit={handleSignIn}
                     autoComplete="on"
                   >
@@ -626,12 +617,12 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
 
                 {mode === "signup" ? (
                   <form
-                    className="space-y-5"
+                    className="space-y-2.5"
                     onSubmit={handleSignup}
                     autoComplete="on"
                   >
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                      <div className="space-y-2">
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      <div className="space-y-1">
                         <label
                           htmlFor={firstNameId}
                           className="text-sm text-slate-200"
@@ -640,7 +631,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                         </label>
                         <input
                           id={firstNameId}
-                          className="h-11 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 text-base text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                          className="h-9 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 text-sm text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
                           type="text"
                           name="firstName"
                           placeholder="Jane"
@@ -650,7 +641,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                           onChange={(e) => setFirstName(e.target.value)}
                         />
                       </div>
-                      <div className="space-y-2">
+                      <div className="space-y-1">
                         <label
                           htmlFor={lastNameId}
                           className="text-sm text-slate-200"
@@ -659,7 +650,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                         </label>
                         <input
                           id={lastNameId}
-                          className="h-11 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 text-base text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                          className="h-9 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 text-sm text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
                           type="text"
                           name="lastName"
                           placeholder="Doe"
@@ -671,7 +662,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                     </div>
 
                     {role === "property_manager" ? (
-                      <div className="space-y-2">
+                      <div className="space-y-1">
                         <label
                           htmlFor={organizationId}
                           className="text-sm text-slate-200"
@@ -680,7 +671,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                         </label>
                         <input
                           id={organizationId}
-                          className="h-11 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 text-base text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                          className="h-9 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 text-sm text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
                           type="text"
                           name="organizationName"
                           placeholder="Avon Management"
@@ -692,13 +683,13 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                       </div>
                     ) : null}
 
-                    <div className="space-y-2">
+                    <div className="space-y-1">
                       <label htmlFor={emailId} className="text-sm text-slate-200">
                         Email
                       </label>
                       <input
                         id={emailId}
-                        className="h-11 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 text-base text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                        className="h-9 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 text-sm text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
                         type="email"
                         name="email"
                         placeholder="you@company.com"
@@ -709,7 +700,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                       />
                     </div>
 
-                    <div className="space-y-2">
+                    <div className="space-y-1">
                       <label
                         htmlFor={passwordId}
                         className="text-sm text-slate-200"
@@ -719,7 +710,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                       <div className="relative">
                         <input
                           id={passwordId}
-                          className="h-11 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 pr-12 text-base text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                          className="h-9 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 pr-12 text-sm text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
                           type={showPassword ? "text" : "password"}
                           name="password"
                           placeholder="Create a secure password"
@@ -739,7 +730,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                       </div>
                     </div>
 
-                    <div className="space-y-2">
+                    <div className="space-y-1">
                       <label
                         htmlFor={confirmPasswordId}
                         className="text-sm text-slate-200"
@@ -749,7 +740,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                       <div className="relative">
                         <input
                           id={confirmPasswordId}
-                          className="h-11 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 pr-12 text-base text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                          className="h-9 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 pr-12 text-sm text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
                           type={showConfirmPassword ? "text" : "password"}
                           name="confirmPassword"
                           placeholder="Repeat your password"
@@ -785,7 +776,6 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
 
                     <div
                       id="clerk-captcha"
-                      className="min-h-[65px]"
                       data-cl-theme="dark"
                       data-cl-size="flexible"
                     />
@@ -797,7 +787,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                     )}
 
                     <button
-                      className="h-11 w-full rounded-md bg-emerald-500 px-4 text-base font-semibold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
+                      className="h-10 w-full rounded-md bg-emerald-500 px-4 text-sm font-semibold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
                       type="submit"
                       disabled={isLoading}
                     >
