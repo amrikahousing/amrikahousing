@@ -1,34 +1,176 @@
 "use client";
 
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useId, useMemo, useState } from "react";
-import { useSignIn } from "@clerk/nextjs";
+import { useAuth, useClerk, useSignIn, useSignUp } from "@clerk/nextjs";
+import { isClerkAPIResponseError } from "@clerk/nextjs/errors";
 
-export default function LoginPage() {
+type LoginRole = "property_manager" | "renter";
+type AuthMode = "signin" | "signup" | "verify";
+
+function BuildingIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M4 21V5.5A1.5 1.5 0 0 1 5.5 4h9A1.5 1.5 0 0 1 16 5.5V21" />
+      <path d="M16 9h2.5A1.5 1.5 0 0 1 20 10.5V21" />
+      <path d="M8 8h4" />
+      <path d="M8 12h4" />
+      <path d="M8 16h4" />
+      <path d="M3 21h18" />
+    </svg>
+  );
+}
+
+function KeyIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <circle cx="8" cy="15" r="3.5" />
+      <path d="M10.5 12.5 20 3" />
+      <path d="m15 8 2 2" />
+      <path d="m18 5 2 2" />
+    </svg>
+  );
+}
+
+function EyeIcon({
+  className = "",
+  hidden,
+}: {
+  className?: string;
+  hidden: boolean;
+}) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" />
+      <circle cx="12" cy="12" r="2.6" />
+      {hidden ? <path d="m4 4 16 16" /> : null}
+    </svg>
+  );
+}
+
+function getErrorMessage(error: unknown, fallback: string) {
+  if (isClerkAPIResponseError(error)) {
+    const clerkError = error.errors[0];
+    const traceId = error.clerkTraceId
+      ? ` Trace ID: ${error.clerkTraceId}.`
+      : "";
+    const code = clerkError?.code ? ` (${clerkError.code})` : "";
+
+    return (
+      `${
+        clerkError?.longMessage ??
+        clerkError?.message ??
+        error.message ??
+        fallback
+      }${code}.${traceId}`
+    ).trim();
+  }
+
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "message" in error &&
+    typeof error.message === "string"
+  ) {
+    return error.message;
+  }
+
+  return fallback;
+}
+
+export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode }) {
   const emailId = useId();
   const passwordId = useId();
+  const firstNameId = useId();
+  const lastNameId = useId();
+  const organizationId = useId();
+  const confirmPasswordId = useId();
+  const codeId = useId();
+
+  const [mode, setMode] = useState<AuthMode>(() => {
+    if (typeof window === "undefined") return initialMode;
+
+    const url = new URL(window.location.href);
+    return url.searchParams.get("mode") === "signup" ? "signup" : initialMode;
+  });
   const [showPassword, setShowPassword] = useState(false);
+  const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [headlineIndex, setHeadlineIndex] = useState(0);
-  const [role, setRole] = useState<"property_manager" | "renter">(
-    "property_manager",
-  );
+  const [role, setRole] = useState<LoginRole>("property_manager");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [firstName, setFirstName] = useState("");
+  const [lastName, setLastName] = useState("");
+  const [organizationName, setOrganizationName] = useState("");
+  const [verificationCode, setVerificationCode] = useState("");
+  const [clientError, setClientError] = useState<string | null>(null);
 
-  const { signIn, errors, fetchStatus } = useSignIn();
+  const { signIn, errors: signInErrors, fetchStatus: signInFetchStatus } =
+    useSignIn();
+  const { signUp, errors: signUpErrors, fetchStatus: signUpFetchStatus } =
+    useSignUp();
+  const { isSignedIn } = useAuth();
+  const clerk = useClerk();
   const router = useRouter();
-  const isLoading = fetchStatus === "fetching";
+  const isLoading =
+    signInFetchStatus === "fetching" || signUpFetchStatus === "fetching";
 
   const headlineWords = useMemo(
     () =>
       [
-        { word: "Invest", className: "text-[var(--accent)]" },
-        { word: "Manage", className: "text-[var(--green)]" },
-        { word: "Rent", className: "text-sky-300" },
+        {
+          word: "Invest",
+          className: "bg-gradient-to-r from-amber-300 to-orange-400",
+        },
+        {
+          word: "Manage",
+          className: "bg-gradient-to-r from-emerald-300 to-emerald-400",
+        },
+        {
+          word: "Rent",
+          className: "bg-gradient-to-r from-sky-300 to-sky-400",
+        },
       ] as const,
     [],
   );
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("mode") !== "signup") return;
+
+    url.searchParams.delete("mode");
+    window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+  }, []);
 
   useEffect(() => {
     const prefersReduced =
@@ -43,11 +185,6 @@ export default function LoginPage() {
     return () => window.clearInterval(id);
   }, [headlineWords.length]);
 
-  const iconLabel = useMemo(
-    () => (showPassword ? "Hide password" : "Show password"),
-    [showPassword],
-  );
-
   const roleLabel = useMemo(() => {
     switch (role) {
       case "renter":
@@ -57,8 +194,61 @@ export default function LoginPage() {
     }
   }, [role]);
 
-  async function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+  const title = mode === "signup" ? "Create your account" : mode === "verify" ? "Verify email" : "Sign in";
+  const description =
+    mode === "signup"
+      ? "Set up access in under a minute."
+      : mode === "verify"
+        ? "Enter the 6-digit code we sent you."
+        : "";
+
+  function switchMode(nextMode: AuthMode) {
+    setMode(nextMode);
+    setClientError(null);
+  }
+
+  async function createOrganizationIfNeeded() {
+    const name = organizationName.trim();
+    if (role !== "property_manager" || !name) return;
+
+    const clerkWithOrgs = clerk as typeof clerk & {
+      createOrganization?: (params: { name: string }) => Promise<unknown>;
+      setActive?: (params: { organization?: string }) => Promise<unknown>;
+    };
+
+    if (typeof clerkWithOrgs.createOrganization !== "function") return;
+
+    const organization = (await clerkWithOrgs.createOrganization({ name })) as {
+      id?: string;
+    };
+
+    if (organization?.id && typeof clerkWithOrgs.setActive === "function") {
+      await clerkWithOrgs.setActive({ organization: organization.id });
+    }
+  }
+
+  async function completeSignup() {
+    const sessionId = signUp.createdSessionId;
+
+    if (sessionId) {
+      await clerk.setActive({ session: sessionId });
+      await createOrganizationIfNeeded();
+      router.push("/dashboard");
+      return;
+    }
+
+    switchMode("signin");
+  }
+
+  async function handleSignIn(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
+    setClientError(null);
+
+    if (isSignedIn) {
+      router.push("/dashboard");
+      return;
+    }
+
     const { error } = await signIn.password({ identifier: email, password });
     if (!error) {
       await signIn.finalize();
@@ -66,241 +256,642 @@ export default function LoginPage() {
     }
   }
 
-  const fieldError =
-    errors.fields.identifier?.message ?? errors.fields.password?.message ?? null;
-  const globalError = errors.global?.[0]?.message ?? null;
-  const displayError = fieldError ?? globalError;
+  async function handleSignup(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setClientError(null);
+
+    if (password !== confirmPassword) {
+      setClientError("Passwords do not match.");
+      return;
+    }
+
+    if (role === "property_manager" && !organizationName.trim()) {
+      setClientError("Organization name is required for property managers.");
+      return;
+    }
+
+    const nameParts = firstName.trim().split(/\s+/);
+    const first = nameParts[0] ?? "";
+    const last = nameParts.slice(1).join(" ") || lastName.trim() || undefined;
+    const organization = organizationName.trim() || undefined;
+
+    try {
+      if (signUp.id && signUp.status !== "complete") {
+        const { error: resetError } = await signUp.reset();
+        if (resetError) {
+          setClientError(getErrorMessage(resetError, "We could not restart signup."));
+          return;
+        }
+      }
+
+      const { error } = await signUp.create({
+        emailAddress: email,
+        password,
+        unsafeMetadata: {
+          firstName: first,
+          lastName: last,
+          role,
+          organizationName: organization,
+        },
+      });
+
+      if (error) {
+        setClientError(getErrorMessage(error, "We could not create your account."));
+        return;
+      }
+
+      if (signUp.status === "complete") {
+        await completeSignup();
+        return;
+      }
+
+      if (
+        signUp.status === "missing_requirements" ||
+        signUp.unverifiedFields.includes("email_address")
+      ) {
+        const { error: verificationError } =
+          await signUp.verifications.sendEmailCode();
+        if (verificationError) {
+          setClientError(getErrorMessage(verificationError, "We could not send the code."));
+          return;
+        }
+        switchMode("verify");
+        return;
+      }
+
+      setClientError("We could not finish creating your account. Please try again.");
+    } catch (error) {
+      setClientError(getErrorMessage(error, "Something went wrong. Please try again."));
+    }
+  }
+
+  async function handleVerify(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setClientError(null);
+
+    try {
+      const { error } = await signUp.verifications.verifyEmailCode({
+        code: verificationCode,
+      });
+      if (error) {
+        setClientError(getErrorMessage(error, "We could not verify that code."));
+        return;
+      }
+
+      await completeSignup();
+    } catch (error) {
+      setClientError(getErrorMessage(error, "Something went wrong. Please try again."));
+    }
+  }
+
+  const signInFieldError =
+    signInErrors.fields.identifier?.message ??
+    signInErrors.fields.password?.message ??
+    null;
+  const signInGlobalError = signInErrors.global?.[0]?.message ?? null;
+  const signUpFieldErrors = signUpErrors.fields as unknown as Record<
+    string,
+    { message: string } | null | undefined
+  >;
+  const signUpGlobalError = signUpErrors.global?.[0]?.message ?? null;
+  const displayError =
+    clientError ??
+    (mode === "signin"
+      ? signInFieldError ?? signInGlobalError
+      : signUpFieldErrors.emailAddress?.message ??
+        signUpFieldErrors.password?.message ??
+        signUpFieldErrors.firstName?.message ??
+        signUpFieldErrors.captcha?.message ??
+        signUpFieldErrors.code?.message ??
+        signUpGlobalError);
+  const hasDebugErrors =
+    process.env.NODE_ENV !== "production" &&
+    mode !== "signin" &&
+    Boolean(
+      signUpErrors.raw ||
+        signUpErrors.global ||
+        Object.values(signUpErrors.fields).some(Boolean),
+    );
 
   return (
-    <main className="min-h-full grid grid-cols-1 gap-7 px-5 py-7 lg:min-h-screen lg:grid-cols-[1fr_420px] lg:gap-8 lg:px-12 lg:py-11 xl:grid-cols-[1fr_460px]">
-      <section aria-label="Product overview" className="flex min-w-0 flex-col justify-between">
-        <div className="pt-1">
-          <div className="inline-flex items-center gap-2.5">
-            <div
-              aria-hidden="true"
-              className="h-[18px] w-[18px] rounded-[5px] bg-[linear-gradient(145deg,rgba(255,255,255,0.92),rgba(255,255,255,0.35))] shadow-[0_12px_30px_rgba(0,0,0,0.35)]"
-            />
-            <div className="font-semibold tracking-[0.2px] text-white/90">Amrika Housing</div>
-          </div>
+    <main className="relative min-h-screen overflow-hidden bg-slate-950 text-slate-100">
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 bg-cover bg-center"
+        style={{ backgroundImage: "url('/home-city.jpg')" }}
+      />
+      <div
+        aria-hidden="true"
+        className="pointer-events-none absolute inset-0 bg-gradient-to-b from-slate-950/45 via-slate-950/70 to-slate-950/85"
+      />
 
-          <h1 className="mt-7 text-[clamp(40px,4.2vw,56px)] leading-[1.03] tracking-[-0.02em]">
-            <span className="sr-only">
-              A Smarter Way to Invest, Manage, or Rent
-            </span>
-            <span aria-hidden="true">
-              A Smarter Way to{" "}
-              <span className="relative inline-block align-baseline">
-                {headlineWords.map((item, idx) => (
-                  <span
-                    key={item.word}
-                    className={[
-                      "absolute left-0 top-0 whitespace-nowrap transition-all duration-500 will-change-transform",
-                      item.className,
-                      idx === headlineIndex
-                        ? "opacity-100 translate-y-0"
-                        : "opacity-0 translate-y-2",
-                    ].join(" ")}
-                  >
-                    {item.word}
-                  </span>
-                ))}
-                <span className="invisible select-none">
-                  {headlineWords[0].word}
-                </span>
-              </span>
-            </span>
-          </h1>
-          <p className="mt-2 text-[clamp(20px,2.2vw,30px)] leading-[1.2] tracking-[-0.01em] text-[var(--accent)]">
-            Your home base starts here.
-          </p>
-          <p className="mt-3.5 max-w-[560px] text-[14px] leading-[1.55] text-white/70">
-            Fast property operations for managers, renters, and investors
-            <br />
-            in one secure workspace.
-          </p>
-        </div>
-
-        <div
-          role="note"
-          aria-label="Value proposition"
-          className="mt-9 max-w-[520px] rounded-[14px] border border-white/12 bg-[linear-gradient(180deg,rgba(12,16,26,0.35),rgba(12,16,26,0.18))] px-[18px] py-4 shadow-[0_20px_55px_rgba(0,0,0,0.28)] backdrop-blur-[10px]"
+      <div className="relative grid min-h-screen lg:grid-cols-2">
+        <section
+          aria-label="Product overview"
+          className="relative hidden min-w-0 flex-col justify-between overflow-hidden border-r border-white/10 bg-slate-950/20 p-12 backdrop-blur-[1px] lg:flex"
         >
-          <div className="text-[11px] tracking-[0.08em] text-white/75">
-            BUILT FOR FOCUSED DECISIONS
-          </div>
-          <div className="mt-1 text-[12px] leading-[1.5] text-white/70">
-            Track leasing, maintenance, accounting, and investment opportunities with fewer
-            clicks.
-          </div>
-        </div>
-      </section>
-
-      <section
-        aria-label="Sign in"
-        className="relative overflow-hidden rounded-[var(--radius)] border border-[var(--stroke)] bg-[linear-gradient(180deg,var(--card),var(--card2))] shadow-[0_40px_120px_rgba(0,0,0,0.45)] backdrop-blur-[18px]"
-      >
-        <div
-          aria-hidden="true"
-          className="pointer-events-none absolute inset-[-2px] bg-[radial-gradient(800px_260px_at_60%_0%,rgba(255,255,255,0.12),transparent_62%)]"
-        />
-
-        <div className="flex justify-end px-[18px] pt-[18px]">
-          <button
-            type="button"
-            aria-label="Menu"
-            className="grid h-[38px] w-[38px] place-items-center rounded-xl border border-white/15 bg-white/5 text-white/90 focus-visible:outline focus-visible:outline-4 focus-visible:outline-offset-2 focus-visible:outline-[rgba(246,184,74,0.35)]"
-          >
-            <span aria-hidden="true">≡</span>
-          </button>
-        </div>
-
-        <div className="px-5 pb-6 pt-5 sm:px-8">
-          <div className="flex items-start gap-3">
-            <div aria-hidden="true" className="mt-1 text-[18px] opacity-90">
-              →
-            </div>
-            <div>
-              <h2 className="m-0 text-[28px] tracking-[-0.01em]">Sign in</h2>
-              <p className="mt-1.5 text-[12px] text-white/55">
-                Signing in as {roleLabel}
-              </p>
-            </div>
-          </div>
-
-          <fieldset className="mt-4">
-            <legend className="sr-only">Select role</legend>
-            <div className="grid grid-cols-2 gap-2 rounded-xl border border-white/15 bg-white/5 p-1">
-              <label className="cursor-pointer">
-                <input
-                  className="peer sr-only"
-                  type="radio"
-                  name="role"
-                  value="property_manager"
-                  checked={role === "property_manager"}
-                  onChange={() => setRole("property_manager")}
-                />
-                <span className="block select-none rounded-[10px] px-3 py-2 text-center text-[12px] font-semibold tracking-[0.1px] text-white/80 transition-colors peer-checked:bg-white/15 peer-checked:text-white">
-                  Manager
-                </span>
-              </label>
-
-              <label className="cursor-pointer">
-                <input
-                  className="peer sr-only"
-                  type="radio"
-                  name="role"
-                  value="renter"
-                  checked={role === "renter"}
-                  onChange={() => setRole("renter")}
-                />
-                <span className="block select-none rounded-[10px] px-3 py-2 text-center text-[12px] font-semibold tracking-[0.1px] text-white/80 transition-colors peer-checked:bg-white/15 peer-checked:text-white">
-                  Renter
-                </span>
-              </label>
-            </div>
-          </fieldset>
-
-          <form className="mt-5 grid gap-3.5" onSubmit={handleSubmit} autoComplete="on">
-            <div className="grid gap-1.5">
-              <label htmlFor={emailId} className="text-[12px] text-white/75">
-                Email
-              </label>
-              <input
-                id={emailId}
-                className="w-full rounded-[10px] border border-white/15 bg-white/90 px-3 py-3 text-[13px] text-[rgba(10,14,24,0.92)] shadow-[0_18px_45px_rgba(0,0,0,0.14)] placeholder:text-[rgba(10,14,24,0.45)] outline-none focus:border-[rgba(246,184,74,0.55)] focus:shadow-[0_0_0_4px_rgba(246,184,74,0.16),0_18px_45px_rgba(0,0,0,0.14)]"
-                type="email"
-                name="email"
-                placeholder="you@company.com"
-                autoComplete="email"
-                required
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-              />
-            </div>
-
-            <div className="grid gap-1.5">
-              <label htmlFor={passwordId} className="text-[12px] text-white/75">
-                Password
-              </label>
-              <div className="relative">
-                <input
-                  id={passwordId}
-                  className="w-full rounded-[10px] border border-white/15 bg-white/90 px-3 py-3 pr-12 text-[13px] text-[rgba(10,14,24,0.92)] shadow-[0_18px_45px_rgba(0,0,0,0.14)] placeholder:text-[rgba(10,14,24,0.45)] outline-none focus:border-[rgba(246,184,74,0.55)] focus:shadow-[0_0_0_4px_rgba(246,184,74,0.16),0_18px_45px_rgba(0,0,0,0.14)]"
-                  type={showPassword ? "text" : "password"}
-                  name="password"
-                  placeholder="Enter your password"
-                  autoComplete="current-password"
-                  required
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                />
-                <button
-                  type="button"
-                  aria-label={iconLabel}
-                  onClick={() => setShowPassword((v) => !v)}
-                  className="absolute right-2 top-1/2 grid h-[34px] w-[34px] -translate-y-1/2 place-items-center rounded-[10px] border border-black/10 bg-white/60 text-[16px] text-black/75"
-                >
-                  <span aria-hidden="true">👁</span>
-                </button>
+          <div className="relative text-slate-100">
+            <div className="mb-8 flex items-center gap-2">
+              <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-slate-900 shadow-lg shadow-slate-500/20">
+                <BuildingIcon className="h-6 w-6 text-white" />
+              </div>
+              <div className="text-2xl font-bold tracking-[-0.025em]">
+                Amrika Housing
               </div>
             </div>
 
-            {displayError && (
-              <p role="alert" className="text-[12px] text-red-400">
-                {displayError}
-              </p>
-            )}
-
-            <button
-              className="mt-0.5 w-full rounded-[10px] border border-white/15 bg-[linear-gradient(180deg,rgba(16,185,129,1),rgba(10,145,100,1))] px-3.5 py-3 font-semibold tracking-[0.1px] text-white/95 shadow-[0_22px_60px_rgba(16,185,129,0.22)] hover:brightness-[1.04] disabled:opacity-60 disabled:cursor-not-allowed"
-              type="submit"
-              disabled={isLoading}
-            >
-              {isLoading ? "Signing in…" : "Sign in"}
-            </button>
-
-            <button
-              className="w-full rounded-[10px] border border-white/15 bg-white/95 px-3.5 py-3 font-semibold tracking-[0.1px] text-[rgba(10,14,24,0.86)]"
-              type="button"
-            >
-              Sign in with Passkey
-            </button>
-
-            <div className="mt-0.5 flex items-center justify-between gap-2.5">
-              <a
-                href="#"
-                className="text-[12px] text-white/85 underline underline-offset-[3px] decoration-white/35 hover:decoration-white/75"
-              >
-                Forgot password?
-              </a>
-              <Link
-                href="/signup"
-                className="text-[12px] text-white/85 underline underline-offset-[3px] decoration-white/35 hover:decoration-white/75"
-              >
-                Create an account
-              </Link>
-            </div>
-
-            <p className="m-0 pt-1.5 text-[10px] leading-[1.45] text-white/60">
-              This site is protected by reCAPTCHA and the Google{" "}
-              <a
-                className="text-white/75 underline underline-offset-[3px] decoration-white/35 hover:decoration-white/75"
-                href="#"
-              >
-                Privacy Policy
-              </a>
-              ,{" "}
-              <a
-                className="text-white/75 underline underline-offset-[3px] decoration-white/35 hover:decoration-white/75"
-                href="#"
-              >
-                Terms of Service
-              </a>{" "}
-              apply.
+            <h1 className="mb-5 text-[44px] font-bold leading-[1.05] tracking-[-0.025em]">
+              <span className="sr-only">
+                A Smarter Way to Invest, Manage, or Rent
+              </span>
+              <span aria-hidden="true">
+                <span className="text-slate-200/90">A Smarter Way to </span>
+                <span className="relative inline-block align-baseline">
+                  {headlineWords.map((item, idx) => (
+                    <span
+                      key={item.word}
+                      className={[
+                        "absolute left-0 top-0 whitespace-nowrap bg-clip-text text-transparent transition-all duration-300 will-change-transform",
+                        item.className,
+                        idx === headlineIndex
+                          ? "translate-y-0 opacity-100"
+                          : "translate-y-2 opacity-0",
+                      ].join(" ")}
+                    >
+                      {item.word}
+                    </span>
+                  ))}
+                  <span className="invisible select-none">
+                    {headlineWords[0].word}
+                  </span>
+                </span>
+              </span>
+            </h1>
+            <p className="mt-2 text-[clamp(20px,2.2vw,30px)] leading-[1.2] tracking-[-0.01em] text-[var(--accent)]">
+              Your home base starts here.
             </p>
-          </form>
-        </div>
-      </section>
+            <p className="mt-3.5 max-w-md text-[14px] leading-[1.55] text-slate-300">
+              Fast property operations for managers, renters, and investors in
+              one secure workspace.
+            </p>
+          </div>
+
+          <div
+            role="note"
+            aria-label="Value proposition"
+            className="relative grid gap-3 text-slate-100"
+          >
+            <div className="rounded-xl border border-white/20 bg-slate-900/40 p-4 backdrop-blur-sm">
+              <p className="text-xs uppercase tracking-wide text-emerald-300">
+                Built for focused decisions
+              </p>
+              <p className="mt-2 text-sm text-slate-200">
+                Track leasing, maintenance, accounting, and investment
+                opportunities with fewer clicks.
+              </p>
+            </div>
+          </div>
+        </section>
+
+        <section
+          aria-label={title}
+          className="flex items-center justify-center bg-slate-950/35 p-4 sm:p-6 lg:p-10"
+        >
+          <div className="w-full max-w-[520px] rounded-3xl bg-gradient-to-br from-emerald-400/70 via-emerald-500/10 to-sky-500/60 p-[1.2px] shadow-[0_18px_60px_rgba(15,23,42,0.95)]">
+            <div className="w-full rounded-[1.6rem] border border-white/10 bg-slate-950/85 shadow-[0_18px_60px_rgba(15,23,42,0.95)] backdrop-blur-xl">
+              <div className="space-y-3 px-6 pb-5 pt-6 sm:space-y-4 sm:px-9 sm:pb-6 sm:pt-8">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2 lg:hidden">
+                    <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-slate-900">
+                      <BuildingIcon className="h-4 w-4 text-white" />
+                    </div>
+                    <span className="font-semibold text-slate-100">
+                      Amrika Housing
+                    </span>
+                  </div>
+                </div>
+
+                <div>
+                  <h2 className="flex items-center gap-2 text-[24px] leading-tight tracking-[-0.025em] text-slate-100 sm:text-[30px]">
+                    <KeyIcon className="h-6 w-6 text-emerald-400" />
+                    {title}
+                  </h2>
+                  {description ? (
+                    <p className="mt-1 text-[15px] text-slate-300">
+                      {description}
+                    </p>
+                  ) : null}
+                </div>
+
+                {mode !== "verify" ? (
+                  <>
+                    <p className="text-sm text-slate-300">
+                      {mode === "signup" ? "Signing up" : "Signing in"} as{" "}
+                      <span className="font-medium text-slate-100">
+                        {roleLabel}
+                      </span>
+                    </p>
+
+                    <fieldset>
+                      <legend className="sr-only">Select role</legend>
+                      <div className="grid grid-cols-2 gap-2 rounded-xl border border-slate-600 bg-slate-900/80 p-1">
+                        <label className="cursor-pointer">
+                          <input
+                            className="peer sr-only"
+                            type="radio"
+                            name="role"
+                            value="property_manager"
+                            checked={role === "property_manager"}
+                            onChange={() => setRole("property_manager")}
+                          />
+                          <span className="block select-none rounded-md px-3 py-2 text-center text-sm font-semibold text-slate-300 transition-colors peer-checked:bg-white/15 peer-checked:text-white">
+                            Manager
+                          </span>
+                        </label>
+
+                        <label className="cursor-pointer">
+                          <input
+                            className="peer sr-only"
+                            type="radio"
+                            name="role"
+                            value="renter"
+                            checked={role === "renter"}
+                            onChange={() => setRole("renter")}
+                          />
+                          <span className="block select-none rounded-md px-3 py-2 text-center text-sm font-semibold text-slate-300 transition-colors peer-checked:bg-white/15 peer-checked:text-white">
+                            Renter
+                          </span>
+                        </label>
+                      </div>
+                    </fieldset>
+                  </>
+                ) : null}
+              </div>
+
+              <div className="px-6 pb-6 sm:px-9 sm:pb-8">
+                {mode === "signin" ? (
+                  <form
+                    className="space-y-5"
+                    onSubmit={handleSignIn}
+                    autoComplete="on"
+                  >
+                    <div className="space-y-2">
+                      <label htmlFor={emailId} className="text-sm text-slate-200">
+                        Email
+                      </label>
+                      <input
+                        id={emailId}
+                        className="h-12 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 text-base text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                        type="email"
+                        name="email"
+                        placeholder="you@company.com"
+                        autoComplete="email"
+                        required
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label
+                        htmlFor={passwordId}
+                        className="text-sm text-slate-200"
+                      >
+                        Password
+                      </label>
+                      <div className="relative">
+                        <input
+                          id={passwordId}
+                          className="h-12 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 pr-12 text-base text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                          type={showPassword ? "text" : "password"}
+                          name="password"
+                          placeholder="Enter your password"
+                          autoComplete="current-password"
+                          required
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                        />
+                        <button
+                          type="button"
+                          aria-label={showPassword ? "Hide password" : "Show password"}
+                          onClick={() => setShowPassword((v) => !v)}
+                          className="absolute right-2 top-1/2 z-20 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md border border-slate-500 bg-slate-800/95 text-slate-100 outline-none transition hover:bg-slate-700 focus-visible:ring-2 focus-visible:ring-emerald-500/30"
+                        >
+                          <EyeIcon className="h-4 w-4" hidden={showPassword} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {displayError && (
+                      <p
+                        role="alert"
+                        className="rounded-md border border-red-400/30 bg-red-950/45 px-3 py-2 text-sm text-red-200"
+                      >
+                        {displayError}
+                      </p>
+                    )}
+
+                    <button
+                      className="h-12 w-full rounded-md bg-emerald-500 px-4 text-base font-semibold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
+                      type="submit"
+                      disabled={isLoading}
+                    >
+                      {isLoading ? "Signing in..." : "Sign in"}
+                    </button>
+
+                    <button
+                      className="h-12 w-full rounded-md border-2 border-slate-300 bg-white px-4 text-base font-medium text-slate-900 transition hover:bg-slate-100"
+                      type="button"
+                    >
+                      Sign in with Passkey
+                    </button>
+
+                    <div className="-mt-1 grid grid-cols-2 gap-2">
+                      <a
+                        href="#"
+                        className="text-left text-sm text-slate-300 underline underline-offset-2 hover:text-slate-100"
+                      >
+                        Forgot password?
+                      </a>
+                      <button
+                        type="button"
+                        className="text-right text-sm text-slate-300 underline underline-offset-2 hover:text-slate-100"
+                        onClick={() => switchMode("signup")}
+                      >
+                        Create an account
+                      </button>
+                    </div>
+                  </form>
+                ) : null}
+
+                {mode === "signup" ? (
+                  <form
+                    className="space-y-5"
+                    onSubmit={handleSignup}
+                    autoComplete="on"
+                  >
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div className="space-y-2">
+                        <label
+                          htmlFor={firstNameId}
+                          className="text-sm text-slate-200"
+                        >
+                          First Name
+                        </label>
+                        <input
+                          id={firstNameId}
+                          className="h-11 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 text-base text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                          type="text"
+                          name="firstName"
+                          placeholder="Jane"
+                          autoComplete="given-name"
+                          required
+                          value={firstName}
+                          onChange={(e) => setFirstName(e.target.value)}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <label
+                          htmlFor={lastNameId}
+                          className="text-sm text-slate-200"
+                        >
+                          Last Name
+                        </label>
+                        <input
+                          id={lastNameId}
+                          className="h-11 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 text-base text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                          type="text"
+                          name="lastName"
+                          placeholder="Doe"
+                          autoComplete="family-name"
+                          value={lastName}
+                          onChange={(e) => setLastName(e.target.value)}
+                        />
+                      </div>
+                    </div>
+
+                    {role === "property_manager" ? (
+                      <div className="space-y-2">
+                        <label
+                          htmlFor={organizationId}
+                          className="text-sm text-slate-200"
+                        >
+                          Organization Name
+                        </label>
+                        <input
+                          id={organizationId}
+                          className="h-11 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 text-base text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                          type="text"
+                          name="organizationName"
+                          placeholder="Avon Management"
+                          autoComplete="organization"
+                          required
+                          value={organizationName}
+                          onChange={(e) => setOrganizationName(e.target.value)}
+                        />
+                      </div>
+                    ) : null}
+
+                    <div className="space-y-2">
+                      <label htmlFor={emailId} className="text-sm text-slate-200">
+                        Email
+                      </label>
+                      <input
+                        id={emailId}
+                        className="h-11 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 text-base text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                        type="email"
+                        name="email"
+                        placeholder="you@company.com"
+                        autoComplete="email"
+                        required
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label
+                        htmlFor={passwordId}
+                        className="text-sm text-slate-200"
+                      >
+                        Password
+                      </label>
+                      <div className="relative">
+                        <input
+                          id={passwordId}
+                          className="h-11 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 pr-12 text-base text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                          type={showPassword ? "text" : "password"}
+                          name="password"
+                          placeholder="Create a secure password"
+                          autoComplete="new-password"
+                          required
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                        />
+                        <button
+                          type="button"
+                          aria-label={showPassword ? "Hide password" : "Show password"}
+                          onClick={() => setShowPassword((v) => !v)}
+                          className="absolute right-2 top-1/2 z-20 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md border border-slate-500 bg-slate-800/95 text-slate-100 outline-none transition hover:bg-slate-700 focus-visible:ring-2 focus-visible:ring-emerald-500/30"
+                        >
+                          <EyeIcon className="h-4 w-4" hidden={showPassword} />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label
+                        htmlFor={confirmPasswordId}
+                        className="text-sm text-slate-200"
+                      >
+                        Confirm password
+                      </label>
+                      <div className="relative">
+                        <input
+                          id={confirmPasswordId}
+                          className="h-11 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 pr-12 text-base text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                          type={showConfirmPassword ? "text" : "password"}
+                          name="confirmPassword"
+                          placeholder="Repeat your password"
+                          autoComplete="new-password"
+                          required
+                          value={confirmPassword}
+                          onChange={(e) => setConfirmPassword(e.target.value)}
+                        />
+                        <button
+                          type="button"
+                          aria-label={
+                            showConfirmPassword ? "Hide password" : "Show password"
+                          }
+                          onClick={() => setShowConfirmPassword((v) => !v)}
+                          className="absolute right-2 top-1/2 z-20 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md border border-slate-500 bg-slate-800/95 text-slate-100 outline-none transition hover:bg-slate-700 focus-visible:ring-2 focus-visible:ring-emerald-500/30"
+                        >
+                          <EyeIcon
+                            className="h-4 w-4"
+                            hidden={showConfirmPassword}
+                          />
+                        </button>
+                      </div>
+                    </div>
+
+                    {displayError && (
+                      <p
+                        role="alert"
+                        className="rounded-md border border-red-400/30 bg-red-950/45 px-3 py-2 text-sm text-red-200"
+                      >
+                        {displayError}
+                      </p>
+                    )}
+
+                    <div
+                      id="clerk-captcha"
+                      className="min-h-[65px]"
+                      data-cl-theme="dark"
+                      data-cl-size="flexible"
+                    />
+
+                    {hasDebugErrors && (
+                      <pre className="max-h-44 overflow-auto rounded-md border border-red-400/25 bg-red-950/30 p-2 text-[10px] leading-[1.4] text-red-100">
+                        {JSON.stringify(signUpErrors, null, 2)}
+                      </pre>
+                    )}
+
+                    <button
+                      className="h-11 w-full rounded-md bg-emerald-500 px-4 text-base font-semibold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
+                      type="submit"
+                      disabled={isLoading}
+                    >
+                      {isLoading ? "Creating account..." : "Create account"}
+                    </button>
+
+                    <button
+                      type="button"
+                      className="w-full text-sm text-slate-300 underline underline-offset-2 hover:text-slate-100"
+                      onClick={() => switchMode("signin")}
+                    >
+                      Already have an account? Sign in
+                    </button>
+                  </form>
+                ) : null}
+
+                {mode === "verify" ? (
+                  <form
+                    className="space-y-5"
+                    onSubmit={handleVerify}
+                    autoComplete="off"
+                  >
+                    <div className="space-y-2">
+                      <label htmlFor={codeId} className="text-sm text-slate-200">
+                        Verification code
+                      </label>
+                      <input
+                        id={codeId}
+                        className="h-12 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 text-center text-lg font-semibold tracking-[0.25em] text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={6}
+                        placeholder="------"
+                        required
+                        value={verificationCode}
+                        onChange={(e) =>
+                          setVerificationCode(e.target.value.replace(/\D/g, ""))
+                        }
+                      />
+                    </div>
+
+                    {displayError && (
+                      <p
+                        role="alert"
+                        className="rounded-md border border-red-400/30 bg-red-950/45 px-3 py-2 text-sm text-red-200"
+                      >
+                        {displayError}
+                      </p>
+                    )}
+
+                    <button
+                      className="h-12 w-full rounded-md bg-emerald-500 px-4 text-base font-semibold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
+                      type="submit"
+                      disabled={isLoading}
+                    >
+                      {isLoading ? "Verifying..." : "Verify & continue"}
+                    </button>
+
+                    <button
+                      type="button"
+                      className="w-full text-sm text-slate-300 underline underline-offset-2 hover:text-slate-100"
+                      onClick={() => switchMode("signup")}
+                    >
+                      Back to create account
+                    </button>
+                  </form>
+                ) : null}
+
+                <p className="m-0 pt-5 text-[11px] leading-[1.45] text-slate-400">
+                  This site is protected by reCAPTCHA and the Google{" "}
+                  <a
+                    className="text-slate-300 underline underline-offset-2 hover:text-slate-100"
+                    href="#"
+                  >
+                    Privacy Policy
+                  </a>
+                  ,{" "}
+                  <a
+                    className="text-slate-300 underline underline-offset-2 hover:text-slate-100"
+                    href="#"
+                  >
+                    Terms of Service
+                  </a>{" "}
+                  apply.
+                </p>
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
     </main>
   );
+}
+
+export default function LoginPage() {
+  return <AuthPage />;
 }
