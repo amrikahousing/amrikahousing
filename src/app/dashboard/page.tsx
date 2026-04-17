@@ -1,5 +1,5 @@
 import { currentUser } from "@clerk/nextjs/server";
-import { AppShell } from "@/components/AppShell";
+import { AppShell, type AppShellUser } from "@/components/AppShell";
 
 const revenueData = [
   { month: "Jan", revenue: 18000 },
@@ -158,10 +158,18 @@ export default async function DashboardPage() {
   const organizationName = metadataString(unsafeMetadata, "organizationName");
   const firstName =
     user?.firstName ?? metadataString(unsafeMetadata, "firstName") ?? null;
+  const role = metadataString(unsafeMetadata, "role") ?? "property_manager";
+  const shellUser: AppShellUser = {
+    email: user?.primaryEmailAddress?.emailAddress ?? null,
+    firstName,
+    imageUrl: user?.imageUrl ?? null,
+    role,
+    organizationName,
+  };
   const tallestRevenue = Math.max(...revenueData.map((item) => item.revenue));
 
   return (
-    <AppShell>
+    <AppShell user={shellUser}>
       <div className="space-y-8">
         <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
