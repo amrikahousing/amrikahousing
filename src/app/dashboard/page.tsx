@@ -1,5 +1,5 @@
-import { UserButton } from "@clerk/nextjs";
 import { currentUser } from "@clerk/nextjs/server";
+import { AppNav } from "@/components/AppNav";
 
 const metrics = [
   { label: "Available homes", value: "12", detail: "4 ready for tours" },
@@ -58,16 +58,10 @@ export default async function DashboardPage() {
   return (
     <main className="relative z-0 min-h-screen px-5 py-6 text-white sm:px-8 lg:px-10">
       <div className="mx-auto flex max-w-7xl flex-col gap-6">
+        <AppNav />
         <header className="flex flex-col gap-4 border-b border-white/12 pb-5 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <div className="inline-flex items-center gap-2.5">
-              <div
-                aria-hidden="true"
-                className="h-[18px] w-[18px] rounded-[5px] bg-[linear-gradient(145deg,rgba(255,255,255,0.92),rgba(255,255,255,0.35))] shadow-[0_12px_30px_rgba(0,0,0,0.35)]"
-              />
-              <div className="font-semibold text-white/90">Amrika Housing</div>
-            </div>
-            <h1 className="mt-5 text-[clamp(32px,4vw,52px)] leading-[1.05]">
+            <h1 className="text-[clamp(32px,4vw,52px)] leading-[1.05]">
               Good to see you{firstName ? `, ${firstName}` : ""}.
             </h1>
             <p className="mt-2 max-w-2xl text-[14px] leading-[1.6] text-white/70">
@@ -77,10 +71,6 @@ export default async function DashboardPage() {
             </p>
           </div>
 
-          <div className="flex items-center gap-3 rounded-[8px] border border-white/15 bg-white/8 px-3 py-2 backdrop-blur-[14px]">
-            <span className="text-[12px] text-white/65">Account</span>
-            <UserButton />
-          </div>
         </header>
 
         <section aria-label="Portfolio snapshot" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
