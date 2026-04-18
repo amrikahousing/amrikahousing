@@ -5,6 +5,8 @@ import { join } from "node:path";
 export const EXPECTED_PROJECT_NAME = "amrikahousing";
 export const EXPECTED_PROJECT_ID = "prj_hdUfbG36MTUtcftGcn3bSazVX8Ei";
 export const EXPECTED_ROOT = "/Users/rayansh/Documents/amrikahousing";
+export const TEST_DEPLOYMENT_ALIAS = "neon-preview-test-amrikahousing.vercel.app";
+export const PRODUCTION_DEPLOYMENT_URL = "https://www.amrikahousing.com";
 
 export function fail(message) {
   console.error(`\nWorkflow blocked: ${message}\n`);
@@ -70,6 +72,14 @@ export function deploymentUrlFromOutput(output) {
   const urls = output.match(/https:\/\/[^\s]+/g) ?? [];
   const deploymentUrls = urls.filter((url) => url.includes(".vercel.app") || url.includes("amrikahousing.com"));
   return deploymentUrls.at(-1) ?? urls.at(-1) ?? null;
+}
+
+export function hostnameFromUrl(url) {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return url.replace(/^https?:\/\//, "").replace(/\/$/, "");
+  }
 }
 
 export function capture(command, args, options = {}) {

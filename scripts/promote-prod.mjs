@@ -6,6 +6,7 @@ import {
   assertBranch,
   assertCanonicalRoot,
   assertCleanTree,
+  PRODUCTION_DEPLOYMENT_URL,
   copyVercelProjectLink,
   deploymentUrlFromOutput,
   ensureBranchPushed,
@@ -84,7 +85,9 @@ const deployOutput = runAndCapture("npx", ["vercel", "deploy", "--prod", "-y"], 
 const deploymentUrl = deploymentUrlFromOutput(deployOutput);
 
 if (deploymentUrl) {
-  console.log(`\nProduction deployment URL: ${deploymentUrl}`);
+  console.log(`\nProduction deployment URL: ${PRODUCTION_DEPLOYMENT_URL}`);
+  console.log(`Vercel deployment URL: ${deploymentUrl}`);
 } else {
-  console.log("\nProduction deployment finished, but no deployment URL was found in the Vercel output.");
+  console.log(`\nProduction deployment URL: ${PRODUCTION_DEPLOYMENT_URL}`);
+  console.log("No Vercel deployment URL was found in the Vercel output.");
 }
