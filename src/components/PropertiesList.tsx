@@ -5,15 +5,20 @@ import { useMemo, useState } from "react";
 
 export type PropertyListItem = {
   id: string;
-  name: string;
+  propertyId: string;
+  propertyName: string;
+  unitNumber: string;
   address: string;
   city: string;
   state: string;
   zip: string;
   type: string;
   description: string | null;
-  unitCount: number;
-  vacantCount: number;
+  bedrooms: number;
+  bathrooms: number;
+  squareFeet: number | null;
+  rentAmount: number | null;
+  status: string;
 };
 
 function SearchIcon({ className = "" }: { className?: string }) {
@@ -36,38 +41,64 @@ function SearchIcon({ className = "" }: { className?: string }) {
 
 export function PropertiesList({ properties }: { properties: PropertyListItem[] }) {
   const [search, setSearch] = useState("");
+  const [status, setStatus] = useState("all");
 
   const filteredProperties = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
-    if (!normalizedSearch) return properties;
 
-    return properties.filter((property) =>
-      [
-        property.name,
-        property.address,
-        property.city,
-        property.state,
-        property.zip,
-        property.description ?? "",
-      ]
-        .join(" ")
-        .toLowerCase()
-        .includes(normalizedSearch),
-    );
-  }, [properties, search]);
+    return properties.filter((property) => {
+      const matchesStatus = status === "all" || property.status === status;
+      const matchesSearch =
+        !normalizedSearch ||
+        [
+          property.propertyName,
+          property.unitNumber,
+          property.address,
+          property.city,
+          property.state,
+          property.zip,
+          property.description ?? "",
+        ]
+          .join(" ")
+          .toLowerCase()
+          .includes(normalizedSearch);
+
+      return matchesStatus && matchesSearch;
+    });
+  }, [properties, search, status]);
+
+  const apartmentNoun = properties.length === 1 ? "apartment" : "apartments";
+
+  function formatCurrency(value: number | null) {
+    if (value === null) return "Rent not set";
+    return `$${value.toLocaleString()}/mo`;
+  }
 
   return (
     <div className="space-y-6">
-      <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-        <label className="relative block">
-          <span className="sr-only">Search properties</span>
+      <div className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:flex-row">
+        <label className="relative block flex-1">
+          <span className="sr-only">Filter apartments by property name</span>
           <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input
             className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 pl-10 pr-3 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-emerald-500 focus:bg-white focus:ring-2 focus:ring-emerald-500/15"
-            placeholder="Search by property name, address, city, state, or zip"
+            placeholder="Filter by property name, apartment, address, city, state, or zip"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
+        </label>
+        <label className="block sm:w-44">
+          <span className="sr-only">Filter apartments by status</span>
+          <select
+            className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm capitalize text-slate-700 outline-none transition-colors focus:border-emerald-500 focus:bg-white focus:ring-2 focus:ring-emerald-500/15"
+            value={status}
+            onChange={(event) => setStatus(event.target.value)}
+          >
+            <option value="all">All statuses</option>
+            <option value="vacant">Vacant</option>
+            <option value="occupied">Occupied</option>
+            <option value="maintenance">Maintenance</option>
+          </select>
         </label>
       </div>
 
@@ -80,17 +111,20 @@ export function PropertiesList({ properties }: { properties: PropertyListItem[] 
             <div className="flex items-start justify-between gap-3">
               <div className="min-w-0">
                 <p className="truncate text-lg font-semibold text-slate-900">
-                  {property.name}
+                  Apartment {property.unitNumber}
                 </p>
                 <p className="mt-1 truncate text-sm text-slate-600">
+                  {property.propertyName}
+                </p>
+                <p className="mt-1 truncate text-sm text-slate-500">
                   {property.address}
                 </p>
-                <p className="mt-0.5 truncate text-sm text-slate-500">
+                <p className="mt-0.5 truncate text-xs text-slate-500">
                   {property.city}, {property.state} {property.zip}
                 </p>
               </div>
-              <span className="shrink-0 rounded border border-slate-200 px-2 py-0.5 text-xs capitalize text-slate-500">
-                {property.type}
+              <span className="shrink-0 rounded border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs capitalize text-emerald-700">
+                {property.status}
               </span>
             </div>
 
@@ -104,32 +138,34 @@ export function PropertiesList({ properties }: { properties: PropertyListItem[] 
               </p>
             )}
 
-            <div className="mt-4 flex gap-3 text-sm text-slate-500">
-              <span>
-                {property.unitCount} unit{property.unitCount !== 1 ? "s" : ""}
+            <div className="mt-4 grid grid-cols-2 gap-3 text-sm text-slate-500">
+              <span>{property.bedrooms} bed{property.bedrooms === 1 ? "" : "s"}</span>
+              <span>{property.bathrooms} bath{property.bathrooms === 1 ? "" : "s"}</span>
+              <span>{property.squareFeet ? `${property.squareFeet.toLocaleString()} sq ft` : "Sq ft not set"}</span>
+              <span className="font-medium text-slate-700">
+                {formatCurrency(property.rentAmount)}
               </span>
-              {property.vacantCount > 0 ? (
-                <span className="text-emerald-600">
-                  {property.vacantCount} vacant
-                </span>
-              ) : null}
             </div>
 
             <Link
-              href={`/properties/${property.id}`}
+              href={`/properties/${property.propertyId}`}
               className="mt-4 inline-flex rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800"
             >
-              View details
+              View property
             </Link>
           </article>
         ))}
 
         {filteredProperties.length === 0 ? (
           <div className="col-span-full rounded-lg border border-slate-200 bg-white p-10 text-center text-slate-500 shadow-sm">
-            No properties matched that search.
+            No apartments matched that filter.
           </div>
         ) : null}
       </div>
+
+      <p className="text-sm text-slate-500">
+        Showing {filteredProperties.length} of {properties.length} {apartmentNoun}.
+      </p>
     </div>
   );
 }

@@ -15,23 +15,35 @@ export default async function PropertiesPage() {
           organizations: { clerk_org_id: orgId },
           deleted_at: null,
         },
-        include: { units: { where: { deleted_at: null } } },
+        include: {
+          units: {
+            where: { deleted_at: null },
+            orderBy: { unit_number: "asc" },
+          },
+        },
         orderBy: { created_at: "desc" },
       })
     : [];
 
-  const propertyCards = properties.map((property) => ({
-    id: property.id,
-    name: property.name,
+  const apartmentCards = properties.flatMap((property) =>
+    property.units.map((unit) => ({
+      id: unit.id,
+      propertyId: property.id,
+      propertyName: property.name,
+      unitNumber: unit.unit_number,
     address: property.address,
     city: property.city,
     state: property.state,
     zip: property.zip,
     type: property.type,
     description: property.description,
-    unitCount: property.units.length,
-    vacantCount: property.units.filter((unit) => unit.status === "vacant").length,
-  }));
+      bedrooms: unit.bedrooms,
+      bathrooms: Number(unit.bathrooms),
+      squareFeet: unit.square_feet,
+      rentAmount: unit.rent_amount === null ? null : Number(unit.rent_amount),
+      status: unit.status,
+    })),
+  );
 
   return (
     <AppShell>
@@ -40,7 +52,8 @@ export default async function PropertiesPage() {
           <div>
             <h1 className="text-3xl font-bold tracking-tight text-slate-900">Properties</h1>
             <p className="mt-1 text-slate-500">
-              {properties.length} propert{properties.length !== 1 ? "ies" : "y"} in your portfolio
+              {apartmentCards.length} apartment{apartmentCards.length !== 1 ? "s" : ""} across{" "}
+              {properties.length} propert{properties.length !== 1 ? "ies" : "y"}
             </p>
           </div>
           <Link
@@ -51,9 +64,9 @@ export default async function PropertiesPage() {
           </Link>
         </header>
 
-        {properties.length === 0 ? (
+        {apartmentCards.length === 0 ? (
           <div className="flex flex-col items-center gap-4 rounded-lg border border-slate-200 bg-white py-16 text-center shadow-sm">
-            <p className="text-slate-500">No properties yet.</p>
+            <p className="text-slate-500">No apartments yet.</p>
             <div className="flex gap-3">
               <Link
                 href="/properties/new"
@@ -64,7 +77,7 @@ export default async function PropertiesPage() {
             </div>
           </div>
         ) : (
-          <PropertiesList properties={propertyCards} />
+          <PropertiesList properties={apartmentCards} />
         )}
       </div>
     </AppShell>
