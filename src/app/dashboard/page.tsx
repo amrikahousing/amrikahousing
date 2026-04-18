@@ -16,6 +16,12 @@ function formatCurrency(value: number) {
   }).format(value);
 }
 
+function formatRatio(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    maximumFractionDigits: 1,
+  }).format(value);
+}
+
 function clampScore(value: number) {
   return Math.max(0, Math.min(100, Math.round(value)));
 }
@@ -293,6 +299,18 @@ export default async function DashboardPage() {
   const occupiedApartments = Math.max(totalApartments - vacantApartments - maintenanceApartments, 0);
   const apartmentOccupancyRate =
     totalApartments === 0 ? 0 : clampScore((occupiedApartments / totalApartments) * 100);
+  const apartmentVacancyRate =
+    totalApartments === 0 ? 0 : clampScore((vacantApartments / totalApartments) * 100);
+  const apartmentMaintenanceRate =
+    totalApartments === 0 ? 0 : clampScore((maintenanceApartments / totalApartments) * 100);
+  const averageApartmentsPerProperty =
+    totalProperties === 0 ? 0 : totalApartments / totalProperties;
+  const averageRentPerActiveLease =
+    activeLeaseRows.length === 0 ? 0 : monthlyRevenue / activeLeaseRows.length;
+  const revenuePerApartment =
+    totalApartments === 0 ? 0 : monthlyRevenue / totalApartments;
+  const requestsPer100Apartments =
+    totalApartments === 0 ? 0 : (openRequests / totalApartments) * 100;
 
   const stats = [
     {
@@ -336,6 +354,39 @@ export default async function DashboardPage() {
       value: formatCurrency(monthlyRevenue),
       icon: "wallet",
       subtext: "Projected from active leases",
+    },
+  ];
+
+  const analytics = [
+    {
+      name: "Avg Apartments / Property",
+      value: formatRatio(averageApartmentsPerProperty),
+      detail: "Portfolio density",
+    },
+    {
+      name: "Occupancy Rate",
+      value: `${apartmentOccupancyRate}%`,
+      detail: `${occupiedApartments.toLocaleString()} occupied apartment${occupiedApartments === 1 ? "" : "s"}`,
+    },
+    {
+      name: "Vacancy Rate",
+      value: `${apartmentVacancyRate}%`,
+      detail: `${vacantApartments.toLocaleString()} ready for leasing`,
+    },
+    {
+      name: "Avg Rent / Active Lease",
+      value: formatCurrency(averageRentPerActiveLease),
+      detail: "Monthly rent roll average",
+    },
+    {
+      name: "Revenue / Apartment",
+      value: formatCurrency(revenuePerApartment),
+      detail: "Monthly rent roll per unit",
+    },
+    {
+      name: "Requests / 100 Apartments",
+      value: formatRatio(requestsPer100Apartments),
+      detail: `${apartmentMaintenanceRate}% of apartments in maintenance`,
     },
   ];
 
@@ -474,6 +525,27 @@ export default async function DashboardPage() {
               <p className="mt-1 text-xs text-slate-500">{stat.subtext}</p>
             </article>
           ))}
+        </section>
+
+        <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-200 p-6">
+            <h2 className="text-lg font-semibold text-slate-900">
+              Apartment Analytics
+            </h2>
+          </div>
+          <div className="grid grid-cols-1 gap-px bg-slate-200 sm:grid-cols-2 xl:grid-cols-3">
+            {analytics.map((item) => (
+              <article key={item.name} className="bg-white p-5">
+                <p className="text-sm font-medium text-slate-500">
+                  {item.name}
+                </p>
+                <p className="mt-2 text-2xl font-bold tracking-tight text-slate-900">
+                  {item.value}
+                </p>
+                <p className="mt-1 text-xs text-slate-500">{item.detail}</p>
+              </article>
+            ))}
+          </div>
         </section>
 
         <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
