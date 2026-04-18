@@ -150,6 +150,17 @@ export function PropertyDetailsClient({
     setUnitForm((current) => ({ ...current, [field]: value }));
   }
 
+  function toggleEditing() {
+    setEditing((current) => {
+      if (current) {
+        setEditingUnitId(null);
+        setDuplicateUnitId(null);
+      }
+
+      return !current;
+    });
+  }
+
   async function saveProperty(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setSaving(true);
@@ -334,7 +345,7 @@ export function PropertyDetailsClient({
             <button
               type="button"
               className="rounded-lg border border-slate-200 px-3 py-1 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-              onClick={() => setEditing((current) => !current)}
+              onClick={toggleEditing}
             >
               {editing ? "Cancel edit" : "Edit"}
             </button>
@@ -505,7 +516,8 @@ export function PropertyDetailsClient({
                     </div>
                   </div>
 
-                  <div className="mt-4 flex justify-end gap-2">
+                  {editing ? (
+                    <div className="mt-4 flex justify-end gap-2">
                         <button
                           type="button"
                           aria-label={`Edit apartment ${unit.unitNumber}`}
@@ -544,7 +556,8 @@ export function PropertyDetailsClient({
                         >
                           <TrashIcon className="h-4 w-4" />
                         </button>
-                  </div>
+                    </div>
+                  ) : null}
                 </article>
               ))}
             </div>
@@ -554,7 +567,7 @@ export function PropertyDetailsClient({
         </section>
       </div>
 
-      {duplicateUnitId ? (
+      {editing && duplicateUnitId ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <button
             type="button"
@@ -602,7 +615,7 @@ export function PropertyDetailsClient({
         </div>
       ) : null}
 
-      {editingUnitId ? (
+      {editing && editingUnitId ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
           <button
             type="button"

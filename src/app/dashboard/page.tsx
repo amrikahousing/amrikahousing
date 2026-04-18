@@ -311,6 +311,17 @@ export default async function DashboardPage() {
     totalApartments === 0 ? 0 : monthlyRevenue / totalApartments;
   const requestsPer100Apartments =
     totalApartments === 0 ? 0 : (openRequests / totalApartments) * 100;
+  const completedPaymentCount = recentPayments.filter(
+    (payment) => payment.status === "paid" || payment.status === "completed",
+  ).length;
+  const collectiblePaymentCount = recentPayments.filter(
+    (payment) => payment.status !== "failed" && payment.status !== "cancelled",
+  ).length;
+  const rentCollectionRate =
+    collectiblePaymentCount === 0
+      ? apartmentOccupancyRate
+      : clampScore((completedPaymentCount / collectiblePaymentCount) * 100);
+  const routineOpenRequests = Math.max(openRequests - urgentOpenRequests, 0);
 
   const stats = [
     {
@@ -410,6 +421,8 @@ export default async function DashboardPage() {
     };
   });
 
+  const tallestRevenue = Math.max(1, ...revenueData.map((item) => item.revenue));
+
   const alerts =
     recentAlerts.length > 0
       ? recentAlerts.map((item) => ({
@@ -476,7 +489,64 @@ export default async function DashboardPage() {
     };
   });
 
-  const tallestRevenue = Math.max(1, ...revenueData.map((item) => item.revenue));
+  const averagePortfolioScore =
+    portfolioHealth.length === 0
+      ? 0
+      : clampScore(
+          portfolioHealth.reduce((sum, item) => sum + item.score, 0) /
+            portfolioHealth.length,
+        );
+  const strongestProperties = [...portfolioHealth]
+    .sort((a, b) => b.score - a.score)
+    .slice(0, 4);
+  const apartmentMix = [
+    {
+      label: "Occupied",
+      value: occupiedApartments,
+      percent: apartmentOccupancyRate,
+      className: "bg-emerald-600",
+    },
+    {
+      label: "Vacant",
+      value: vacantApartments,
+      percent: apartmentVacancyRate,
+      className: "bg-amber-500",
+    },
+    {
+      label: "Maintenance",
+      value: maintenanceApartments,
+      percent: apartmentMaintenanceRate,
+      className: "bg-rose-600",
+    },
+  ];
+  const occupiedSlice = apartmentOccupancyRate;
+  const vacantSlice = occupiedSlice + apartmentVacancyRate;
+  const apartmentMixGradient =
+    totalApartments === 0
+      ? "conic-gradient(#e2e8f0 0deg 360deg)"
+      : `conic-gradient(#059669 0% ${occupiedSlice}%, #f59e0b ${occupiedSlice}% ${vacantSlice}%, #e11d48 ${vacantSlice}% 100%)`;
+  const maintenanceChart = [
+    {
+      label: "Routine",
+      value: routineOpenRequests,
+      percent: openRequests === 0 ? 0 : clampScore((routineOpenRequests / openRequests) * 100),
+      className: "bg-sky-500",
+    },
+    {
+      label: "Urgent",
+      value: urgentOpenRequests,
+      percent: openRequests === 0 ? 0 : clampScore((urgentOpenRequests / openRequests) * 100),
+      className: "bg-rose-600",
+    },
+  ];
+  const alertGridClass = [
+    "grid grid-cols-1 divide-y divide-slate-200",
+    alerts.length === 1
+      ? ""
+      : alerts.length === 2
+        ? "md:grid-cols-2 md:divide-x md:divide-y-0"
+        : "md:grid-cols-3 md:divide-x md:divide-y-0",
+  ].join(" ");
   const lastUpdated = new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
@@ -503,6 +573,187 @@ export default async function DashboardPage() {
             Last updated: {lastUpdated}
           </div>
         </header>
+
+        <section
+          aria-label="Dashboard charts"
+          className="grid grid-cols-1 gap-6 xl:grid-cols-3"
+        >
+          <article className="rounded-lg border border-slate-200 bg-white shadow-sm xl:col-span-2">
+            <div className="flex flex-col gap-3 border-b border-slate-200 p-6 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900">
+                  Revenue Trend
+                </h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Six-month rent movement from paid and scheduled payments.
+                </p>
+              </div>
+              <div className="rounded-lg border border-slate-200 px-3 py-2 text-sm text-slate-600">
+                {formatCurrency(monthlyRevenue)} monthly roll
+              </div>
+            </div>
+            <div className="h-[340px] p-6">
+              <div className="flex h-full items-end gap-3 border-b border-l border-slate-200 pl-3">
+                {revenueData.map((item) => (
+                  <div
+                    key={item.month}
+                    className="flex h-full min-w-0 flex-1 flex-col justify-end gap-2"
+                  >
+                    <div className="flex min-h-10 items-end justify-center text-[11px] font-medium text-slate-500">
+                      {item.revenue > 0 ? formatCurrency(item.revenue) : ""}
+                    </div>
+                    <div
+                      className="rounded-t bg-emerald-600 shadow-sm"
+                      style={{
+                        height: `${Math.max(12, (item.revenue / tallestRevenue) * 100)}%`,
+                      }}
+                      title={formatCurrency(item.revenue)}
+                    />
+                    <div className="pb-2 text-center text-xs text-slate-500">
+                      {item.month}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </article>
+
+          <article className="rounded-lg border border-slate-200 bg-white shadow-sm">
+            <div className="border-b border-slate-200 p-6">
+              <h2 className="text-lg font-semibold text-slate-900">
+                Apartment Mix
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Current unit status across the portfolio.
+              </p>
+            </div>
+            <div className="p-6">
+              <div
+                className="mx-auto flex h-48 w-48 items-center justify-center rounded-full"
+                style={{ background: apartmentMixGradient }}
+              >
+                <div className="flex h-28 w-28 flex-col items-center justify-center rounded-full bg-white text-center shadow-sm">
+                  <span className="text-3xl font-bold text-slate-900">
+                    {apartmentOccupancyRate}%
+                  </span>
+                  <span className="text-xs font-medium text-slate-500">
+                    occupied
+                  </span>
+                </div>
+              </div>
+              <div className="mt-6 space-y-3">
+                {apartmentMix.map((item) => (
+                  <div key={item.label} className="flex items-center gap-3">
+                    <span className={`h-2.5 w-2.5 rounded-full ${item.className}`} />
+                    <span className="flex-1 text-sm text-slate-600">
+                      {item.label}
+                    </span>
+                    <span className="text-sm font-semibold text-slate-900">
+                      {item.value.toLocaleString()}
+                    </span>
+                    <span className="w-10 text-right text-xs text-slate-500">
+                      {item.percent}%
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </article>
+        </section>
+
+        <section
+          aria-label="Operational charts"
+          className="grid grid-cols-1 gap-6 lg:grid-cols-2"
+        >
+          <article className="rounded-lg border border-slate-200 bg-white shadow-sm">
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-6">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-900">
+                  Portfolio Health
+                </h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Highest-scoring properties by occupancy, rent, and maintenance.
+                </p>
+              </div>
+              <span className="rounded-lg bg-emerald-50 px-3 py-2 text-sm font-semibold text-emerald-700">
+                {averagePortfolioScore}/100 avg
+              </span>
+            </div>
+            <div className="space-y-4 p-6">
+              {strongestProperties.length === 0 ? (
+                <p className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm text-slate-500">
+                  Add properties to start scoring performance.
+                </p>
+              ) : (
+                strongestProperties.map((item) => (
+                  <div key={item.propertyId}>
+                    <div className="mb-1 flex items-center justify-between gap-3 text-sm">
+                      <span className="truncate font-medium text-slate-700">
+                        {item.address}
+                      </span>
+                      <span className="font-semibold text-slate-900">
+                        {item.score}/100
+                      </span>
+                    </div>
+                    <div className="h-3 rounded-full bg-slate-100">
+                      <div
+                        className="h-3 rounded-full bg-sky-500"
+                        style={{ width: `${item.score}%` }}
+                      />
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </article>
+
+          <article className="rounded-lg border border-slate-200 bg-white shadow-sm">
+            <div className="border-b border-slate-200 p-6">
+              <h2 className="text-lg font-semibold text-slate-900">
+                Maintenance Pressure
+              </h2>
+              <p className="mt-1 text-sm text-slate-500">
+                Open workload split by routine and urgent requests.
+              </p>
+            </div>
+            <div className="space-y-5 p-6">
+              <div className="grid grid-cols-2 gap-6 border-b border-slate-200 pb-5">
+                <div>
+                  <p className="text-xs font-medium text-slate-500">
+                    Open requests
+                  </p>
+                  <p className="mt-2 text-2xl font-bold text-slate-900">
+                    {openRequests.toLocaleString()}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs font-medium text-slate-500">
+                    Rent collection
+                  </p>
+                  <p className="mt-2 text-2xl font-bold text-slate-900">
+                    {rentCollectionRate}%
+                  </p>
+                </div>
+              </div>
+              {maintenanceChart.map((item) => (
+                <div key={item.label}>
+                  <div className="mb-1 flex items-center justify-between text-sm">
+                    <span className="font-medium text-slate-700">{item.label}</span>
+                    <span className="text-slate-500">
+                      {item.value.toLocaleString()} requests
+                    </span>
+                  </div>
+                  <div className="h-3 rounded-full bg-slate-100">
+                    <div
+                      className={`h-3 rounded-full ${item.className}`}
+                      style={{ width: `${Math.max(item.percent, item.value > 0 ? 6 : 0)}%` }}
+                    />
+                  </div>
+                </div>
+              ))}
+            </div>
+          </article>
+        </section>
 
         <section
           aria-label="Portfolio stats"
@@ -548,70 +799,39 @@ export default async function DashboardPage() {
           </div>
         </section>
 
-        <div className="grid grid-cols-1 gap-8 lg:grid-cols-3">
-          <section className="rounded-lg border border-slate-200 bg-white shadow-sm lg:col-span-2">
-            <div className="border-b border-slate-200 p-6">
-              <h2 className="text-lg font-semibold text-slate-900">
-                Revenue Overview
-              </h2>
-            </div>
-            <div className="h-[300px] p-6">
-              <div className="flex h-full items-end gap-3">
-                {revenueData.map((item) => (
-                  <div
-                    key={item.month}
-                    className="flex h-full min-w-0 flex-1 flex-col justify-end gap-2"
-                  >
-                    <div
-                      className="rounded-t bg-emerald-500"
-                      style={{
-                        height: `${Math.max(12, (item.revenue / tallestRevenue) * 100)}%`,
-                      }}
-                      title={`$${item.revenue.toLocaleString()}`}
-                    />
-                    <div className="text-center text-xs text-slate-500">
-                      {item.month}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </section>
-
-          <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
-            <div className="border-b border-slate-200 p-6">
-              <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-900">
-                <Icon name="alert" className="h-4 w-4 text-amber-600" />
-                Smart Alerts Center
-              </h2>
-            </div>
-            <div className="space-y-6 p-6">
-              {alerts.map((item) => (
-                <div key={item.title} className="flex items-start gap-3">
-                  <div
-                    className={[
-                      "mt-2 h-2 w-2 rounded-full",
-                      item.severity === "high"
-                        ? "bg-red-500"
-                        : item.severity === "medium"
-                          ? "bg-amber-500"
-                          : "bg-sky-500",
-                    ].join(" ")}
-                  />
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-slate-900">
-                      {item.title}
-                    </p>
-                    <p className="text-xs text-slate-500">{item.detail}</p>
-                  </div>
-                  <span className="rounded border border-slate-200 px-2 py-0.5 text-xs capitalize text-slate-600">
-                    {item.severity}
-                  </span>
+        <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-200 p-6">
+            <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-900">
+              <Icon name="alert" className="h-4 w-4 text-amber-600" />
+              Smart Alerts Center
+            </h2>
+          </div>
+          <div className={alertGridClass}>
+            {alerts.map((item) => (
+              <div key={item.title} className="flex min-w-0 items-start gap-3 p-6">
+                <div
+                  className={[
+                    "mt-2 h-2 w-2 rounded-full",
+                    item.severity === "high"
+                      ? "bg-rose-600"
+                      : item.severity === "medium"
+                        ? "bg-amber-500"
+                        : "bg-sky-500",
+                  ].join(" ")}
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-medium text-slate-900">
+                    {item.title}
+                  </p>
+                  <p className="mt-1 text-xs text-slate-500">{item.detail}</p>
                 </div>
-              ))}
-            </div>
-          </section>
-        </div>
+                <span className="rounded border border-slate-200 px-2 py-0.5 text-xs capitalize text-slate-600">
+                  {item.severity}
+                </span>
+              </div>
+            ))}
+          </div>
+        </section>
 
         <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
           <div className="border-b border-slate-200 p-6">
