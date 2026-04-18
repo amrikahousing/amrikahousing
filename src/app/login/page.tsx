@@ -265,15 +265,9 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
       return;
     }
 
-    if (!inviteTicket && role === "property_manager" && !organizationName.trim()) {
-      setClientError("Organization name is required for property managers.");
-      return;
-    }
-
     const nameParts = firstName.trim().split(/\s+/);
     const first = nameParts[0] ?? "";
     const last = nameParts.slice(1).join(" ") || lastName.trim() || undefined;
-    const organization = organizationName.trim() || undefined;
 
     try {
       if (signUp.id && signUp.status !== "complete") {
@@ -299,8 +293,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
             unsafeMetadata: {
               firstName: first,
               lastName: last,
-              role,
-              organizationName: organization,
+              role: "renter",
             },
           };
 
@@ -494,10 +487,10 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                   ) : null}
                 </div>
 
-                {mode !== "verify" && !inviteTicket ? (
+                {mode === "signin" ? (
                   <>
                     <p className="text-sm text-slate-300">
-                      {mode === "signup" ? "Signing up" : "Signing in"} as{" "}
+                      Signing in as{" "}
                       <span className="font-medium text-slate-100">
                         {roleLabel}
                       </span>
