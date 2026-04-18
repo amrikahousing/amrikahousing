@@ -1,6 +1,5 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useEffect, useId, useMemo, useState } from "react";
 import { useAuth, useClerk, useSignIn, useSignUp } from "@clerk/nextjs";
 import { isClerkAPIResponseError } from "@clerk/nextjs/errors";
@@ -168,7 +167,6 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     useSignUp();
   const { isSignedIn } = useAuth();
   const clerk = useClerk();
-  const router = useRouter();
   const isLoading =
     signInFetchStatus === "fetching" || signUpFetchStatus === "fetching";
 
@@ -193,6 +191,15 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     url.searchParams.delete("email");
     window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!inviteTicket || mode !== "signup") return;
+    if (!isSignedIn && !clerk.isSignedIn) return;
+
+    const redirectUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    void clerk.signOut({ redirectUrl });
+  }, [clerk, inviteTicket, isSignedIn, mode]);
 
   useEffect(() => {
     const prefersReduced =
@@ -262,6 +269,16 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     } catch {
       return "/dashboard";
     }
+  }
+
+  async function completeSignIn() {
+    const { error: finalizeError } = await signIn.finalize();
+    if (finalizeError) {
+      setClientError(getErrorMessage(finalizeError, "We could not finish signing you in."));
+      return;
+    }
+
+    window.location.href = await resolvePostSignInDestination();
   }
 
   async function createOrganizationIfNeeded() {
@@ -350,13 +367,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
         return;
       }
 
-      const { error: finalizeError } = await signIn.finalize();
-      if (finalizeError) {
-        setClientError(getErrorMessage(finalizeError, "We could not finish signing you in."));
-        return;
-      }
-
-      router.push(await resolvePostSignInDestination());
+      await completeSignIn();
     } catch (error) {
       setClientError(getErrorMessage(error, "Something went wrong. Please try again."));
     }
@@ -576,13 +587,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
         return;
       }
 
-      const { error: finalizeError } = await signIn.finalize();
-      if (finalizeError) {
-        setClientError(getErrorMessage(finalizeError, "We could not finish signing you in."));
-        return;
-      }
-
-      router.push(await resolvePostSignInDestination());
+      await completeSignIn();
     } catch (error) {
       setClientError(getErrorMessage(error, "Something went wrong. Please try again."));
     }
