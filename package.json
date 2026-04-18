@@ -7,8 +7,6 @@
     "build": "prisma generate && next build",
     "deploy:test": "node scripts/release-test.mjs",
     "deploy:prod": "node scripts/promote-prod.mjs",
-    "release:test": "npm run deploy:test",
-    "promote:prod": "npm run deploy:prod",
     "start": "next start",
     "lint": "eslint"
   },
