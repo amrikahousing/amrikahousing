@@ -144,6 +144,19 @@ export function assertCleanTree(cwd = process.cwd()) {
   }
 }
 
+export function commitLocalChanges(cwd = process.cwd()) {
+  const status = git(["status", "--porcelain"], { cwd });
+  if (!status) {
+    console.log("No local changes to commit.");
+    return false;
+  }
+
+  console.log("Committing local changes before test deploy.");
+  runGit(["add", "--all"], { cwd });
+  runGit(["commit", "-m", "chore: prepare test deployment"], { cwd });
+  return true;
+}
+
 export function ensureVercelProject(cwd = process.cwd()) {
   const projectFile = join(cwdRealpath(cwd), ".vercel", "project.json");
   if (!existsSync(projectFile)) {

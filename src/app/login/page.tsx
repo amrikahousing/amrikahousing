@@ -425,6 +425,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
       return;
     }
 
+    const trimmedOrganizationName = organizationName.trim();
     const nameParts = firstName.trim().split(/\s+/);
     const first = nameParts[0] ?? "";
     const last = nameParts.slice(1).join(" ") || lastName.trim() || undefined;
@@ -453,7 +454,10 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
             unsafeMetadata: {
               firstName: first,
               lastName: last,
-              role: "renter",
+              role,
+              ...(role === "property_manager" && trimmedOrganizationName
+                ? { organizationName: trimmedOrganizationName }
+                : {}),
             },
           };
 
@@ -788,6 +792,17 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                         Forgot password?
                       </button>
                     </div>
+
+                    <button
+                      type="button"
+                      className="w-full text-sm text-slate-300 underline underline-offset-2 hover:text-slate-100"
+                      onClick={() => {
+                        setRole("property_manager");
+                        switchMode("signup");
+                      }}
+                    >
+                      Create a new organization
+                    </button>
                   </form>
                 ) : null}
 

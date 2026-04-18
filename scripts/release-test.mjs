@@ -4,6 +4,7 @@ import {
   assertBranch,
   assertCanonicalRoot,
   assertCleanTree,
+  commitLocalChanges,
   NEON_PREVIEW_HOST_PREFIX,
   TEST_DEPLOYMENT_ALIAS,
   TEST_GIT_BRANCH_ALIAS,
@@ -23,7 +24,12 @@ const root = assertCanonicalRoot();
 
 ensureVercelProject(root);
 assertBranch("neon-preview-test", root);
-assertCleanTree(root);
+
+if (dryRun) {
+  assertCleanTree(root);
+} else {
+  commitLocalChanges(root);
+}
 
 console.log("Checking the test branch before deploy.");
 run("npm", ["run", "lint"], { cwd: root });
