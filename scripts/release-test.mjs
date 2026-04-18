@@ -4,9 +4,11 @@ import {
   assertBranch,
   assertCanonicalRoot,
   assertCleanTree,
+  deploymentUrlFromOutput,
   ensureBranchPushed,
   ensureVercelProject,
   run,
+  runAndCapture,
 } from "./deploy-workflow-utils.mjs";
 
 const dryRun = process.argv.includes("--dry-run");
@@ -29,5 +31,11 @@ if (dryRun) {
 ensureBranchPushed("neon-preview-test", root);
 
 console.log("Deploying neon-preview-test to the Vercel test/preview environment.");
-run("npx", ["vercel", "deploy", "-y"], { cwd: root });
+const deployOutput = runAndCapture("npx", ["vercel", "deploy", "-y"], { cwd: root });
+const deploymentUrl = deploymentUrlFromOutput(deployOutput);
 
+if (deploymentUrl) {
+  console.log(`\nTest deployment URL: ${deploymentUrl}`);
+} else {
+  console.log("\nTest deployment finished, but no deployment URL was found in the Vercel output.");
+}

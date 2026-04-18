@@ -7,11 +7,13 @@ import {
   assertCanonicalRoot,
   assertCleanTree,
   copyVercelProjectLink,
+  deploymentUrlFromOutput,
   ensureBranchPushed,
   ensureVercelProject,
   fail,
   findWorktreeForBranch,
   run,
+  runAndCapture,
   runGit,
 } from "./deploy-workflow-utils.mjs";
 
@@ -78,5 +80,11 @@ console.log("Pushing main to GitHub.");
 runGit(["push", "origin", "main"], { cwd: mainWorktree });
 
 console.log("Deploying main to production.");
-run("npx", ["vercel", "deploy", "--prod", "-y"], { cwd: mainWorktree });
+const deployOutput = runAndCapture("npx", ["vercel", "deploy", "--prod", "-y"], { cwd: mainWorktree });
+const deploymentUrl = deploymentUrlFromOutput(deployOutput);
 
+if (deploymentUrl) {
+  console.log(`\nProduction deployment URL: ${deploymentUrl}`);
+} else {
+  console.log("\nProduction deployment finished, but no deployment URL was found in the Vercel output.");
+}

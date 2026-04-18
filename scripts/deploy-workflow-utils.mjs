@@ -39,6 +39,39 @@ export function run(command, args, options = {}) {
   }
 }
 
+export function runAndCapture(command, args, options = {}) {
+  const result = spawnSync(command, args, {
+    cwd: options.cwd,
+    encoding: "utf8",
+    shell: false,
+    stdio: ["inherit", "pipe", "pipe"],
+  });
+
+  if (result.stdout) {
+    process.stdout.write(result.stdout);
+  }
+
+  if (result.stderr) {
+    process.stderr.write(result.stderr);
+  }
+
+  if (result.error) {
+    fail(`${command} ${args.join(" ")} failed: ${result.error.message}`);
+  }
+
+  if (result.status !== 0) {
+    fail(`${command} ${args.join(" ")} exited with status ${result.status}.`);
+  }
+
+  return `${result.stdout ?? ""}\n${result.stderr ?? ""}`.trim();
+}
+
+export function deploymentUrlFromOutput(output) {
+  const urls = output.match(/https:\/\/[^\s]+/g) ?? [];
+  const deploymentUrls = urls.filter((url) => url.includes(".vercel.app") || url.includes("amrikahousing.com"));
+  return deploymentUrls.at(-1) ?? urls.at(-1) ?? null;
+}
+
 export function capture(command, args, options = {}) {
   try {
     return execFileSync(command, args, {
