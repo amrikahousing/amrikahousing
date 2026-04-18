@@ -817,16 +817,6 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                       </button>
                     </div>
 
-                    <button
-                      type="button"
-                      className="w-full text-sm text-slate-300 underline underline-offset-2 hover:text-slate-100"
-                      onClick={() => {
-                        setRole("property_manager");
-                        switchMode("signup");
-                      }}
-                    >
-                      Create a new organization
-                    </button>
                   </form>
                 ) : null}
 
