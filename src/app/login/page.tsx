@@ -270,13 +270,16 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
   }
 
   async function completeSignup() {
-    const { error: finalizeError } = await signUp.finalize();
-    if (finalizeError) {
-      setClientError(getErrorMessage(finalizeError, "We could not complete your sign-up."));
+    const sessionId = signUp.createdSessionId;
+
+    if (sessionId) {
+      await clerk.setActive({ session: sessionId });
+      await createOrganizationIfNeeded();
+      router.push(inviteTicket ? "/onboarding" : role === "property_manager" ? "/onboarding" : "/dashboard");
       return;
     }
-    await createOrganizationIfNeeded();
-    router.push(role === "property_manager" ? "/onboarding" : "/dashboard");
+
+    switchMode("signin");
   }
 
   async function handleSignIn(e: React.FormEvent<HTMLFormElement>) {

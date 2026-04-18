@@ -1,8 +1,8 @@
 "use client";
 
-import { SignOutButton, UserButton } from "@clerk/nextjs";
+import { useClerk, UserButton } from "@clerk/nextjs";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 
 type AppSidebarProps = {
@@ -129,6 +129,8 @@ function cx(...classes: Array<string | false | null | undefined>) {
 
 export function AppSidebar({ user }: AppSidebarProps) {
   const pathname = usePathname();
+  const router = useRouter();
+  const { signOut } = useClerk();
   const [isOpen, setIsOpen] = useState(false);
   const roleLabel = roleLabels[user.role] ?? "Workspace";
   const displayName = user.firstName ?? user.email ?? "Account";
@@ -217,12 +219,13 @@ export function AppSidebar({ user }: AppSidebarProps) {
           <UserButton />
         </Link>
 
-        <SignOutButton redirectUrl="/login">
-          <button className="flex w-full items-center justify-start gap-2 rounded-lg border border-slate-700 px-3 py-2 text-sm font-medium text-slate-400 transition-colors hover:bg-slate-800 hover:text-white">
-            <span aria-hidden="true">-&gt;</span>
-            Log Out
-          </button>
-        </SignOutButton>
+        <button
+          onClick={() => signOut(() => router.push("/login"))}
+          className="flex w-full items-center justify-start gap-2 rounded-lg border border-slate-700 px-3 py-2 text-sm font-medium text-slate-400 transition-colors hover:bg-slate-800 hover:text-white"
+        >
+          <span aria-hidden="true">-&gt;</span>
+          Log Out
+        </button>
       </div>
     </div>
   );
