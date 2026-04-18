@@ -74,5 +74,11 @@ runAndCapture("npx", ["vercel", "alias", "set", hostnameFromUrl(deploymentUrl), 
   cwd: root,
 });
 
+console.log(`\nRunning E2E smoke tests against https://${TEST_DEPLOYMENT_ALIAS}.`);
+run("npm", ["run", "test:e2e"], {
+  cwd: root,
+  env: { E2E_BASE_URL: `https://${TEST_DEPLOYMENT_ALIAS}` },
+});
+
 console.log(`\nTest deployment URL: https://${TEST_DEPLOYMENT_ALIAS}`);
 console.log(`Vercel branch deployment URL: ${deploymentUrl}`);
