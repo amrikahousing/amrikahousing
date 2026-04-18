@@ -240,6 +240,19 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     switchMode("signin");
   }
 
+  async function handlePasskeySignIn() {
+    setClientError(null);
+    try {
+      const result = await signIn.authenticateWithPasskey({ flow: "discoverable" });
+      if (result.status === "complete") {
+        await clerk.setActive({ session: result.createdSessionId });
+        router.push("/dashboard");
+      }
+    } catch (error) {
+      setClientError(getErrorMessage(error, "Passkey sign-in failed. Try again or use your password."));
+    }
+  }
+
   async function handleSignIn(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setClientError(null);
@@ -609,6 +622,14 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                       disabled={isLoading}
                     >
                       {isLoading ? "Signing in..." : "Sign in"}
+                    </button>
+
+                    <button
+                      className="h-12 w-full rounded-md border-2 border-slate-300 bg-white px-4 text-base font-medium text-slate-900 transition hover:bg-slate-100"
+                      type="button"
+                      onClick={handlePasskeySignIn}
+                    >
+                      Sign in with Passkey
                     </button>
 
                     <div className="-mt-1">
