@@ -6,7 +6,7 @@ import { useAuth, useClerk, useSignIn, useSignUp } from "@clerk/nextjs";
 import { isClerkAPIResponseError } from "@clerk/nextjs/errors";
 
 type LoginRole = "property_manager" | "renter";
-type AuthMode = "signin" | "signup" | "verify" | "forgot" | "reset";
+type AuthMode = "signin" | "signup" | "verify" | "forgot" | "reset" | "signin_mfa";
 
 function BuildingIcon({ className = "" }: { className?: string }) {
   return (
@@ -225,7 +225,9 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
           ? "Reset password"
           : mode === "reset"
             ? "Create new password"
-            : "Sign in";
+            : mode === "signin_mfa"
+              ? "Check your email"
+              : "Sign in";
   const description =
     mode === "signup"
       ? "Set up access in under a minute."
@@ -235,7 +237,9 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
           ? "Enter your email and we will send a reset code."
           : mode === "reset"
             ? "Enter the code we sent and choose a new password."
-        : "";
+            : mode === "signin_mfa"
+              ? "Enter the 6-digit code we sent to your email."
+              : "";
 
   function switchMode(nextMode: AuthMode) {
     setMode(nextMode);
@@ -317,12 +321,19 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
         return;
       }
 
-      // Debug: log status after create
-      console.log("[login] after create — status:", signIn.status, "createdSessionId:", signIn.createdSessionId);
+      if (signIn.status === "needs_second_factor") {
+        const { error: sendError } = await signIn.mfa.sendEmailCode();
+        if (sendError) {
+          setClientError(getErrorMessage(sendError, "We could not send a verification code."));
+          return;
+        }
+        setVerificationCode("");
+        switchMode("signin_mfa");
+        return;
+      }
 
       const { error: finalizeError } = await signIn.finalize();
       if (finalizeError) {
-        console.log("[login] finalize error:", finalizeError);
         setClientError(getErrorMessage(finalizeError, "We could not finish signing you in."));
         return;
       }
@@ -531,6 +542,29 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
       }
 
       await completeSignup();
+    } catch (error) {
+      setClientError(getErrorMessage(error, "Something went wrong. Please try again."));
+    }
+  }
+
+  async function handleSignInMfa(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setClientError(null);
+
+    try {
+      const { error } = await signIn.mfa.verifyEmailCode({ code: verificationCode });
+      if (error) {
+        setClientError(getErrorMessage(error, "We could not verify that code."));
+        return;
+      }
+
+      const { error: finalizeError } = await signIn.finalize();
+      if (finalizeError) {
+        setClientError(getErrorMessage(finalizeError, "We could not finish signing you in."));
+        return;
+      }
+
+      router.push("/dashboard");
     } catch (error) {
       setClientError(getErrorMessage(error, "Something went wrong. Please try again."));
     }
@@ -1231,6 +1265,58 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                       disabled={isLoading}
                     >
                       {isLoading ? "Verifying..." : "Verify & continue"}
+                    </button>
+
+                    <button
+                      type="button"
+                      className="w-full text-sm text-slate-300 underline underline-offset-2 hover:text-slate-100"
+                      onClick={() => switchMode("signin")}
+                    >
+                      Back to sign in
+                    </button>
+                  </form>
+                ) : null}
+
+                {mode === "signin_mfa" ? (
+                  <form
+                    className="space-y-5"
+                    onSubmit={handleSignInMfa}
+                    autoComplete="off"
+                  >
+                    <div className="space-y-2">
+                      <label htmlFor={codeId} className="text-sm text-slate-200">
+                        Verification code
+                      </label>
+                      <input
+                        id={codeId}
+                        className="h-12 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 text-center text-lg font-semibold tracking-[0.25em] text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={6}
+                        placeholder="------"
+                        required
+                        value={verificationCode}
+                        onChange={(e) =>
+                          setVerificationCode(e.target.value.replace(/\D/g, ""))
+                        }
+                      />
+                    </div>
+
+                    {displayError && (
+                      <p
+                        role="alert"
+                        className="rounded-md border border-red-400/30 bg-red-950/45 px-3 py-2 text-sm text-red-200"
+                      >
+                        {displayError}
+                      </p>
+                    )}
+
+                    <button
+                      className="h-12 w-full rounded-md bg-emerald-500 px-4 text-base font-semibold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
+                      type="submit"
+                      disabled={isLoading}
+                    >
+                      {isLoading ? "Verifying..." : "Verify & sign in"}
                     </button>
 
                     <button
