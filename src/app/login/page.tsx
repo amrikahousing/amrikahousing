@@ -306,7 +306,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
         }
       }
 
-      const { error } = await signIn.password({ identifier: email, password });
+      const { error } = await signIn.create({ identifier: email.trim(), password });
       if (error) {
         if (hasClerkErrorCode(error, "session_exists")) {
           await redirectToCleanSignIn();

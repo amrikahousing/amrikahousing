@@ -21,6 +21,7 @@ import {
 } from "./deploy-workflow-utils.mjs";
 
 const dryRun = process.argv.includes("--dry-run");
+const skipE2e = process.argv.includes("--skip-e2e");
 const root = assertCanonicalRoot();
 
 ensureVercelProject(root);
@@ -74,11 +75,15 @@ runAndCapture("npx", ["vercel", "alias", "set", hostnameFromUrl(deploymentUrl), 
   cwd: root,
 });
 
-console.log(`\nRunning E2E smoke tests against https://${TEST_DEPLOYMENT_ALIAS}.`);
-run("npm", ["run", "test:e2e"], {
-  cwd: root,
-  env: { E2E_BASE_URL: `https://${TEST_DEPLOYMENT_ALIAS}` },
-});
+if (skipE2e) {
+  console.log("\nSkipping E2E smoke tests (--skip-e2e).");
+} else {
+  console.log(`\nRunning E2E smoke tests against https://${TEST_DEPLOYMENT_ALIAS}.`);
+  run("npm", ["run", "test:e2e"], {
+    cwd: root,
+    env: { E2E_BASE_URL: `https://${TEST_DEPLOYMENT_ALIAS}` },
+  });
+}
 
 console.log(`\nTest deployment URL: https://${TEST_DEPLOYMENT_ALIAS}`);
 console.log(`Vercel branch deployment URL: ${deploymentUrl}`);
