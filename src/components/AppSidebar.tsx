@@ -19,14 +19,12 @@ type IconName =
   | "dashboard"
   | "building"
   | "wrench"
-  | "screening"
   | "profile";
 
 const navigation: Array<{ name: string; href: string; icon: IconName }> = [
   { name: "Dashboard", href: "/dashboard", icon: "dashboard" },
   { name: "Properties", href: "/properties", icon: "building" },
   { name: "Maintenance", href: "/maintenance", icon: "wrench" },
-  { name: "Screening", href: "/screenings", icon: "screening" },
 ];
 
 const implementedRoutes = new Set([
@@ -70,13 +68,6 @@ function Icon({ name, className = "" }: { name: IconName; className?: string }) 
         <svg {...shared}>
           <path d="M14.7 6.3a4 4 0 0 0 5 5L11 20l-4-4 8.7-8.7Z" />
           <path d="m7 16-3 3 1 1 3-3" />
-        </svg>
-      );
-    case "screening":
-      return (
-        <svg {...shared}>
-          <path d="M10.5 11.5a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM3.5 20a7 7 0 0 1 10.8-5.9" />
-          <path d="m15 18 2 2 4-5" />
         </svg>
       );
     case "profile":
