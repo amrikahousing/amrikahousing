@@ -79,9 +79,16 @@ if (skipE2e) {
   console.log("\nSkipping E2E smoke tests (--skip-e2e).");
 } else {
   console.log(`\nRunning E2E smoke tests against https://${TEST_DEPLOYMENT_ALIAS}.`);
+  const bypassSecret = process.env.VERCEL_AUTOMATION_BYPASS_SECRET;
+  if (!bypassSecret) {
+    console.warn("Warning: VERCEL_AUTOMATION_BYPASS_SECRET is not set. Tests will fail if deployment protection is enabled.");
+  }
   run("npm", ["run", "test:e2e"], {
     cwd: root,
-    env: { E2E_BASE_URL: `https://${TEST_DEPLOYMENT_ALIAS}` },
+    env: {
+      E2E_BASE_URL: `https://${TEST_DEPLOYMENT_ALIAS}`,
+      ...(bypassSecret ? { VERCEL_AUTOMATION_BYPASS_SECRET: bypassSecret } : {}),
+    },
   });
 }
 

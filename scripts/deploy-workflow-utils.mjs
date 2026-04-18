@@ -15,7 +15,7 @@ import { parse as parseDotenv } from "dotenv";
 export const EXPECTED_PROJECT_NAME = "amrikahousing";
 export const EXPECTED_PROJECT_ID = "prj_hdUfbG36MTUtcftGcn3bSazVX8Ei";
 export const EXPECTED_ROOT = "/Users/rayansh/Documents/amrikahousing";
-export const TEST_DEPLOYMENT_ALIAS = "neon-preview-test-amrikahousing.vercel.app";
+export const TEST_DEPLOYMENT_ALIAS = "test.amrikahousing.com";
 export const TEST_GIT_BRANCH_ALIAS = "amrikahousing-git-neon-preview-test-amrika-housings-projects.vercel.app";
 export const PRODUCTION_DEPLOYMENT_URL = "https://www.amrikahousing.com";
 export const NEON_PREVIEW_HOST_PREFIX = "ep-mute-mode-amov2nuk";
