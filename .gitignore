@@ -46,4 +46,6 @@ next-env.d.ts
 /.clerk/
 .env*.local
 
+/.claude/worktrees/
+
 /src/generated/prisma
