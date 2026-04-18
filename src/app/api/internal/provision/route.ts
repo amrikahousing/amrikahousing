@@ -1,19 +1,10 @@
 import { clerkClient } from "@clerk/nextjs/server";
 import { NextRequest } from "next/server";
+import { isInternalAdmin } from "@/lib/internal-admin";
 
 export async function POST(request: NextRequest) {
-  const secret = process.env.INTERNAL_SECRET;
-
-  if (!secret) {
-    return Response.json(
-      { error: "Provisioning is not configured on this environment." },
-      { status: 503 }
-    );
-  }
-
-  const token = request.headers.get("x-internal-token");
-  if (!token || token !== secret) {
-    return Response.json({ error: "Unauthorized." }, { status: 401 });
+  if (!(await isInternalAdmin())) {
+    return Response.json({ error: "Not found." }, { status: 404 });
   }
 
   let body: { orgName?: string; adminEmail?: string; appUrl?: string };
@@ -45,7 +36,7 @@ export async function POST(request: NextRequest) {
     organizationId: org.id,
     emailAddress: adminEmail,
     role: "org:admin",
-    redirectUrl: `${appUrl}/onboarding`,
+    redirectUrl: `${appUrl}/signup`,
   });
 
   return Response.json({

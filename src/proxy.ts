@@ -5,12 +5,12 @@ const isPublicRoute = createRouteMatcher([
   "/",
   "/login(.*)",
   "/signup(.*)",
-  "/internal(.*)",
   "/onboard(.*)",
 ]);
 
 // Routes that require an active org (not just authentication)
 const isSignupRoute = createRouteMatcher(["/signup(.*)"]);
+const isOnboardingRoute = createRouteMatcher(["/onboarding(.*)"]);
 
 const isOrgRoute = createRouteMatcher([
   "/dashboard(.*)",
@@ -21,13 +21,21 @@ const isOrgRoute = createRouteMatcher([
 ]);
 
 export default clerkMiddleware(async (auth, request) => {
+  if (isOnboardingRoute(request) && request.nextUrl.searchParams.has("__clerk_ticket")) {
+    const signup = new URL("/signup", request.url);
+    request.nextUrl.searchParams.forEach((value, key) => {
+      signup.searchParams.set(key, value);
+    });
+    return NextResponse.redirect(signup);
+  }
+
   if (isSignupRoute(request) && !request.nextUrl.searchParams.has("__clerk_ticket")) {
     return NextResponse.redirect(new URL("/login", request.url));
   }
 
   if (isPublicRoute(request)) return;
 
-  const { userId, orgId } = await auth.protect();
+  const { orgId } = await auth.protect();
 
   // Authenticated but no active org — redirect to onboard
   if (isOrgRoute(request) && !orgId) {

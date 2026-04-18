@@ -6,7 +6,7 @@ import { useAuth, useClerk, useSignIn, useSignUp } from "@clerk/nextjs";
 import { isClerkAPIResponseError } from "@clerk/nextjs/errors";
 
 type LoginRole = "property_manager" | "renter";
-type AuthMode = "signin" | "signup" | "verify";
+type AuthMode = "signin" | "signup" | "verify" | "forgot" | "reset";
 
 function BuildingIcon({ className = "" }: { className?: string }) {
   return (
@@ -105,6 +105,12 @@ function getErrorMessage(error: unknown, fallback: string) {
   return fallback;
 }
 
+function hasClerkErrorCode(error: unknown, code: string) {
+  if (!isClerkAPIResponseError(error)) return false;
+
+  return error.errors.some((clerkError) => clerkError.code === code);
+}
+
 export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode }) {
   const emailId = useId();
   const passwordId = useId();
@@ -129,7 +135,12 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [headlineIndex, setHeadlineIndex] = useState(0);
   const [role, setRole] = useState<LoginRole>("property_manager");
-  const [email, setEmail] = useState("");
+  const [email, setEmail] = useState(() => {
+    if (typeof window === "undefined") return "";
+
+    const url = new URL(window.location.href);
+    return url.searchParams.get("email") ?? "";
+  });
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [firstName, setFirstName] = useState("");
@@ -137,6 +148,19 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
   const [organizationName, setOrganizationName] = useState("");
   const [verificationCode, setVerificationCode] = useState("");
   const [clientError, setClientError] = useState<string | null>(null);
+  const [clientNotice, setClientNotice] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+
+    const url = new URL(window.location.href);
+    if (url.searchParams.get("password_reset") === "success") {
+      return "Your password was updated. Please sign in.";
+    }
+    if (url.searchParams.get("signed_out") === "1") {
+      return "You have been signed out. Please sign in again.";
+    }
+
+    return null;
+  });
 
   const { signIn, errors: signInErrors, fetchStatus: signInFetchStatus } =
     useSignIn();
@@ -164,6 +188,9 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     const url = new URL(window.location.href);
     url.searchParams.delete("mode");
     url.searchParams.delete("__clerk_ticket");
+    url.searchParams.delete("password_reset");
+    url.searchParams.delete("signed_out");
+    url.searchParams.delete("email");
     window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
   }, []);
 
@@ -189,17 +216,31 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     }
   }, [role]);
 
-  const title = mode === "signup" ? "Create your account" : mode === "verify" ? "Verify email" : "Sign in";
+  const title =
+    mode === "signup"
+      ? "Create your account"
+      : mode === "verify"
+        ? "Verify email"
+        : mode === "forgot"
+          ? "Reset password"
+          : mode === "reset"
+            ? "Create new password"
+            : "Sign in";
   const description =
     mode === "signup"
       ? "Set up access in under a minute."
       : mode === "verify"
         ? "Enter the 6-digit code we sent you."
+        : mode === "forgot"
+          ? "Enter your email and we will send a reset code."
+          : mode === "reset"
+            ? "Enter the code we sent and choose a new password."
         : "";
 
   function switchMode(nextMode: AuthMode) {
     setMode(nextMode);
     setClientError(null);
+    setClientNotice(null);
   }
 
   async function createOrganizationIfNeeded() {
@@ -240,16 +281,138 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
   async function handleSignIn(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setClientError(null);
+    setClientNotice(null);
 
-    if (isSignedIn) {
-      router.push("/dashboard");
+    const redirectToCleanSignIn = async () => {
+      const redirectUrl = new URL("/login", window.location.origin);
+      const trimmedEmail = email.trim();
+      if (trimmedEmail) redirectUrl.searchParams.set("email", trimmedEmail);
+      redirectUrl.searchParams.set("signed_out", "1");
+
+      await clerk.signOut({ redirectUrl: `${redirectUrl.pathname}${redirectUrl.search}` });
+    };
+
+    if (isSignedIn || clerk.isSignedIn) {
+      await redirectToCleanSignIn();
       return;
     }
 
-    const { error } = await signIn.password({ identifier: email, password });
-    if (!error) {
-      await signIn.finalize();
+    try {
+      if (signIn.id) {
+        const { error: resetError } = await signIn.reset();
+        if (resetError) {
+          setClientError(getErrorMessage(resetError, "We could not restart sign in."));
+          return;
+        }
+      }
+
+      const { error } = await signIn.password({ identifier: email, password });
+      if (error) {
+        if (hasClerkErrorCode(error, "session_exists")) {
+          await redirectToCleanSignIn();
+          return;
+        }
+
+        setClientError(getErrorMessage(error, "We could not sign you in."));
+        return;
+      }
+
+      const { error: finalizeError } = await signIn.finalize();
+      if (finalizeError) {
+        setClientError(getErrorMessage(finalizeError, "We could not finish signing you in."));
+        return;
+      }
+
       router.push("/dashboard");
+    } catch (error) {
+      setClientError(getErrorMessage(error, "Something went wrong. Please try again."));
+    }
+  }
+
+  async function handleForgotPassword(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setClientError(null);
+    setClientNotice(null);
+
+    const identifier = email.trim();
+    if (!identifier) {
+      setClientError("Enter your email so we can send a reset code.");
+      return;
+    }
+
+    try {
+      if (isSignedIn || clerk.isSignedIn) {
+        await clerk.signOut();
+      }
+
+      if (signIn.id && !signIn.canBeDiscarded) {
+        const { error: resetError } = await signIn.reset();
+        if (resetError) {
+          setClientError(getErrorMessage(resetError, "We could not restart password reset."));
+          return;
+        }
+      }
+
+      const { error } = await signIn.create({ identifier });
+
+      if (error) {
+        setClientError(getErrorMessage(error, "We could not send a reset code."));
+        return;
+      }
+
+      const { error: sendError } = await signIn.resetPasswordEmailCode.sendCode();
+
+      if (sendError) {
+        setClientError(getErrorMessage(sendError, "We could not send a reset code."));
+        return;
+      }
+
+      setClientNotice("Check your email for a 6-digit reset code.");
+      setVerificationCode("");
+      setPassword("");
+      setConfirmPassword("");
+      setMode("reset");
+    } catch (error) {
+      setClientError(getErrorMessage(error, "Something went wrong. Please try again."));
+    }
+  }
+
+  async function handleResetPassword(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setClientError(null);
+    setClientNotice(null);
+
+    if (password !== confirmPassword) {
+      setClientError("Passwords do not match.");
+      return;
+    }
+
+    try {
+      const { error: codeError } =
+        await signIn.resetPasswordEmailCode.verifyCode({
+          code: verificationCode,
+        });
+      if (codeError) {
+        setClientError(getErrorMessage(codeError, "We could not verify that code."));
+        return;
+      }
+
+      const { error: passwordError } =
+        await signIn.resetPasswordEmailCode.submitPassword({
+          password,
+          signOutOfOtherSessions: true,
+        });
+      if (passwordError) {
+        setClientError(getErrorMessage(passwordError, "We could not update your password."));
+        return;
+      }
+
+      await signIn.reset();
+      await clerk.signOut({
+        redirectUrl: "/login?password_reset=success",
+      });
+    } catch (error) {
+      setClientError(getErrorMessage(error, "Something went wrong. Please try again."));
     }
   }
 
@@ -359,6 +522,8 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     clientError ??
     (mode === "signin"
       ? signInFieldError ?? signInGlobalError
+      : mode === "forgot" || mode === "reset"
+        ? signInFieldError ?? signInGlobalError
       : signUpFieldErrors.emailAddress?.message ??
         signUpFieldErrors.password?.message ??
         signUpFieldErrors.firstName?.message ??
@@ -600,6 +765,12 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                       </p>
                     )}
 
+                    {clientNotice && (
+                      <p className="rounded-md border border-emerald-400/30 bg-emerald-950/35 px-3 py-2 text-sm text-emerald-100">
+                        {clientNotice}
+                      </p>
+                    )}
+
                     <button
                       className="h-12 w-full rounded-md bg-emerald-500 px-4 text-base font-semibold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
                       type="submit"
@@ -609,13 +780,193 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                     </button>
 
                     <div className="-mt-1">
-                      <a
-                        href="#"
+                      <button
+                        type="button"
                         className="text-sm text-slate-300 underline underline-offset-2 hover:text-slate-100"
+                        onClick={() => switchMode("forgot")}
                       >
                         Forgot password?
-                      </a>
+                      </button>
                     </div>
+                  </form>
+                ) : null}
+
+                {mode === "forgot" ? (
+                  <form
+                    className="space-y-3"
+                    onSubmit={handleForgotPassword}
+                    autoComplete="on"
+                  >
+                    <div className="space-y-2">
+                      <label htmlFor={emailId} className="text-sm text-slate-200">
+                        Email
+                      </label>
+                      <input
+                        id={emailId}
+                        className="h-12 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 text-base text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                        type="email"
+                        name="email"
+                        placeholder="you@company.com"
+                        autoComplete="email"
+                        required
+                        value={email}
+                        onChange={(e) => setEmail(e.target.value)}
+                      />
+                    </div>
+
+                    {displayError && (
+                      <p
+                        role="alert"
+                        className="rounded-md border border-red-400/30 bg-red-950/45 px-3 py-2 text-sm text-red-200"
+                      >
+                        {displayError}
+                      </p>
+                    )}
+
+                    {clientNotice && (
+                      <p className="rounded-md border border-emerald-400/30 bg-emerald-950/35 px-3 py-2 text-sm text-emerald-100">
+                        {clientNotice}
+                      </p>
+                    )}
+
+                    <button
+                      className="h-12 w-full rounded-md bg-emerald-500 px-4 text-base font-semibold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
+                      type="submit"
+                      disabled={isLoading}
+                    >
+                      {isLoading ? "Sending code..." : "Send reset code"}
+                    </button>
+
+                    <button
+                      type="button"
+                      className="w-full text-sm text-slate-300 underline underline-offset-2 hover:text-slate-100"
+                      onClick={() => switchMode("signin")}
+                    >
+                      Back to sign in
+                    </button>
+                  </form>
+                ) : null}
+
+                {mode === "reset" ? (
+                  <form
+                    className="space-y-3"
+                    onSubmit={handleResetPassword}
+                    autoComplete="off"
+                  >
+                    <div className="space-y-2">
+                      <label htmlFor={codeId} className="text-sm text-slate-200">
+                        Reset code
+                      </label>
+                      <input
+                        id={codeId}
+                        className="h-12 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 text-center text-lg font-semibold tracking-[0.25em] text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={6}
+                        placeholder="------"
+                        required
+                        value={verificationCode}
+                        onChange={(e) =>
+                          setVerificationCode(e.target.value.replace(/\D/g, ""))
+                        }
+                      />
+                    </div>
+
+                    <div className="space-y-2">
+                      <label
+                        htmlFor={passwordId}
+                        className="text-sm text-slate-200"
+                      >
+                        New password
+                      </label>
+                      <div className="relative">
+                        <input
+                          id={passwordId}
+                          className="h-12 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 pr-12 text-base text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                          type={showPassword ? "text" : "password"}
+                          name="newPassword"
+                          placeholder="Create a new password"
+                          autoComplete="new-password"
+                          required
+                          value={password}
+                          onChange={(e) => setPassword(e.target.value)}
+                        />
+                        <button
+                          type="button"
+                          aria-label={showPassword ? "Hide password" : "Show password"}
+                          onClick={() => setShowPassword((v) => !v)}
+                          className="absolute right-2 top-1/2 z-20 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md border border-slate-500 bg-slate-800/95 text-slate-100 outline-none transition hover:bg-slate-700 focus-visible:ring-2 focus-visible:ring-emerald-500/30"
+                        >
+                          <EyeIcon className="h-4 w-4" hidden={showPassword} />
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <label
+                        htmlFor={confirmPasswordId}
+                        className="text-sm text-slate-200"
+                      >
+                        Confirm password
+                      </label>
+                      <div className="relative">
+                        <input
+                          id={confirmPasswordId}
+                          className="h-12 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 pr-12 text-base text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                          type={showConfirmPassword ? "text" : "password"}
+                          name="confirmNewPassword"
+                          placeholder="Repeat your new password"
+                          autoComplete="new-password"
+                          required
+                          value={confirmPassword}
+                          onChange={(e) => setConfirmPassword(e.target.value)}
+                        />
+                        <button
+                          type="button"
+                          aria-label={
+                            showConfirmPassword ? "Hide password" : "Show password"
+                          }
+                          onClick={() => setShowConfirmPassword((v) => !v)}
+                          className="absolute right-2 top-1/2 z-20 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-md border border-slate-500 bg-slate-800/95 text-slate-100 outline-none transition hover:bg-slate-700 focus-visible:ring-2 focus-visible:ring-emerald-500/30"
+                        >
+                          <EyeIcon
+                            className="h-4 w-4"
+                            hidden={showConfirmPassword}
+                          />
+                        </button>
+                      </div>
+                    </div>
+
+                    {displayError && (
+                      <p
+                        role="alert"
+                        className="rounded-md border border-red-400/30 bg-red-950/45 px-3 py-2 text-sm text-red-200"
+                      >
+                        {displayError}
+                      </p>
+                    )}
+
+                    {clientNotice && (
+                      <p className="rounded-md border border-emerald-400/30 bg-emerald-950/35 px-3 py-2 text-sm text-emerald-100">
+                        {clientNotice}
+                      </p>
+                    )}
+
+                    <button
+                      className="h-12 w-full rounded-md bg-emerald-500 px-4 text-base font-semibold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
+                      type="submit"
+                      disabled={isLoading}
+                    >
+                      {isLoading ? "Updating password..." : "Update password"}
+                    </button>
+
+                    <button
+                      type="button"
+                      className="w-full text-sm text-slate-300 underline underline-offset-2 hover:text-slate-100"
+                      onClick={() => switchMode("forgot")}
+                    >
+                      Send a new code
+                    </button>
                   </form>
                 ) : null}
 
