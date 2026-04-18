@@ -4,7 +4,9 @@
   "private": true,
   "scripts": {
     "dev": "next dev",
-    "build": "next build",
+    "build": "prisma generate && next build",
+    "deploy:test": "node scripts/guard-deploy.mjs neon-preview-test preview && npx vercel deploy -y",
+    "deploy:prod": "node scripts/guard-deploy.mjs main production && npx vercel deploy --prod -y",
     "start": "next start",
     "lint": "eslint"
   },
