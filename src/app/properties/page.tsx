@@ -29,20 +29,12 @@ export default async function PropertiesPage() {
               {properties.length} propert{properties.length !== 1 ? "ies" : "y"} in your portfolio
             </p>
           </div>
-          <div className="flex gap-2">
-            <Link
-              href="/import"
-              className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600 shadow-sm hover:bg-slate-50"
-            >
-              Import CSV
-            </Link>
-            <Link
-              href="/properties/new"
-              className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
-            >
-              + Add property
-            </Link>
-          </div>
+          <Link
+            href="/properties/new"
+            className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+          >
+            + Add property
+          </Link>
         </header>
 
         {properties.length === 0 ? (
@@ -54,12 +46,6 @@ export default async function PropertiesPage() {
                 className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
               >
                 Add manually
-              </Link>
-              <Link
-                href="/import"
-                className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm text-slate-600 hover:bg-slate-50"
-              >
-                Import CSV
               </Link>
             </div>
           </div>

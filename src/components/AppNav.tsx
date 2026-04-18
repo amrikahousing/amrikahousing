@@ -7,7 +7,6 @@ import { UserButton } from "@clerk/nextjs";
 const NAV = [
   { label: "Dashboard", href: "/dashboard" },
   { label: "Properties", href: "/properties" },
-  { label: "Import", href: "/import" },
 ];
 
 export function AppNav() {

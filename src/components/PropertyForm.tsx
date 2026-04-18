@@ -6,9 +6,9 @@ import { UnitRowBuilder, emptyUnit } from "./UnitRowBuilder";
 import type { UnitDraft } from "./UnitRowBuilder";
 
 const inputClass =
-  "w-full rounded-[8px] border border-white/15 bg-white/6 px-3 py-2.5 text-[13px] text-white placeholder-white/30 focus:border-white/35 focus:outline-none";
+  "w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20";
 
-const labelClass = "block text-[12px] font-semibold text-white/55 mb-1.5";
+const labelClass = "mb-1.5 block text-xs font-semibold text-slate-600";
 
 export function PropertyForm() {
   const router = useRouter();
@@ -59,9 +59,8 @@ export function PropertyForm() {
 
   return (
     <form onSubmit={handleSubmit} className="flex flex-col gap-6">
-      {/* Property details */}
-      <section className="rounded-[12px] border border-white/12 bg-[var(--card)] p-5 backdrop-blur-[16px]">
-        <h2 className="mb-4 text-[16px] font-semibold text-white">Property details</h2>
+      <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
+        <h2 className="mb-4 text-base font-semibold text-slate-900">Property details</h2>
         <div className="grid gap-4 sm:grid-cols-2">
           <div className="sm:col-span-2">
             <label className={labelClass}>Property name *</label>
@@ -105,16 +104,15 @@ export function PropertyForm() {
         </div>
       </section>
 
-      {/* Units */}
-      <section className="rounded-[12px] border border-white/12 bg-[var(--card)] p-5 backdrop-blur-[16px]">
+      <section className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm">
         <div className="mb-4 flex items-center justify-between">
-          <h2 className="text-[16px] font-semibold text-white">Units</h2>
-          <label className="flex cursor-pointer items-center gap-2 text-[13px] text-white/60">
+          <h2 className="text-base font-semibold text-slate-900">Units</h2>
+          <label className="flex cursor-pointer items-center gap-2 text-sm text-slate-600">
             <div
               role="checkbox"
               aria-checked={multiUnit}
               onClick={() => setMultiUnit((v) => !v)}
-              className={`relative h-5 w-9 rounded-full transition-colors ${multiUnit ? "bg-[var(--green)]" : "bg-white/20"}`}
+              className={`relative h-5 w-9 rounded-full transition-colors ${multiUnit ? "bg-emerald-500" : "bg-slate-300"}`}
             >
               <div className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${multiUnit ? "translate-x-4" : "translate-x-0.5"}`} />
             </div>
@@ -124,14 +122,14 @@ export function PropertyForm() {
         {multiUnit ? (
           <UnitRowBuilder units={units} onChange={setUnits} />
         ) : (
-          <p className="text-[13px] text-white/45">
+          <p className="text-sm text-slate-500">
             A single unit will be created automatically. Toggle &quot;Multiple units&quot; to configure individual unit details.
           </p>
         )}
       </section>
 
       {error && (
-        <div className="rounded-[8px] border border-red-500/30 bg-red-500/10 px-4 py-3 text-[13px] text-red-300">
+        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
           {error}
         </div>
       )}
@@ -140,14 +138,14 @@ export function PropertyForm() {
         <button
           type="button"
           onClick={() => router.back()}
-          className="rounded-[8px] border border-white/15 bg-white/8 px-4 py-2.5 text-[13px] text-white/70 hover:bg-white/12"
+          className="rounded-lg border border-slate-200 bg-white px-4 py-2.5 text-sm text-slate-700 hover:bg-slate-50"
         >
           Cancel
         </button>
         <button
           type="submit"
           disabled={isLoading}
-          className="rounded-[8px] bg-[linear-gradient(180deg,rgba(16,185,129,1),rgba(10,145,100,1))] px-5 py-2.5 text-[13px] font-semibold text-white hover:opacity-90 disabled:opacity-50"
+          className="rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
         >
           {isLoading ? "Saving…" : "Add property"}
         </button>
