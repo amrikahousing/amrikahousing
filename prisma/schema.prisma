@@ -1,0 +1,290 @@
+generator client {
+  provider        = "prisma-client"
+  output          = "../src/generated/prisma"
+  previewFeatures = ["partialIndexes"]
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+model lease_tenants {
+  id         String  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  lease_id   String  @unique(map: "idx_lease_tenants_one_primary", where: raw("(is_primary = true)")) @db.Uuid
+  tenant_id  String  @db.Uuid
+  is_primary Boolean @default(false)
+  leases     leases  @relation(fields: [lease_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants    tenants @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([lease_id, tenant_id])
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model leases {
+  id               String         @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  unit_id          String         @unique(map: "idx_leases_one_active_per_unit", where: raw("(status = 'active'::text)")) @db.Uuid
+  start_date       DateTime       @db.Date
+  end_date         DateTime?      @db.Date
+  rent_amount      Decimal        @db.Decimal(10, 2)
+  security_deposit Decimal?       @db.Decimal(10, 2)
+  status           String         @default("active")
+  created_at       DateTime       @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime       @default(now()) @db.Timestamptz(6)
+  deleted_at       DateTime?      @db.Timestamptz(6)
+  lease_tenants    lease_tenants?
+  units            units          @relation(fields: [unit_id], references: [id], onUpdate: NoAction)
+  payments         payments[]
+
+  @@index([deleted_at], map: "idx_leases_deleted_at", where: raw("(deleted_at IS NULL)"))
+  @@index([status], map: "idx_leases_status")
+  @@index([unit_id], map: "idx_leases_unit")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model maintenance_requests {
+  id                  String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id     String        @db.Uuid
+  unit_id             String        @db.Uuid
+  submitted_by_tenant String?       @db.Uuid
+  assigned_to_user    String?       @db.Uuid
+  assigned_to_vendor  String?       @db.Uuid
+  title               String
+  description         String?
+  priority            String        @default("normal")
+  status              String        @default("open")
+  scheduled_date      DateTime?     @db.Date
+  resolved_at         DateTime?     @db.Timestamptz(6)
+  created_at          DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime      @default(now()) @db.Timestamptz(6)
+  users               users?        @relation(fields: [assigned_to_user], references: [id], onUpdate: NoAction)
+  vendors             vendors?      @relation(fields: [assigned_to_vendor], references: [id], onUpdate: NoAction)
+  organizations       organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants             tenants?      @relation(fields: [submitted_by_tenant], references: [id], onUpdate: NoAction)
+  units               units         @relation(fields: [unit_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([priority], map: "idx_maintenance_requests_priority")
+  @@index([status], map: "idx_maintenance_requests_status")
+  @@index([unit_id], map: "idx_maintenance_requests_unit")
+}
+
+model organizations {
+  id                   String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  clerk_org_id         String                 @unique
+  name                 String
+  slug                 String?                @unique
+  email                String?
+  phone                String?
+  address              String?
+  city                 String?
+  state                String?
+  zip                  String?
+  created_at           DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime               @default(now()) @db.Timestamptz(6)
+  maintenance_requests maintenance_requests[]
+  owners               owners[]
+  properties           properties[]
+  rental_applications  rental_applications[]
+  tenants              tenants[]
+  users                users[]
+  vendors              vendors[]
+}
+
+model owners {
+  id                  String                @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id     String                @db.Uuid
+  first_name          String
+  last_name           String
+  email               String?
+  phone               String?
+  address             String?
+  created_at          DateTime              @default(now()) @db.Timestamptz(6)
+  updated_at          DateTime              @default(now()) @db.Timestamptz(6)
+  organizations       organizations         @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  property_ownerships property_ownerships[]
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model payments {
+  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  lease_id       String    @db.Uuid
+  tenant_id      String?   @db.Uuid
+  amount         Decimal   @db.Decimal(10, 2)
+  currency       String    @default("USD") @db.Char(3)
+  type           String    @default("rent")
+  status         String    @default("pending")
+  due_date       DateTime? @db.Date
+  paid_at        DateTime? @db.Timestamptz(6)
+  payment_method String?
+  reference      String?
+  notes          String?
+  created_at     DateTime  @default(now()) @db.Timestamptz(6)
+  updated_at     DateTime  @default(now()) @db.Timestamptz(6)
+  leases         leases    @relation(fields: [lease_id], references: [id], onUpdate: NoAction)
+  tenants        tenants?  @relation(fields: [tenant_id], references: [id], onUpdate: NoAction)
+
+  @@index([due_date], map: "idx_payments_due_date")
+  @@index([lease_id], map: "idx_payments_lease")
+  @@index([status], map: "idx_payments_status")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model properties {
+  id                   String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id      String                 @db.Uuid
+  name                 String
+  type                 String                 @default("rental")
+  address              String
+  city                 String
+  state                String
+  zip                  String
+  country              String                 @default("US")
+  description          String?
+  is_active            Boolean                @default(true)
+  created_at           DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime               @default(now()) @db.Timestamptz(6)
+  deleted_at           DateTime?              @db.Timestamptz(6)
+  organizations        organizations          @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  property_assignments property_assignments[]
+  property_ownerships  property_ownerships[]
+  units                units[]
+
+  @@index([deleted_at], map: "idx_properties_deleted_at", where: raw("(deleted_at IS NULL)"))
+  @@index([organization_id], map: "idx_properties_org")
+}
+
+model property_assignments {
+  id          String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id     String     @db.Uuid
+  property_id String     @db.Uuid
+  assigned_at DateTime   @default(now()) @db.Timestamptz(6)
+  properties  properties @relation(fields: [property_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users       users      @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([user_id, property_id])
+  @@index([property_id], map: "idx_property_assignments_property")
+  @@index([user_id], map: "idx_property_assignments_user")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model property_ownerships {
+  id                   String     @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  owner_id             String     @db.Uuid
+  property_id          String     @db.Uuid
+  ownership_percentage Decimal    @default(100.00) @db.Decimal(5, 2)
+  start_date           DateTime?  @db.Date
+  end_date             DateTime?  @db.Date
+  owners               owners     @relation(fields: [owner_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  properties           properties @relation(fields: [property_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([owner_id, property_id])
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model rental_applications {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id String        @db.Uuid
+  unit_id         String        @db.Uuid
+  first_name      String
+  last_name       String
+  email           String
+  phone           String?
+  desired_move_in DateTime?     @db.Date
+  monthly_income  Decimal?      @db.Decimal(10, 2)
+  status          String        @default("pending")
+  notes           String?
+  reviewed_by     String?       @db.Uuid
+  reviewed_at     DateTime?     @db.Timestamptz(6)
+  created_at      DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime      @default(now()) @db.Timestamptz(6)
+  organizations   organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users           users?        @relation(fields: [reviewed_by], references: [id], onUpdate: NoAction)
+  units           units         @relation(fields: [unit_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([status], map: "idx_rental_applications_status")
+  @@index([unit_id], map: "idx_rental_applications_unit")
+}
+
+model tenants {
+  id                   String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  clerk_user_id        String?                @unique
+  organization_id      String                 @db.Uuid
+  first_name           String
+  last_name            String
+  email                String
+  phone                String?
+  created_at           DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime               @default(now()) @db.Timestamptz(6)
+  deleted_at           DateTime?              @db.Timestamptz(6)
+  lease_tenants        lease_tenants[]
+  maintenance_requests maintenance_requests[]
+  payments             payments[]
+  organizations        organizations          @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([organization_id, email], map: "tenants_email_org_unique")
+  @@index([clerk_user_id], map: "idx_tenants_clerk")
+  @@index([deleted_at], map: "idx_tenants_deleted_at", where: raw("(deleted_at IS NULL)"))
+  @@index([organization_id], map: "idx_tenants_org")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model units {
+  id                   String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  property_id          String                 @db.Uuid
+  unit_number          String
+  bedrooms             Int                    @default(0)
+  bathrooms            Decimal                @default(0) @db.Decimal(3, 1)
+  square_feet          Int?
+  rent_amount          Decimal?               @db.Decimal(10, 2)
+  status               String                 @default("vacant")
+  created_at           DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime               @default(now()) @db.Timestamptz(6)
+  deleted_at           DateTime?              @db.Timestamptz(6)
+  leases               leases?
+  maintenance_requests maintenance_requests[]
+  rental_applications  rental_applications[]
+  properties           properties             @relation(fields: [property_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([property_id, unit_number])
+  @@index([deleted_at], map: "idx_units_deleted_at", where: raw("(deleted_at IS NULL)"))
+  @@index([property_id], map: "idx_units_property")
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model users {
+  id                   String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  clerk_user_id        String                 @unique
+  organization_id      String?                @db.Uuid
+  email                String                 @unique(map: "users_email_unique")
+  first_name           String?
+  last_name            String?
+  role                 String                 @default("property_manager")
+  is_active            Boolean                @default(true)
+  created_at           DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime               @default(now()) @db.Timestamptz(6)
+  deleted_at           DateTime?              @db.Timestamptz(6)
+  maintenance_requests maintenance_requests[]
+  property_assignments property_assignments[]
+  rental_applications  rental_applications[]
+  organizations        organizations?         @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([clerk_user_id], map: "idx_users_clerk")
+  @@index([deleted_at], map: "idx_users_deleted_at", where: raw("(deleted_at IS NULL)"))
+  @@index([organization_id], map: "idx_users_org")
+}
+
+model vendors {
+  id                   String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id      String                 @db.Uuid
+  name                 String
+  contact_name         String?
+  email                String?
+  phone                String?
+  specialty            String?
+  is_active            Boolean                @default(true)
+  created_at           DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime               @default(now()) @db.Timestamptz(6)
+  maintenance_requests maintenance_requests[]
+  organizations        organizations          @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([organization_id], map: "idx_vendors_org")
+}

@@ -1,10 +1,26 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
+import { NextResponse } from "next/server";
 
-const isPublicRoute = createRouteMatcher(["/", "/login(.*)", "/signup(.*)"]);
+const isPublicRoute = createRouteMatcher(["/", "/login(.*)", "/signup(.*)", "/onboard(.*)"]);
+
+// Routes that require an active org (not just authentication)
+const isOrgRoute = createRouteMatcher([
+  "/dashboard(.*)",
+  "/properties(.*)",
+  "/import(.*)",
+  "/api/import(.*)",
+  "/api/properties(.*)",
+]);
 
 export default clerkMiddleware(async (auth, request) => {
-  if (!isPublicRoute(request)) {
-    await auth.protect();
+  if (isPublicRoute(request)) return;
+
+  const { userId, orgId } = await auth.protect();
+
+  // Authenticated but no active org — redirect to onboard
+  if (isOrgRoute(request) && !orgId) {
+    const onboard = new URL("/onboard", request.url);
+    return NextResponse.redirect(onboard);
   }
 });
 
