@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 /Users/rayansh/Documents/amrikahousing/.claude/hooks/check-branch.py",
+            "statusMessage": "Checking branch name..."
+          }
+        ]
+      }
+    ]
+  }
+}

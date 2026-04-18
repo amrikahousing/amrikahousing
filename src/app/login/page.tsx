@@ -121,7 +121,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     if (url.searchParams.get("__clerk_ticket")) return "signup";
     return url.searchParams.get("mode") === "signup" ? "signup" : initialMode;
   });
-  const [inviteTicket, setInviteTicket] = useState<string | null>(() => {
+  const [inviteTicket] = useState<string | null>(() => {
     if (typeof window === "undefined") return null;
     return new URL(window.location.href).searchParams.get("__clerk_ticket");
   });
@@ -162,9 +162,6 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     if (typeof window === "undefined") return;
 
     const url = new URL(window.location.href);
-    const ticket = url.searchParams.get("__clerk_ticket");
-    if (ticket) setInviteTicket(ticket);
-
     url.searchParams.delete("mode");
     url.searchParams.delete("__clerk_ticket");
     window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
@@ -238,19 +235,6 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     }
 
     switchMode("signin");
-  }
-
-  async function handlePasskeySignIn() {
-    setClientError(null);
-    try {
-      const result = await signIn.authenticateWithPasskey({ flow: "discoverable" });
-      if (result.status === "complete") {
-        await clerk.setActive({ session: result.createdSessionId });
-        router.push("/dashboard");
-      }
-    } catch (error) {
-      setClientError(getErrorMessage(error, "Passkey sign-in failed. Try again or use your password."));
-    }
   }
 
   async function handleSignIn(e: React.FormEvent<HTMLFormElement>) {
@@ -622,14 +606,6 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                       disabled={isLoading}
                     >
                       {isLoading ? "Signing in..." : "Sign in"}
-                    </button>
-
-                    <button
-                      className="h-12 w-full rounded-md border-2 border-slate-300 bg-white px-4 text-base font-medium text-slate-900 transition hover:bg-slate-100"
-                      type="button"
-                      onClick={handlePasskeySignIn}
-                    >
-                      Sign in with Passkey
                     </button>
 
                     <div className="-mt-1">
