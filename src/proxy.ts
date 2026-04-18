@@ -1,9 +1,17 @@
 import { clerkMiddleware, createRouteMatcher } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 
-const isPublicRoute = createRouteMatcher(["/", "/login(.*)", "/signup(.*)", "/onboard(.*)"]);
+const isPublicRoute = createRouteMatcher([
+  "/",
+  "/login(.*)",
+  "/signup(.*)",
+  "/internal(.*)",
+  "/onboard(.*)",
+]);
 
 // Routes that require an active org (not just authentication)
+const isSignupRoute = createRouteMatcher(["/signup(.*)"]);
+
 const isOrgRoute = createRouteMatcher([
   "/dashboard(.*)",
   "/properties(.*)",
@@ -13,6 +21,10 @@ const isOrgRoute = createRouteMatcher([
 ]);
 
 export default clerkMiddleware(async (auth, request) => {
+  if (isSignupRoute(request) && !request.nextUrl.searchParams.has("__clerk_ticket")) {
+    return NextResponse.redirect(new URL("/login", request.url));
+  }
+
   if (isPublicRoute(request)) return;
 
   const { userId, orgId } = await auth.protect();

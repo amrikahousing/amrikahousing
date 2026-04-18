@@ -118,7 +118,12 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     if (typeof window === "undefined") return initialMode;
 
     const url = new URL(window.location.href);
+    if (url.searchParams.get("__clerk_ticket")) return "signup";
     return url.searchParams.get("mode") === "signup" ? "signup" : initialMode;
+  });
+  const [inviteTicket, setInviteTicket] = useState<string | null>(() => {
+    if (typeof window === "undefined") return null;
+    return new URL(window.location.href).searchParams.get("__clerk_ticket");
   });
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
@@ -157,9 +162,11 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     if (typeof window === "undefined") return;
 
     const url = new URL(window.location.href);
-    if (url.searchParams.get("mode") !== "signup") return;
+    const ticket = url.searchParams.get("__clerk_ticket");
+    if (ticket) setInviteTicket(ticket);
 
     url.searchParams.delete("mode");
+    url.searchParams.delete("__clerk_ticket");
     window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
   }, []);
 
@@ -199,6 +206,8 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
   }
 
   async function createOrganizationIfNeeded() {
+    if (inviteTicket) return;
+
     const name = organizationName.trim();
     if (role !== "property_manager" || !name) return;
 
@@ -224,7 +233,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     if (sessionId) {
       await clerk.setActive({ session: sessionId });
       await createOrganizationIfNeeded();
-      router.push("/dashboard");
+      router.push(role === "property_manager" ? "/onboarding" : "/dashboard");
       return;
     }
 
@@ -256,15 +265,9 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
       return;
     }
 
-    if (role === "property_manager" && !organizationName.trim()) {
-      setClientError("Organization name is required for property managers.");
-      return;
-    }
-
     const nameParts = firstName.trim().split(/\s+/);
     const first = nameParts[0] ?? "";
     const last = nameParts.slice(1).join(" ") || lastName.trim() || undefined;
-    const organization = organizationName.trim() || undefined;
 
     try {
       if (signUp.id && signUp.status !== "complete") {
@@ -275,16 +278,26 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
         }
       }
 
-      const { error } = await signUp.create({
-        emailAddress: email,
-        password,
-        unsafeMetadata: {
-          firstName: first,
-          lastName: last,
-          role,
-          organizationName: organization,
-        },
-      });
+      const createParams = inviteTicket
+        ? {
+            strategy: "ticket" as const,
+            ticket: inviteTicket,
+            password,
+            firstName: first || undefined,
+            lastName: last,
+            unsafeMetadata: { role: "property_manager" },
+          }
+        : {
+            emailAddress: email,
+            password,
+            unsafeMetadata: {
+              firstName: first,
+              lastName: last,
+              role: "renter",
+            },
+          };
+
+      const { error } = await signUp.create(createParams);
 
       if (error) {
         setClientError(getErrorMessage(error, "We could not create your account."));
@@ -474,10 +487,10 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                   ) : null}
                 </div>
 
-                {mode !== "verify" ? (
+                {mode === "signin" ? (
                   <>
                     <p className="text-sm text-slate-300">
-                      {mode === "signup" ? "Signing up" : "Signing in"} as{" "}
+                      Signing in as{" "}
                       <span className="font-medium text-slate-100">
                         {roleLabel}
                       </span>
@@ -516,6 +529,14 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                       </div>
                     </fieldset>
                   </>
+                ) : null}
+
+                {inviteTicket && mode === "signup" ? (
+                  <p className="text-sm text-slate-400">
+                    You&apos;ve been invited as a{" "}
+                    <span className="font-medium text-slate-200">Property Manager</span>.
+                    Set a password to activate your account.
+                  </p>
                 ) : null}
               </div>
 
@@ -597,20 +618,13 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                       Sign in with Passkey
                     </button>
 
-                    <div className="-mt-1 grid grid-cols-2 gap-2">
+                    <div className="-mt-1">
                       <a
                         href="#"
-                        className="text-left text-sm text-slate-300 underline underline-offset-2 hover:text-slate-100"
+                        className="text-sm text-slate-300 underline underline-offset-2 hover:text-slate-100"
                       >
                         Forgot password?
                       </a>
-                      <button
-                        type="button"
-                        className="text-right text-sm text-slate-300 underline underline-offset-2 hover:text-slate-100"
-                        onClick={() => switchMode("signup")}
-                      >
-                        Create an account
-                      </button>
                     </div>
                   </form>
                 ) : null}
@@ -661,7 +675,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                       </div>
                     </div>
 
-                    {role === "property_manager" ? (
+                    {role === "property_manager" && !inviteTicket ? (
                       <div className="space-y-1">
                         <label
                           htmlFor={organizationId}
@@ -683,22 +697,24 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                       </div>
                     ) : null}
 
-                    <div className="space-y-1">
-                      <label htmlFor={emailId} className="text-sm text-slate-200">
-                        Email
-                      </label>
-                      <input
-                        id={emailId}
-                        className="h-9 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 text-sm text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
-                        type="email"
-                        name="email"
-                        placeholder="you@company.com"
-                        autoComplete="email"
-                        required
-                        value={email}
-                        onChange={(e) => setEmail(e.target.value)}
-                      />
-                    </div>
+                    {!inviteTicket ? (
+                      <div className="space-y-1">
+                        <label htmlFor={emailId} className="text-sm text-slate-200">
+                          Email
+                        </label>
+                        <input
+                          id={emailId}
+                          className="h-9 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 text-sm text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                          type="email"
+                          name="email"
+                          placeholder="you@company.com"
+                          autoComplete="email"
+                          required
+                          value={email}
+                          onChange={(e) => setEmail(e.target.value)}
+                        />
+                      </div>
+                    ) : null}
 
                     <div className="space-y-1">
                       <label
@@ -849,9 +865,9 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                     <button
                       type="button"
                       className="w-full text-sm text-slate-300 underline underline-offset-2 hover:text-slate-100"
-                      onClick={() => switchMode("signup")}
+                      onClick={() => switchMode("signin")}
                     >
-                      Back to create account
+                      Back to sign in
                     </button>
                   </form>
                 ) : null}
