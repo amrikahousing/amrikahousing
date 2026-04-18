@@ -37,7 +37,7 @@ Call log:
       - navigation [ref=e5]:
         - navigation [ref=e6]:
           - link "Sign Up" [ref=e7] [cursor=pointer]:
-            - /url: /signup?next=%2Fsso-api%3Furl%3Dhttps%253A%252F%252Fneon-preview-test-amrikahousing.vercel.app%252Flogin%26nonce%3De67f6480d5ce13f22c2bec35b169d067820ef3ada9f0c273a2e51084df9c288c
+            - /url: /signup?next=%2Fsso-api%3Furl%3Dhttps%253A%252F%252Fneon-preview-test-amrikahousing.vercel.app%252Flogin%26nonce%3D084ce7586bfffe7c997aaaa80aeb9c98db8dea7b745c0b5bd4439bff7291e05f
             - paragraph [ref=e9]: Sign Up
     - main [ref=e10]:
       - generic [ref=e12]:
@@ -68,7 +68,7 @@ Call log:
         - paragraph [ref=e62]:
           - text: Don't have an account?
           - link "Sign Up" [ref=e63] [cursor=pointer]:
-            - /url: /signup?next=%2Fsso-api%3Furl%3Dhttps%253A%252F%252Fneon-preview-test-amrikahousing.vercel.app%252Flogin%26nonce%3De67f6480d5ce13f22c2bec35b169d067820ef3ada9f0c273a2e51084df9c288c
+            - /url: /signup?next=%2Fsso-api%3Furl%3Dhttps%253A%252F%252Fneon-preview-test-amrikahousing.vercel.app%252Flogin%26nonce%3D084ce7586bfffe7c997aaaa80aeb9c98db8dea7b745c0b5bd4439bff7291e05f
       - generic [ref=e66]:
         - link "Terms" [ref=e67] [cursor=pointer]:
           - /url: /legal/terms

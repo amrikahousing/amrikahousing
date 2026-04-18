@@ -317,8 +317,12 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
         return;
       }
 
+      // Debug: log status after create
+      console.log("[login] after create — status:", signIn.status, "createdSessionId:", signIn.createdSessionId);
+
       const { error: finalizeError } = await signIn.finalize();
       if (finalizeError) {
+        console.log("[login] finalize error:", finalizeError);
         setClientError(getErrorMessage(finalizeError, "We could not finish signing you in."));
         return;
       }

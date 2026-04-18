@@ -28,53 +28,53 @@ Call log:
 - generic [active] [ref=e1]:
   - link "Skip to content":
     - /url: "#geist-skip-nav"
-  - generic [ref=e3]:
-    - banner [ref=e4]:
+  - alert [ref=e2]
+  - generic [ref=e4]:
+    - banner [ref=e5]:
       - link "Vercel logo":
         - /url: /home
         - button "Vercel Logo":
           - img "Vercel Logo"
-      - navigation [ref=e5]:
-        - navigation [ref=e6]:
-          - link "Sign Up" [ref=e7] [cursor=pointer]:
-            - /url: /signup?next=%2Fsso-api%3Furl%3Dhttps%253A%252F%252Fneon-preview-test-amrikahousing.vercel.app%252Flogin%26nonce%3Db93965a8fc0f92519ff6d5ea63ddced2cd0fd1c6aeb50044e08c7c62e150362f
-            - paragraph [ref=e9]: Sign Up
-    - main [ref=e10]:
-      - generic [ref=e12]:
-        - heading "Log in to Vercel" [level=1] [ref=e15]
-        - generic [ref=e16]:
-          - generic [ref=e17]:
-            - textbox "Email Address" [ref=e19]
-            - button "Continue with Email" [ref=e21] [cursor=pointer]:
-              - generic [ref=e22]: Continue with Email
-          - generic [ref=e24]:
-            - button "Continue with Google" [ref=e25] [cursor=pointer]:
-              - img [ref=e28]
-              - generic [ref=e34]: Continue with Google
-            - button "Continue with GitHub" [ref=e35] [cursor=pointer]:
-              - img [ref=e37]
-              - generic [ref=e41]: Continue with GitHub
-            - button "Continue with Apple" [ref=e42] [cursor=pointer]:
-              - img [ref=e44]
-              - generic [ref=e47]: Continue with Apple
-            - button "Continue with SAML SSO" [ref=e49] [cursor=pointer]:
-              - img [ref=e51]
-              - generic [ref=e53]: Continue with SAML SSO
-            - button "Continue with Passkey" [ref=e54] [cursor=pointer]:
-              - img [ref=e56]
-              - generic [ref=e58]: Continue with Passkey
-            - button "Show other options" [ref=e59] [cursor=pointer]:
-              - generic [ref=e60]: Show other options
-        - paragraph [ref=e62]:
+      - navigation [ref=e6]:
+        - navigation [ref=e7]:
+          - link "Sign Up" [ref=e8] [cursor=pointer]:
+            - /url: /signup?next=%2Fsso-api%3Furl%3Dhttps%253A%252F%252Fneon-preview-test-amrikahousing.vercel.app%252Flogin%26nonce%3De5a2e20f309d5165d1011a0153c682d437948bf6c929b437d69b25c6f090ce8e
+            - paragraph [ref=e10]: Sign Up
+    - main [ref=e11]:
+      - generic [ref=e13]:
+        - heading "Log in to Vercel" [level=1] [ref=e16]
+        - generic [ref=e17]:
+          - generic [ref=e18]:
+            - textbox "Email Address" [ref=e20]
+            - button "Continue with Email" [ref=e22] [cursor=pointer]:
+              - generic [ref=e23]: Continue with Email
+          - generic [ref=e25]:
+            - button "Continue with Google" [ref=e26] [cursor=pointer]:
+              - img [ref=e29]
+              - generic [ref=e35]: Continue with Google
+            - button "Continue with GitHub" [ref=e36] [cursor=pointer]:
+              - img [ref=e38]
+              - generic [ref=e42]: Continue with GitHub
+            - button "Continue with Apple" [ref=e43] [cursor=pointer]:
+              - img [ref=e45]
+              - generic [ref=e48]: Continue with Apple
+            - button "Continue with SAML SSO" [ref=e50] [cursor=pointer]:
+              - img [ref=e52]
+              - generic [ref=e54]: Continue with SAML SSO
+            - button "Continue with Passkey" [ref=e55] [cursor=pointer]:
+              - img [ref=e57]
+              - generic [ref=e59]: Continue with Passkey
+            - button "Show other options" [ref=e60] [cursor=pointer]:
+              - generic [ref=e61]: Show other options
+        - paragraph [ref=e63]:
           - text: Don't have an account?
-          - link "Sign Up" [ref=e63] [cursor=pointer]:
-            - /url: /signup?next=%2Fsso-api%3Furl%3Dhttps%253A%252F%252Fneon-preview-test-amrikahousing.vercel.app%252Flogin%26nonce%3Db93965a8fc0f92519ff6d5ea63ddced2cd0fd1c6aeb50044e08c7c62e150362f
-      - generic [ref=e66]:
-        - link "Terms" [ref=e67] [cursor=pointer]:
+          - link "Sign Up" [ref=e64] [cursor=pointer]:
+            - /url: /signup?next=%2Fsso-api%3Furl%3Dhttps%253A%252F%252Fneon-preview-test-amrikahousing.vercel.app%252Flogin%26nonce%3De5a2e20f309d5165d1011a0153c682d437948bf6c929b437d69b25c6f090ce8e
+      - generic [ref=e67]:
+        - link "Terms" [ref=e68] [cursor=pointer]:
           - /url: /legal/terms
-        - link "Privacy Policy" [ref=e68] [cursor=pointer]:
+        - link "Privacy Policy" [ref=e69] [cursor=pointer]:
           - /url: /legal/privacy-policy
-  - alert [ref=e69]
   - generic:
     - generic:
       - generic:
