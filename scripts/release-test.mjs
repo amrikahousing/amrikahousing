@@ -5,18 +5,19 @@ import {
   assertCanonicalRoot,
   assertCleanTree,
   commitLocalChanges,
+  EXPECTED_PROJECT_NAME,
+  git,
   NEON_PREVIEW_HOST_PREFIX,
   TEST_DEPLOYMENT_ALIAS,
-  TEST_GIT_BRANCH_ALIAS,
   assertDatabaseUrlHost,
   ensureBranchPushed,
   ensureVercelProject,
   hostnameFromUrl,
-  inspectVercelDeployment,
   pullVercelEnv,
   run,
   runAndCapture,
   syncPrismaSchema,
+  waitForVercelGitDeployment,
 } from "./deploy-workflow-utils.mjs";
 
 const dryRun = process.argv.includes("--dry-run");
@@ -53,14 +54,19 @@ try {
 }
 
 const pushed = ensureBranchPushed("neon-preview-test", root);
+const headSha = git(["rev-parse", "HEAD"], { cwd: root });
 if (pushed) {
   console.log("Git push triggered the Vercel preview deployment.");
 } else {
   console.log("No new Git push was needed; using the latest Vercel branch deployment.");
 }
 
-console.log("Waiting for the Vercel Git deployment for neon-preview-test.");
-const deployment = inspectVercelDeployment(TEST_GIT_BRANCH_ALIAS, root);
+console.log(`Waiting for the Vercel Git deployment for ${headSha.slice(0, 7)}.`);
+const deployment = waitForVercelGitDeployment({
+  cwd: root,
+  projectName: EXPECTED_PROJECT_NAME,
+  commitSha: headSha,
+});
 const deploymentUrl = `https://${deployment.url}`;
 
 console.log(`Assigning stable test alias https://${TEST_DEPLOYMENT_ALIAS}.`);

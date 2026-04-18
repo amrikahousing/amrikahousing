@@ -89,6 +89,10 @@ export function deploymentUrlFromOutput(output) {
   return deploymentUrls.at(-1) ?? urls.at(-1) ?? null;
 }
 
+function sleep(ms) {
+  Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
 export function hostnameFromUrl(url) {
   try {
     return new URL(url).hostname;
@@ -295,6 +299,28 @@ export function inspectVercelDeployment(aliasOrUrl, cwd = process.cwd()) {
   } catch {
     fail(`Vercel inspect output for ${aliasOrUrl} was not valid JSON.`);
   }
+}
+
+export function waitForVercelGitDeployment({ cwd = process.cwd(), projectName, commitSha, timeoutMs = 10 * 60 * 1000 }) {
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const output = capture(
+      "npx",
+      ["vercel", "list", projectName, "--meta", `githubCommitSha=${commitSha}`],
+      { cwd }
+    );
+    const deploymentUrl = deploymentUrlFromOutput(output);
+
+    if (deploymentUrl) {
+      return inspectVercelDeployment(hostnameFromUrl(deploymentUrl), cwd);
+    }
+
+    console.log(`Waiting for Vercel deployment for commit ${commitSha.slice(0, 7)}...`);
+    sleep(5000);
+  }
+
+  fail(`timed out waiting for Vercel deployment for commit ${commitSha}.`);
 }
 
 export function findWorktreeForBranch(branch, cwd = process.cwd()) {
