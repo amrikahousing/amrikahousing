@@ -273,9 +273,10 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     const sessionId = signUp.createdSessionId;
 
     if (sessionId) {
-      await clerk.setActive({ session: sessionId });
+      await clerk.setActive({ session: sessionId, navigate: async () => {} });
       await createOrganizationIfNeeded();
-      router.push(inviteTicket ? "/onboarding" : role === "property_manager" ? "/onboarding" : "/dashboard");
+      const dest = inviteTicket || role === "property_manager" ? "/onboarding" : "/dashboard";
+      window.location.href = dest;
       return;
     }
 
