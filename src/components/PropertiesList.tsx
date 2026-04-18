@@ -43,7 +43,6 @@ export function PropertiesList({ properties }: { properties: PropertyListItem[] 
   const [search, setSearch] = useState("");
   const [propertyName, setPropertyName] = useState("all");
   const [status, setStatus] = useState("all");
-  const [expandedApartmentId, setExpandedApartmentId] = useState<string | null>(null);
 
   const propertyOptions = useMemo(
     () =>
@@ -84,6 +83,24 @@ export function PropertiesList({ properties }: { properties: PropertyListItem[] 
   function formatCurrency(value: number | null) {
     if (value === null) return "Rent not set";
     return `$${value.toLocaleString()}/mo`;
+  }
+
+  function EditIcon({ className = "" }: { className?: string }) {
+    return (
+      <svg
+        aria-hidden="true"
+        className={className}
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        strokeWidth="1.8"
+      >
+        <path d="m14.5 5.5 4 4" />
+        <path d="M4 20h4l10.5-10.5a2.8 2.8 0 0 0-4-4L4 16v4Z" />
+      </svg>
+    );
   }
 
   return (
@@ -150,9 +167,18 @@ export function PropertiesList({ properties }: { properties: PropertyListItem[] 
                   {property.city}, {property.state} {property.zip}
                 </p>
               </div>
-              <span className="shrink-0 rounded border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs capitalize text-emerald-700">
-                {property.status}
-              </span>
+              <div className="flex shrink-0 items-center gap-2">
+                <span className="rounded border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs capitalize text-emerald-700">
+                  {property.status}
+                </span>
+                <Link
+                  href={`/properties/${property.propertyId}`}
+                  aria-label={`Edit apartment ${property.unitNumber} at ${property.propertyName}`}
+                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-900"
+                >
+                  <EditIcon className="h-4 w-4" />
+                </Link>
+              </div>
             </div>
 
             {property.description ? (
@@ -172,50 +198,6 @@ export function PropertiesList({ properties }: { properties: PropertyListItem[] 
               <span className="font-medium text-slate-700">
                 {formatCurrency(property.rentAmount)}
               </span>
-            </div>
-
-            {expandedApartmentId === property.id ? (
-              <div className="mt-4 border-t border-slate-200 pt-4 text-sm text-slate-600">
-                <dl className="grid grid-cols-2 gap-x-4 gap-y-3">
-                  <div>
-                    <dt className="text-xs font-semibold uppercase text-slate-400">Property</dt>
-                    <dd className="mt-0.5 text-slate-900">{property.propertyName}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-xs font-semibold uppercase text-slate-400">Apartment</dt>
-                    <dd className="mt-0.5 text-slate-900">{property.unitNumber}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-xs font-semibold uppercase text-slate-400">Status</dt>
-                    <dd className="mt-0.5 capitalize text-slate-900">{property.status}</dd>
-                  </div>
-                  <div>
-                    <dt className="text-xs font-semibold uppercase text-slate-400">Type</dt>
-                    <dd className="mt-0.5 capitalize text-slate-900">{property.type}</dd>
-                  </div>
-                </dl>
-              </div>
-            ) : null}
-
-            <div className="mt-4 flex flex-wrap gap-2">
-              <button
-                type="button"
-                className="rounded-lg bg-slate-900 px-3 py-2 text-sm font-semibold text-white hover:bg-slate-800"
-                aria-expanded={expandedApartmentId === property.id}
-                onClick={() =>
-                  setExpandedApartmentId((current) =>
-                    current === property.id ? null : property.id,
-                  )
-                }
-              >
-                {expandedApartmentId === property.id ? "Hide details" : "View apartment"}
-              </button>
-              <Link
-                href={`/properties/${property.propertyId}`}
-                className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
-              >
-                Manage property
-              </Link>
             </div>
           </article>
         ))}

@@ -5,6 +5,23 @@ import { AppShell } from "@/components/AppShell";
 import { PropertiesList } from "@/components/PropertiesList";
 import { prisma } from "@/lib/db";
 
+function PlusIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.8"
+    >
+      <path d="M12 5v14M5 12h14" />
+    </svg>
+  );
+}
+
 export default async function PropertiesPage() {
   const { userId, orgId } = await auth();
   if (!userId) redirect("/login");
@@ -58,9 +75,10 @@ export default async function PropertiesPage() {
           </div>
           <Link
             href="/properties/new"
-            className="rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+            className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
           >
-            + Add property
+            <PlusIcon className="h-4 w-4" />
+            Add property
           </Link>
         </header>
 
