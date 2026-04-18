@@ -618,20 +618,13 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                       Sign in with Passkey
                     </button>
 
-                    <div className="-mt-1 grid grid-cols-2 gap-2">
+                    <div className="-mt-1">
                       <a
                         href="#"
-                        className="text-left text-sm text-slate-300 underline underline-offset-2 hover:text-slate-100"
+                        className="text-sm text-slate-300 underline underline-offset-2 hover:text-slate-100"
                       >
                         Forgot password?
                       </a>
-                      <button
-                        type="button"
-                        className="text-right text-sm text-slate-300 underline underline-offset-2 hover:text-slate-100"
-                        onClick={() => switchMode("signup")}
-                      >
-                        Create an account
-                      </button>
                     </div>
                   </form>
                 ) : null}
@@ -872,9 +865,9 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                     <button
                       type="button"
                       className="w-full text-sm text-slate-300 underline underline-offset-2 hover:text-slate-100"
-                      onClick={() => switchMode("signup")}
+                      onClick={() => switchMode("signin")}
                     >
-                      Back to create account
+                      Back to sign in
                     </button>
                   </form>
                 ) : null}
