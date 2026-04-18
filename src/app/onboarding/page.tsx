@@ -197,6 +197,7 @@ function InviteStep({
   const [error, setError] = useState<string | null>(null);
 
   function addRow() {
+    setError(null);
     setInvites((prev) => [...prev, ""]);
   }
 
@@ -205,6 +206,7 @@ function InviteStep({
   }
 
   function updateRow(i: number, val: string) {
+    setError(null);
     setInvites((prev) => prev.map((v, idx) => (idx === i ? val : v)));
   }
 

@@ -420,6 +420,26 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     e.preventDefault();
     setClientError(null);
 
+    if (!firstName.trim()) {
+      setClientError("First name is required.");
+      return;
+    }
+    if (!inviteTicket && !email.trim()) {
+      setClientError("Email is required.");
+      return;
+    }
+    if (role === "property_manager" && !inviteTicket && !organizationName.trim()) {
+      setClientError("Organization name is required.");
+      return;
+    }
+    if (!password) {
+      setClientError("Password is required.");
+      return;
+    }
+    if (!confirmPassword) {
+      setClientError("Please confirm your password.");
+      return;
+    }
     if (password !== confirmPassword) {
       setClientError("Passwords do not match.");
       return;
@@ -990,6 +1010,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                     className="space-y-2.5"
                     onSubmit={handleSignup}
                     autoComplete="on"
+                    noValidate
                   >
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                       <div className="space-y-1">
