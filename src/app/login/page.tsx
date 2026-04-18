@@ -247,6 +247,23 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     setClientNotice(null);
   }
 
+  async function resolvePostSignInDestination() {
+    try {
+      const response = await fetch("/api/internal/whoami", {
+        method: "GET",
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+
+      if (!response.ok) return "/dashboard";
+
+      const data = (await response.json()) as { internalAdmin?: boolean };
+      return data.internalAdmin ? "/internal/provision" : "/dashboard";
+    } catch {
+      return "/dashboard";
+    }
+  }
+
   async function createOrganizationIfNeeded() {
     if (inviteTicket) return;
 
@@ -339,7 +356,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
         return;
       }
 
-      router.push("/dashboard");
+      router.push(await resolvePostSignInDestination());
     } catch (error) {
       setClientError(getErrorMessage(error, "Something went wrong. Please try again."));
     }
@@ -565,7 +582,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
         return;
       }
 
-      router.push("/dashboard");
+      router.push(await resolvePostSignInDestination());
     } catch (error) {
       setClientError(getErrorMessage(error, "Something went wrong. Please try again."));
     }

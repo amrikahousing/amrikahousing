@@ -19,10 +19,6 @@ type IconName =
   | "dashboard"
   | "building"
   | "wrench"
-  | "vendors"
-  | "leases"
-  | "accounting"
-  | "send"
   | "screening"
   | "profile";
 
@@ -30,12 +26,15 @@ const navigation: Array<{ name: string; href: string; icon: IconName }> = [
   { name: "Dashboard", href: "/dashboard", icon: "dashboard" },
   { name: "Properties", href: "/properties", icon: "building" },
   { name: "Maintenance", href: "/maintenance", icon: "wrench" },
-  { name: "Vendors", href: "/vendors", icon: "vendors" },
-  { name: "Leases", href: "/leases", icon: "leases" },
-  { name: "Accounting", href: "/accounting", icon: "accounting" },
-  { name: "Syndication", href: "/listing-exports", icon: "send" },
   { name: "Screening", href: "/screenings", icon: "screening" },
 ];
+
+const implementedRoutes = new Set([
+  "/dashboard",
+  "/properties",
+  "/maintenance",
+  "/profile",
+]);
 
 const roleLabels: Record<string, string> = {
   property_manager: "Property Manager",
@@ -71,34 +70,6 @@ function Icon({ name, className = "" }: { name: IconName; className?: string }) 
         <svg {...shared}>
           <path d="M14.7 6.3a4 4 0 0 0 5 5L11 20l-4-4 8.7-8.7Z" />
           <path d="m7 16-3 3 1 1 3-3" />
-        </svg>
-      );
-    case "vendors":
-      return (
-        <svg {...shared}>
-          <path d="M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7" />
-          <path d="M4.5 8.5h15v10A1.5 1.5 0 0 1 18 20H6a1.5 1.5 0 0 1-1.5-1.5v-10Z" />
-          <path d="M4.5 12h15M10 12v1.5h4V12" />
-        </svg>
-      );
-    case "leases":
-      return (
-        <svg {...shared}>
-          <path d="M7 3.5h7l3 3V20a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1Z" />
-          <path d="M14 3.5V7h3M9 11h6M9 15h6" />
-        </svg>
-      );
-    case "accounting":
-      return (
-        <svg {...shared}>
-          <path d="M12 3v18M16 7.5c-.8-.9-2-1.5-3.6-1.5-2 0-3.4 1-3.4 2.5 0 3.7 7.4 1.5 7.4 5.8 0 1.8-1.6 3-4 3-1.7 0-3.1-.6-4.1-1.7" />
-        </svg>
-      );
-    case "send":
-      return (
-        <svg {...shared}>
-          <path d="m4 12 16-8-5 16-3-7-8-1Z" />
-          <path d="m12 13 8-9" />
         </svg>
       );
     case "screening":
@@ -173,6 +144,7 @@ export function AppSidebar({ user }: AppSidebarProps) {
               <Link
                 key={item.name}
                 href={item.href}
+                prefetch={implementedRoutes.has(item.href)}
                 className={cx(
                   "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
                   isActive
