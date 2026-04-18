@@ -611,13 +611,6 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                       {isLoading ? "Signing in..." : "Sign in"}
                     </button>
 
-                    <button
-                      className="h-12 w-full rounded-md border-2 border-slate-300 bg-white px-4 text-base font-medium text-slate-900 transition hover:bg-slate-100"
-                      type="button"
-                    >
-                      Sign in with Passkey
-                    </button>
-
                     <div className="-mt-1">
                       <a
                         href="#"
