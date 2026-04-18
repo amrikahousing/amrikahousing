@@ -8,7 +8,7 @@ export default defineConfig({
   retries: 1,
   reporter: "list",
   use: {
-    baseURL: process.env.E2E_BASE_URL ?? "https://neon-preview-test-amrikahousing.vercel.app",
+    baseURL: process.env.E2E_BASE_URL ?? "https://test.amrikahousing.com",
     trace: "on-first-retry",
     screenshot: "only-on-failure",
     // Bypass Vercel deployment protection for automation runs.
