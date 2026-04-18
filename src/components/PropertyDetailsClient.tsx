@@ -73,6 +73,35 @@ function TrashIcon({ className = "" }: { className?: string }) {
   );
 }
 
+function EditIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="m14.5 5.5 4 4" />
+      <path d="M4 20h4l10.5-10.5a2.8 2.8 0 0 0-4-4L4 16v4Z" />
+    </svg>
+  );
+}
+
+function unitFormFromUnit(unit: UnitDetails) {
+  return {
+    unitNumber: unit.unitNumber,
+    bedrooms: String(unit.bedrooms),
+    bathrooms: String(unit.bathrooms),
+    squareFeet: unit.squareFeet === null ? "" : String(unit.squareFeet),
+    rentAmount: unit.rentAmount === null ? "" : String(unit.rentAmount),
+    status: unit.status,
+  };
+}
+
 export function PropertyDetailsClient({
   initialProperty,
 }: {
@@ -92,6 +121,17 @@ export function PropertyDetailsClient({
   });
   const [saving, setSaving] = useState(false);
   const [deletingUnitId, setDeletingUnitId] = useState<string | null>(null);
+  const [editingUnitId, setEditingUnitId] = useState<string | null>(null);
+  const [unitForm, setUnitForm] = useState(unitFormFromUnit(initialProperty.units[0] ?? {
+    id: "",
+    unitNumber: "",
+    bedrooms: 0,
+    bathrooms: 0,
+    squareFeet: null,
+    rentAmount: null,
+    status: "vacant",
+  }));
+  const [savingUnit, setSavingUnit] = useState(false);
   const [duplicateUnitId, setDuplicateUnitId] = useState<string | null>(null);
   const [duplicateUnitNumber, setDuplicateUnitNumber] = useState("");
   const [message, setMessage] = useState<string | null>(null);
@@ -104,6 +144,10 @@ export function PropertyDetailsClient({
 
   function updateForm(field: keyof typeof form, value: string) {
     setForm((current) => ({ ...current, [field]: value }));
+  }
+
+  function updateUnitForm(field: keyof typeof unitForm, value: string) {
+    setUnitForm((current) => ({ ...current, [field]: value }));
   }
 
   async function saveProperty(event: React.FormEvent<HTMLFormElement>) {
@@ -214,6 +258,59 @@ export function PropertyDetailsClient({
       setError(caughtError instanceof Error ? caughtError.message : "Could not delete apartment.");
     } finally {
       setDeletingUnitId(null);
+    }
+  }
+
+  async function saveUnit(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!editingUnitId) return;
+
+    setSavingUnit(true);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const response = await fetch(`/api/properties/${property.id}/units/${editingUnitId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          unitNumber: unitForm.unitNumber,
+          bedrooms: Number(unitForm.bedrooms) || 0,
+          bathrooms: Number(unitForm.bathrooms) || 0,
+          squareFeet: unitForm.squareFeet ? Number(unitForm.squareFeet) : null,
+          rentAmount: unitForm.rentAmount ? Number(unitForm.rentAmount) : null,
+          status: unitForm.status,
+        }),
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error ?? "Could not update apartment.");
+      }
+
+      const updatedUnit: UnitDetails = {
+        id: data.unit.id,
+        unitNumber: data.unit.unit_number,
+        bedrooms: data.unit.bedrooms,
+        bathrooms: Number(data.unit.bathrooms),
+        squareFeet: data.unit.square_feet,
+        rentAmount: data.unit.rent_amount === null ? null : Number(data.unit.rent_amount),
+        status: data.unit.status,
+      };
+
+      setProperty((current) => ({
+        ...current,
+        units: current.units
+          .map((unit) => (unit.id === updatedUnit.id ? updatedUnit : unit))
+          .sort((a, b) => a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true })),
+      }));
+      setEditingUnitId(null);
+      setMessage(`Apartment ${updatedUnit.unitNumber} updated.`);
+      router.refresh();
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Could not update apartment.");
+    } finally {
+      setSavingUnit(false);
     }
   }
 
@@ -411,6 +508,20 @@ export function PropertyDetailsClient({
                   <div className="mt-4 flex justify-end gap-2">
                         <button
                           type="button"
+                          aria-label={`Edit apartment ${unit.unitNumber}`}
+                          title="Edit apartment"
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-slate-900"
+                          onClick={() => {
+                            setEditingUnitId(unit.id);
+                            setUnitForm(unitFormFromUnit(unit));
+                            setError(null);
+                            setMessage(null);
+                          }}
+                        >
+                          <EditIcon className="h-4 w-4" />
+                        </button>
+                        <button
+                          type="button"
                           aria-label={`Duplicate apartment ${unit.unitNumber}`}
                           title="Duplicate apartment"
                           className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-slate-900"
@@ -485,6 +596,108 @@ export function PropertyDetailsClient({
                 className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
               >
                 Create apartment
+              </button>
+            </div>
+          </form>
+        </div>
+      ) : null}
+
+      {editingUnitId ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+          <button
+            type="button"
+            aria-label="Close edit apartment dialog"
+            className="absolute inset-0 bg-slate-950/60"
+            onClick={() => setEditingUnitId(null)}
+          />
+          <form
+            onSubmit={saveUnit}
+            className="relative w-full max-w-lg rounded-lg bg-white p-6 shadow-2xl"
+          >
+            <h3 className="text-lg font-semibold text-slate-900">
+              Edit apartment
+            </h3>
+            <div className="mt-4 grid gap-4 sm:grid-cols-2">
+              <label className={labelClass}>
+                Apartment number
+                <input
+                  className={inputClass}
+                  value={unitForm.unitNumber}
+                  onChange={(event) => updateUnitForm("unitNumber", event.target.value)}
+                  required
+                />
+              </label>
+              <label className={labelClass}>
+                Status
+                <select
+                  className={inputClass}
+                  value={unitForm.status}
+                  onChange={(event) => updateUnitForm("status", event.target.value)}
+                >
+                  <option value="vacant">Vacant</option>
+                  <option value="occupied">Occupied</option>
+                  <option value="maintenance">Maintenance</option>
+                </select>
+              </label>
+              <label className={labelClass}>
+                Beds
+                <input
+                  className={inputClass}
+                  type="number"
+                  min="0"
+                  value={unitForm.bedrooms}
+                  onChange={(event) => updateUnitForm("bedrooms", event.target.value)}
+                />
+              </label>
+              <label className={labelClass}>
+                Baths
+                <input
+                  className={inputClass}
+                  type="number"
+                  min="0"
+                  step="0.5"
+                  value={unitForm.bathrooms}
+                  onChange={(event) => updateUnitForm("bathrooms", event.target.value)}
+                />
+              </label>
+              <label className={labelClass}>
+                Square feet
+                <input
+                  className={inputClass}
+                  type="number"
+                  min="0"
+                  value={unitForm.squareFeet}
+                  onChange={(event) => updateUnitForm("squareFeet", event.target.value)}
+                  placeholder="Optional"
+                />
+              </label>
+              <label className={labelClass}>
+                Rent
+                <input
+                  className={inputClass}
+                  type="number"
+                  min="0"
+                  step="50"
+                  value={unitForm.rentAmount}
+                  onChange={(event) => updateUnitForm("rentAmount", event.target.value)}
+                  placeholder="Optional"
+                />
+              </label>
+            </div>
+            <div className="mt-5 flex justify-end gap-2">
+              <button
+                type="button"
+                className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"
+                onClick={() => setEditingUnitId(null)}
+              >
+                Cancel
+              </button>
+              <button
+                type="submit"
+                className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60"
+                disabled={savingUnit}
+              >
+                {savingUnit ? "Saving..." : "Save apartment"}
               </button>
             </div>
           </form>
