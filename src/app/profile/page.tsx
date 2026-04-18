@@ -35,7 +35,6 @@ export default async function ProfilePage() {
 
         <ProfileForm
           initialProfile={{
-            userId: user?.id ?? "",
             email: user?.primaryEmailAddress?.emailAddress ?? "",
             phoneNumber: metadataString(metadata, "phoneNumber"),
             city: metadataString(metadata, "city"),

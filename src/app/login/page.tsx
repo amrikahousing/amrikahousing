@@ -1,12 +1,11 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import { useEffect, useId, useMemo, useState } from "react";
 import { useAuth, useClerk, useSignIn, useSignUp } from "@clerk/nextjs";
 import { isClerkAPIResponseError } from "@clerk/nextjs/errors";
 
 type LoginRole = "property_manager" | "renter";
-type AuthMode = "signin" | "signup" | "verify" | "forgot" | "reset";
+type AuthMode = "signin" | "signup" | "verify" | "forgot" | "reset" | "signin_mfa";
 
 function BuildingIcon({ className = "" }: { className?: string }) {
   return (
@@ -111,6 +110,24 @@ function hasClerkErrorCode(error: unknown, code: string) {
   return error.errors.some((clerkError) => clerkError.code === code);
 }
 
+function isConsumedInvitationError(error: unknown) {
+  if (!isClerkAPIResponseError(error)) return false;
+
+  return error.errors.some((clerkError) => {
+    const message = `${clerkError.code ?? ""} ${clerkError.message ?? ""} ${clerkError.longMessage ?? ""}`
+      .toLowerCase();
+
+    return (
+      message.includes("session_exists") ||
+      ((message.includes("ticket") || message.includes("invitation")) &&
+        (message.includes("used") ||
+          message.includes("accepted") ||
+          message.includes("expired") ||
+          message.includes("invalid")))
+    );
+  });
+}
+
 export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode }) {
   const emailId = useId();
   const passwordId = useId();
@@ -158,6 +175,9 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     if (url.searchParams.get("signed_out") === "1") {
       return "You have been signed out. Please sign in again.";
     }
+    if (url.searchParams.get("invite") === "used") {
+      return "That invitation link has already been used. Please sign in to continue.";
+    }
 
     return null;
   });
@@ -168,7 +188,6 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     useSignUp();
   const { isSignedIn } = useAuth();
   const clerk = useClerk();
-  const router = useRouter();
   const isLoading =
     signInFetchStatus === "fetching" || signUpFetchStatus === "fetching";
 
@@ -193,6 +212,15 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     url.searchParams.delete("email");
     window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
   }, []);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (!inviteTicket || mode !== "signup") return;
+    if (!isSignedIn && !clerk.isSignedIn) return;
+
+    const redirectUrl = `${window.location.pathname}${window.location.search}${window.location.hash}`;
+    void clerk.signOut({ redirectUrl });
+  }, [clerk, inviteTicket, isSignedIn, mode]);
 
   useEffect(() => {
     const prefersReduced =
@@ -225,7 +253,9 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
           ? "Reset password"
           : mode === "reset"
             ? "Create new password"
-            : "Sign in";
+            : mode === "signin_mfa"
+              ? "Check your email"
+              : "Sign in";
   const description =
     mode === "signup"
       ? "Set up access in under a minute."
@@ -235,12 +265,49 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
           ? "Enter your email and we will send a reset code."
           : mode === "reset"
             ? "Enter the code we sent and choose a new password."
-        : "";
+            : mode === "signin_mfa"
+              ? "Enter the 6-digit code we sent to your email."
+              : "";
 
   function switchMode(nextMode: AuthMode) {
     setMode(nextMode);
     setClientError(null);
     setClientNotice(null);
+  }
+
+  async function resolvePostSignInDestination() {
+    try {
+      const response = await fetch("/api/internal/whoami", {
+        method: "GET",
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+
+      if (!response.ok) return "/dashboard";
+
+      const data = (await response.json()) as { internalAdmin?: boolean };
+      return data.internalAdmin ? "/internal/provision" : "/dashboard";
+    } catch {
+      return "/dashboard";
+    }
+  }
+
+  async function completeSignIn() {
+    const { error: finalizeError } = await signIn.finalize();
+    if (finalizeError) {
+      setClientError(getErrorMessage(finalizeError, "We could not finish signing you in."));
+      return;
+    }
+
+    window.location.href = await resolvePostSignInDestination();
+  }
+
+  function redirectToInviteLoginNotice() {
+    const redirectUrl = new URL("/login", window.location.origin);
+    const trimmedEmail = email.trim();
+    if (trimmedEmail) redirectUrl.searchParams.set("email", trimmedEmail);
+    redirectUrl.searchParams.set("invite", "used");
+    window.location.href = `${redirectUrl.pathname}${redirectUrl.search}`;
   }
 
   async function createOrganizationIfNeeded() {
@@ -269,9 +336,10 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     const sessionId = signUp.createdSessionId;
 
     if (sessionId) {
-      await clerk.setActive({ session: sessionId });
+      await clerk.setActive({ session: sessionId, navigate: async () => {} });
       await createOrganizationIfNeeded();
-      router.push(role === "property_manager" ? "/onboarding" : "/dashboard");
+      const dest = inviteTicket || role === "property_manager" ? "/onboarding" : "/dashboard";
+      window.location.href = dest;
       return;
     }
 
@@ -306,7 +374,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
         }
       }
 
-      const { error } = await signIn.password({ identifier: email, password });
+      const { error } = await signIn.create({ identifier: email.trim(), password });
       if (error) {
         if (hasClerkErrorCode(error, "session_exists")) {
           await redirectToCleanSignIn();
@@ -317,13 +385,18 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
         return;
       }
 
-      const { error: finalizeError } = await signIn.finalize();
-      if (finalizeError) {
-        setClientError(getErrorMessage(finalizeError, "We could not finish signing you in."));
+      if (signIn.status === "needs_second_factor") {
+        const { error: sendError } = await signIn.mfa.sendEmailCode();
+        if (sendError) {
+          setClientError(getErrorMessage(sendError, "We could not send a verification code."));
+          return;
+        }
+        setVerificationCode("");
+        switchMode("signin_mfa");
         return;
       }
 
-      router.push("/dashboard");
+      await completeSignIn();
     } catch (error) {
       setClientError(getErrorMessage(error, "Something went wrong. Please try again."));
     }
@@ -420,11 +493,32 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     e.preventDefault();
     setClientError(null);
 
+    if (!firstName.trim()) {
+      setClientError("First name is required.");
+      return;
+    }
+    if (!inviteTicket && !email.trim()) {
+      setClientError("Email is required.");
+      return;
+    }
+    if (role === "property_manager" && !inviteTicket && !organizationName.trim()) {
+      setClientError("Organization name is required.");
+      return;
+    }
+    if (!password) {
+      setClientError("Password is required.");
+      return;
+    }
+    if (!confirmPassword) {
+      setClientError("Please confirm your password.");
+      return;
+    }
     if (password !== confirmPassword) {
       setClientError("Passwords do not match.");
       return;
     }
 
+    const trimmedOrganizationName = organizationName.trim();
     const nameParts = firstName.trim().split(/\s+/);
     const first = nameParts[0] ?? "";
     const last = nameParts.slice(1).join(" ") || lastName.trim() || undefined;
@@ -453,13 +547,21 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
             unsafeMetadata: {
               firstName: first,
               lastName: last,
-              role: "renter",
+              role,
+              ...(role === "property_manager" && trimmedOrganizationName
+                ? { organizationName: trimmedOrganizationName }
+                : {}),
             },
           };
 
       const { error } = await signUp.create(createParams);
 
       if (error) {
+        if (inviteTicket && isConsumedInvitationError(error)) {
+          redirectToInviteLoginNotice();
+          return;
+        }
+
         setClientError(getErrorMessage(error, "We could not create your account."));
         return;
       }
@@ -503,6 +605,23 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
       }
 
       await completeSignup();
+    } catch (error) {
+      setClientError(getErrorMessage(error, "Something went wrong. Please try again."));
+    }
+  }
+
+  async function handleSignInMfa(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setClientError(null);
+
+    try {
+      const { error } = await signIn.mfa.verifyEmailCode({ code: verificationCode });
+      if (error) {
+        setClientError(getErrorMessage(error, "We could not verify that code."));
+        return;
+      }
+
+      await completeSignIn();
     } catch (error) {
       setClientError(getErrorMessage(error, "Something went wrong. Please try again."));
     }
@@ -788,6 +907,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                         Forgot password?
                       </button>
                     </div>
+
                   </form>
                 ) : null}
 
@@ -975,6 +1095,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                     className="space-y-2.5"
                     onSubmit={handleSignup}
                     autoComplete="on"
+                    noValidate
                   >
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
                       <div className="space-y-1">
@@ -1201,6 +1322,58 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                       disabled={isLoading}
                     >
                       {isLoading ? "Verifying..." : "Verify & continue"}
+                    </button>
+
+                    <button
+                      type="button"
+                      className="w-full text-sm text-slate-300 underline underline-offset-2 hover:text-slate-100"
+                      onClick={() => switchMode("signin")}
+                    >
+                      Back to sign in
+                    </button>
+                  </form>
+                ) : null}
+
+                {mode === "signin_mfa" ? (
+                  <form
+                    className="space-y-5"
+                    onSubmit={handleSignInMfa}
+                    autoComplete="off"
+                  >
+                    <div className="space-y-2">
+                      <label htmlFor={codeId} className="text-sm text-slate-200">
+                        Verification code
+                      </label>
+                      <input
+                        id={codeId}
+                        className="h-12 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 text-center text-lg font-semibold tracking-[0.25em] text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                        type="text"
+                        inputMode="numeric"
+                        maxLength={6}
+                        placeholder="------"
+                        required
+                        value={verificationCode}
+                        onChange={(e) =>
+                          setVerificationCode(e.target.value.replace(/\D/g, ""))
+                        }
+                      />
+                    </div>
+
+                    {displayError && (
+                      <p
+                        role="alert"
+                        className="rounded-md border border-red-400/30 bg-red-950/45 px-3 py-2 text-sm text-red-200"
+                      >
+                        {displayError}
+                      </p>
+                    )}
+
+                    <button
+                      className="h-12 w-full rounded-md bg-emerald-500 px-4 text-base font-semibold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
+                      type="submit"
+                      disabled={isLoading}
+                    >
+                      {isLoading ? "Verifying..." : "Verify & sign in"}
                     </button>
 
                     <button

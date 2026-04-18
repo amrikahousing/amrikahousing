@@ -5,7 +5,6 @@ import { useEffect, useState } from "react";
 
 type ProfileFormProps = {
   initialProfile: {
-    userId: string;
     email: string;
     phoneNumber: string;
     city: string;
@@ -125,16 +124,6 @@ export function ProfileForm({ initialProfile }: ProfileFormProps) {
         </div>
 
         <div className="space-y-4 p-6">
-          <Field id="profile-user-id" label="User ID">
-            <input
-              id="profile-user-id"
-              className={inputClass}
-              value={initialProfile.userId}
-              readOnly
-              disabled
-            />
-          </Field>
-
           <Field id="profile-email" label="Email address">
             <input
               id="profile-email"

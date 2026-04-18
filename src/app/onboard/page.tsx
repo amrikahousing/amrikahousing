@@ -1,11 +1,15 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { OrganizationList } from "@clerk/nextjs";
+import { isInternalAdmin } from "@/lib/internal-admin";
 
 export default async function OnboardPage() {
   const { userId, orgId } = await auth();
+  const internalAdmin = await isInternalAdmin();
+  const afterOrganizationUrl = internalAdmin ? "/internal/provision" : "/dashboard";
+
   if (!userId) redirect("/login");
-  if (orgId) redirect("/dashboard");
+  if (orgId) redirect(afterOrganizationUrl);
 
   return (
     <main className="relative z-0 flex min-h-screen items-center justify-center px-5 py-10 text-white">
@@ -27,8 +31,8 @@ export default async function OnboardPage() {
         <div className="rounded-[12px] border border-white/12 bg-[var(--card)] p-6 backdrop-blur-[16px]">
           <OrganizationList
             hidePersonal
-            afterSelectOrganizationUrl="/dashboard"
-            afterCreateOrganizationUrl="/dashboard"
+            afterSelectOrganizationUrl={afterOrganizationUrl}
+            afterCreateOrganizationUrl={afterOrganizationUrl}
           />
         </div>
       </div>

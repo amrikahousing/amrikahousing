@@ -19,7 +19,7 @@ type Props = {
 };
 
 const inputClass =
-  "w-full rounded-[8px] border border-white/15 bg-white/6 px-3 py-2 text-[13px] text-white placeholder-white/30 focus:border-white/35 focus:outline-none";
+  "w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20";
 
 export function UnitRowBuilder({ units, onChange }: Props) {
   function update(index: number, patch: Partial<UnitDraft>) {
@@ -37,8 +37,7 @@ export function UnitRowBuilder({ units, onChange }: Props) {
 
   return (
     <div className="flex flex-col gap-3">
-      {/* Header */}
-      <div className="hidden grid-cols-[1fr_60px_60px_80px_90px_90px_28px] gap-2 px-1 text-[11px] font-semibold text-white/40 uppercase tracking-wide sm:grid">
+      <div className="hidden grid-cols-[1fr_60px_60px_80px_90px_90px_28px] gap-2 px-1 text-[11px] font-semibold uppercase tracking-wide text-slate-500 sm:grid">
         <span>Unit #</span>
         <span>Beds</span>
         <span>Baths</span>
@@ -49,7 +48,7 @@ export function UnitRowBuilder({ units, onChange }: Props) {
       </div>
 
       {units.map((unit, i) => (
-        <div key={i} className="grid grid-cols-1 gap-2 rounded-[8px] border border-white/10 bg-white/4 p-3 sm:grid-cols-[1fr_60px_60px_80px_90px_90px_28px] sm:items-center sm:border-0 sm:bg-transparent sm:p-0">
+        <div key={i} className="grid grid-cols-1 gap-2 rounded-lg border border-slate-200 bg-slate-50 p-3 sm:grid-cols-[1fr_60px_60px_80px_90px_90px_28px] sm:items-center sm:border-0 sm:bg-transparent sm:p-0">
           <input
             className={inputClass}
             placeholder={`Unit ${i + 1}`}
@@ -102,7 +101,7 @@ export function UnitRowBuilder({ units, onChange }: Props) {
           <button
             type="button"
             onClick={() => remove(i)}
-            className="flex h-7 w-7 items-center justify-center rounded-[6px] text-white/30 hover:bg-red-500/15 hover:text-red-400 transition-colors"
+            className="flex h-7 w-7 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-red-50 hover:text-red-500"
           >
             ×
           </button>
@@ -113,12 +112,12 @@ export function UnitRowBuilder({ units, onChange }: Props) {
         type="button"
         onClick={add}
         disabled={units.length >= 50}
-        className="flex items-center gap-2 self-start rounded-[8px] border border-dashed border-white/20 px-3 py-2 text-[13px] text-white/50 hover:border-white/35 hover:text-white/70 disabled:opacity-40 transition-colors"
+        className="flex items-center gap-2 self-start rounded-lg border border-dashed border-slate-300 px-3 py-2 text-sm text-slate-600 transition-colors hover:border-slate-400 hover:text-slate-800 disabled:opacity-40"
       >
         <span>+</span> Add unit
       </button>
       {units.length >= 50 && (
-        <p className="text-[12px] text-white/40">Max 50 units via form — use CSV import for larger portfolios.</p>
+        <p className="text-xs text-slate-500">Max 50 units via form for now.</p>
       )}
     </div>
   );

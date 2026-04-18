@@ -1,8 +1,8 @@
 "use client";
 
-import { SignOutButton, UserButton } from "@clerk/nextjs";
+import { useClerk, UserButton } from "@clerk/nextjs";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
 
 type AppSidebarProps = {
@@ -19,23 +19,20 @@ type IconName =
   | "dashboard"
   | "building"
   | "wrench"
-  | "vendors"
-  | "leases"
-  | "accounting"
-  | "send"
-  | "screening"
   | "profile";
 
 const navigation: Array<{ name: string; href: string; icon: IconName }> = [
   { name: "Dashboard", href: "/dashboard", icon: "dashboard" },
   { name: "Properties", href: "/properties", icon: "building" },
   { name: "Maintenance", href: "/maintenance", icon: "wrench" },
-  { name: "Vendors", href: "/vendors", icon: "vendors" },
-  { name: "Leases", href: "/leases", icon: "leases" },
-  { name: "Accounting", href: "/accounting", icon: "accounting" },
-  { name: "Syndication", href: "/listing-exports", icon: "send" },
-  { name: "Screening", href: "/screenings", icon: "screening" },
 ];
+
+const implementedRoutes = new Set([
+  "/dashboard",
+  "/properties",
+  "/maintenance",
+  "/profile",
+]);
 
 const roleLabels: Record<string, string> = {
   property_manager: "Property Manager",
@@ -73,41 +70,6 @@ function Icon({ name, className = "" }: { name: IconName; className?: string }) 
           <path d="m7 16-3 3 1 1 3-3" />
         </svg>
       );
-    case "vendors":
-      return (
-        <svg {...shared}>
-          <path d="M9 7V5.5A1.5 1.5 0 0 1 10.5 4h3A1.5 1.5 0 0 1 15 5.5V7" />
-          <path d="M4.5 8.5h15v10A1.5 1.5 0 0 1 18 20H6a1.5 1.5 0 0 1-1.5-1.5v-10Z" />
-          <path d="M4.5 12h15M10 12v1.5h4V12" />
-        </svg>
-      );
-    case "leases":
-      return (
-        <svg {...shared}>
-          <path d="M7 3.5h7l3 3V20a1 1 0 0 1-1 1H7a1 1 0 0 1-1-1V4.5a1 1 0 0 1 1-1Z" />
-          <path d="M14 3.5V7h3M9 11h6M9 15h6" />
-        </svg>
-      );
-    case "accounting":
-      return (
-        <svg {...shared}>
-          <path d="M12 3v18M16 7.5c-.8-.9-2-1.5-3.6-1.5-2 0-3.4 1-3.4 2.5 0 3.7 7.4 1.5 7.4 5.8 0 1.8-1.6 3-4 3-1.7 0-3.1-.6-4.1-1.7" />
-        </svg>
-      );
-    case "send":
-      return (
-        <svg {...shared}>
-          <path d="m4 12 16-8-5 16-3-7-8-1Z" />
-          <path d="m12 13 8-9" />
-        </svg>
-      );
-    case "screening":
-      return (
-        <svg {...shared}>
-          <path d="M10.5 11.5a4 4 0 1 0 0-8 4 4 0 0 0 0 8ZM3.5 20a7 7 0 0 1 10.8-5.9" />
-          <path d="m15 18 2 2 4-5" />
-        </svg>
-      );
     case "profile":
       return (
         <svg {...shared}>
@@ -129,6 +91,8 @@ function cx(...classes: Array<string | false | null | undefined>) {
 
 export function AppSidebar({ user }: AppSidebarProps) {
   const pathname = usePathname();
+  const router = useRouter();
+  const { signOut } = useClerk();
   const [isOpen, setIsOpen] = useState(false);
   const roleLabel = roleLabels[user.role] ?? "Workspace";
   const displayName = user.firstName ?? user.email ?? "Account";
@@ -171,6 +135,7 @@ export function AppSidebar({ user }: AppSidebarProps) {
               <Link
                 key={item.name}
                 href={item.href}
+                prefetch={implementedRoutes.has(item.href)}
                 className={cx(
                   "flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors",
                   isActive
@@ -217,12 +182,13 @@ export function AppSidebar({ user }: AppSidebarProps) {
           <UserButton />
         </Link>
 
-        <SignOutButton redirectUrl="/login">
-          <button className="flex w-full items-center justify-start gap-2 rounded-lg border border-slate-700 px-3 py-2 text-sm font-medium text-slate-400 transition-colors hover:bg-slate-800 hover:text-white">
-            <span aria-hidden="true">-&gt;</span>
-            Log Out
-          </button>
-        </SignOutButton>
+        <button
+          onClick={() => signOut(() => router.push("/login"))}
+          className="flex w-full items-center justify-start gap-2 rounded-lg border border-slate-700 px-3 py-2 text-sm font-medium text-slate-400 transition-colors hover:bg-slate-800 hover:text-white"
+        >
+          <span aria-hidden="true">-&gt;</span>
+          Log Out
+        </button>
       </div>
     </div>
   );
