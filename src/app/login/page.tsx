@@ -110,6 +110,24 @@ function hasClerkErrorCode(error: unknown, code: string) {
   return error.errors.some((clerkError) => clerkError.code === code);
 }
 
+function isConsumedInvitationError(error: unknown) {
+  if (!isClerkAPIResponseError(error)) return false;
+
+  return error.errors.some((clerkError) => {
+    const message = `${clerkError.code ?? ""} ${clerkError.message ?? ""} ${clerkError.longMessage ?? ""}`
+      .toLowerCase();
+
+    return (
+      message.includes("session_exists") ||
+      ((message.includes("ticket") || message.includes("invitation")) &&
+        (message.includes("used") ||
+          message.includes("accepted") ||
+          message.includes("expired") ||
+          message.includes("invalid")))
+    );
+  });
+}
+
 export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode }) {
   const emailId = useId();
   const passwordId = useId();
@@ -156,6 +174,9 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     }
     if (url.searchParams.get("signed_out") === "1") {
       return "You have been signed out. Please sign in again.";
+    }
+    if (url.searchParams.get("invite") === "used") {
+      return "That invitation link has already been used. Please sign in to continue.";
     }
 
     return null;
@@ -279,6 +300,14 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     }
 
     window.location.href = await resolvePostSignInDestination();
+  }
+
+  function redirectToInviteLoginNotice() {
+    const redirectUrl = new URL("/login", window.location.origin);
+    const trimmedEmail = email.trim();
+    if (trimmedEmail) redirectUrl.searchParams.set("email", trimmedEmail);
+    redirectUrl.searchParams.set("invite", "used");
+    window.location.href = `${redirectUrl.pathname}${redirectUrl.search}`;
   }
 
   async function createOrganizationIfNeeded() {
@@ -528,6 +557,11 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
       const { error } = await signUp.create(createParams);
 
       if (error) {
+        if (inviteTicket && isConsumedInvitationError(error)) {
+          redirectToInviteLoginNotice();
+          return;
+        }
+
         setClientError(getErrorMessage(error, "We could not create your account."));
         return;
       }
