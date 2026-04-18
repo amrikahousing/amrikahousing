@@ -263,7 +263,7 @@ export function syncPrismaSchema({ cwd = process.cwd(), env, label }) {
   }
 
   console.log(`Syncing Prisma schema to ${label}.`);
-  run("npx", ["prisma", "db", "push", "--skip-generate"], { cwd, env: prismaEnv });
+  run("npx", ["prisma", "db", "push"], { cwd, env: prismaEnv });
 }
 
 export function inspectVercelDeployment(aliasOrUrl, cwd = process.cwd()) {
