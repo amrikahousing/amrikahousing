@@ -6,16 +6,19 @@ import {
   assertBranch,
   assertCanonicalRoot,
   assertCleanTree,
+  NEON_PRODUCTION_HOST_PREFIX,
   PRODUCTION_DEPLOYMENT_URL,
+  assertDatabaseUrlHost,
   copyVercelProjectLink,
-  deploymentUrlFromOutput,
   ensureBranchPushed,
   ensureVercelProject,
   fail,
   findWorktreeForBranch,
+  inspectVercelDeployment,
+  pullVercelEnv,
   run,
-  runAndCapture,
   runGit,
+  syncPrismaSchema,
 } from "./deploy-workflow-utils.mjs";
 
 const dryRun = process.argv.includes("--dry-run");
@@ -44,6 +47,14 @@ run("npm", ["run", "build"], { cwd: root });
 assertCleanTree(root);
 
 if (dryRun) {
+  console.log("Checking Vercel production env points to Neon production.");
+  const productionEnv = pullVercelEnv({ cwd: root, environment: "production" });
+  try {
+    assertDatabaseUrlHost(productionEnv.values, NEON_PRODUCTION_HOST_PREFIX, "Production");
+  } finally {
+    productionEnv.cleanup();
+  }
+
   console.log("Dry run complete: production promotion checks passed before merge/deploy steps.");
   process.exit(0);
 }
@@ -77,17 +88,21 @@ run("npm", ["run", "lint"], { cwd: mainWorktree });
 run("npm", ["run", "build"], { cwd: mainWorktree });
 assertCleanTree(mainWorktree);
 
+console.log("Checking Vercel production env points to Neon production.");
+const productionEnv = pullVercelEnv({ cwd: mainWorktree, environment: "production" });
+try {
+  assertDatabaseUrlHost(productionEnv.values, NEON_PRODUCTION_HOST_PREFIX, "Production");
+  syncPrismaSchema({ cwd: mainWorktree, env: productionEnv.values, label: "Neon production" });
+} finally {
+  productionEnv.cleanup();
+}
+
 console.log("Pushing main to GitHub.");
 runGit(["push", "origin", "main"], { cwd: mainWorktree });
 
-console.log("Deploying main to production.");
-const deployOutput = runAndCapture("npx", ["vercel", "deploy", "--prod", "-y"], { cwd: mainWorktree });
-const deploymentUrl = deploymentUrlFromOutput(deployOutput);
+console.log("Git push triggered the Vercel production deployment. Waiting for production to finish.");
+const deployment = inspectVercelDeployment(PRODUCTION_DEPLOYMENT_URL, mainWorktree);
+const deploymentUrl = `https://${deployment.url}`;
 
-if (deploymentUrl) {
-  console.log(`\nProduction deployment URL: ${PRODUCTION_DEPLOYMENT_URL}`);
-  console.log(`Vercel deployment URL: ${deploymentUrl}`);
-} else {
-  console.log(`\nProduction deployment URL: ${PRODUCTION_DEPLOYMENT_URL}`);
-  console.log("No Vercel deployment URL was found in the Vercel output.");
-}
+console.log(`\nProduction deployment URL: ${PRODUCTION_DEPLOYMENT_URL}`);
+console.log(`Vercel deployment URL: ${deploymentUrl}`);

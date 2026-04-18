@@ -1,12 +1,25 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, realpathSync } from "node:fs";
+import {
+  copyFileSync,
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { parse as parseDotenv } from "dotenv";
 
 export const EXPECTED_PROJECT_NAME = "amrikahousing";
 export const EXPECTED_PROJECT_ID = "prj_hdUfbG36MTUtcftGcn3bSazVX8Ei";
 export const EXPECTED_ROOT = "/Users/rayansh/Documents/amrikahousing";
 export const TEST_DEPLOYMENT_ALIAS = "neon-preview-test-amrikahousing.vercel.app";
+export const TEST_GIT_BRANCH_ALIAS = "amrikahousing-git-neon-preview-test-amrika-housings-projects.vercel.app";
 export const PRODUCTION_DEPLOYMENT_URL = "https://www.amrikahousing.com";
+export const NEON_PREVIEW_HOST_PREFIX = "ep-mute-mode-amov2nuk";
+export const NEON_PRODUCTION_HOST_PREFIX = "ep-spring-boat-amf4cngn";
 
 export function fail(message) {
   console.error(`\nWorkflow blocked: ${message}\n`);
@@ -28,6 +41,7 @@ export function assertCanonicalRoot() {
 export function run(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: options.cwd,
+    env: options.env ? { ...process.env, ...options.env } : process.env,
     stdio: "inherit",
     shell: false,
   });
@@ -45,6 +59,7 @@ export function runAndCapture(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: options.cwd,
     encoding: "utf8",
+    env: options.env ? { ...process.env, ...options.env } : process.env,
     shell: false,
     stdio: ["inherit", "pipe", "pipe"],
   });
@@ -87,6 +102,8 @@ export function capture(command, args, options = {}) {
     return execFileSync(command, args, {
       cwd: options.cwd,
       encoding: "utf8",
+      env: options.env ? { ...process.env, ...options.env } : process.env,
+      maxBuffer: 1024 * 1024 * 16,
       stdio: ["ignore", "pipe", "pipe"],
     }).trim();
   } catch (error) {
@@ -177,14 +194,14 @@ export function ensureBranchPushed(branch, cwd = process.cwd()) {
   const remoteHead = git(["rev-parse", `origin/${branch}`], { cwd });
   if (localHead === remoteHead) {
     console.log(`${branch} is already synced with origin/${branch}.`);
-    return;
+    return false;
   }
 
   const mergeBase = git(["merge-base", branch, `origin/${branch}`], { cwd });
   if (mergeBase === remoteHead) {
     console.log(`Pushing ${branch} to origin/${branch}.`);
     runGit(["push", "origin", branch], { cwd });
-    return;
+    return true;
   }
 
   if (mergeBase === localHead) {
@@ -192,6 +209,79 @@ export function ensureBranchPushed(branch, cwd = process.cwd()) {
   }
 
   fail(`${branch} has diverged from origin/${branch}. Resolve it manually before continuing.`);
+}
+
+export function pullVercelEnv({ cwd = process.cwd(), environment, gitBranch }) {
+  const tempDir = mkdtempSync(join(tmpdir(), "amrikahousing-vercel-env-"));
+  const envFile = join(tempDir, `${environment}.env`);
+
+  const args = ["vercel", "env", "pull", envFile, "--environment", environment];
+  if (gitBranch) {
+    args.push("--git-branch", gitBranch);
+  }
+
+  try {
+    run("npx", args, { cwd });
+    return {
+      values: parseDotenv(readFileSync(envFile)),
+      cleanup: () => rmSync(tempDir, { recursive: true, force: true }),
+    };
+  } catch (error) {
+    rmSync(tempDir, { recursive: true, force: true });
+    throw error;
+  }
+}
+
+export function assertDatabaseUrlHost(env, expectedHostPrefix, label) {
+  const databaseUrl = env.DATABASE_URL;
+  if (!databaseUrl) {
+    fail(`${label} DATABASE_URL is missing or empty in Vercel environment variables.`);
+  }
+
+  let host;
+  try {
+    host = new URL(databaseUrl).hostname;
+  } catch {
+    fail(`${label} DATABASE_URL is not a valid Postgres URL.`);
+  }
+
+  if (!host.includes(expectedHostPrefix)) {
+    fail(`${label} DATABASE_URL points to ${host}, expected Neon host containing ${expectedHostPrefix}.`);
+  }
+
+  console.log(`${label} database verified: ${host}`);
+}
+
+export function syncPrismaSchema({ cwd = process.cwd(), env, label }) {
+  const prismaEnv = { ...env, DATABASE_URL: env.DATABASE_URL };
+  const migrationsDir = join(cwdRealpath(cwd), "prisma", "migrations");
+
+  if (existsSync(migrationsDir)) {
+    console.log(`Applying Prisma migrations to ${label}.`);
+    run("npx", ["prisma", "migrate", "deploy"], { cwd, env: prismaEnv });
+    return;
+  }
+
+  console.log(`Syncing Prisma schema to ${label}.`);
+  run("npx", ["prisma", "db", "push", "--skip-generate"], { cwd, env: prismaEnv });
+}
+
+export function inspectVercelDeployment(aliasOrUrl, cwd = process.cwd()) {
+  const output = capture(
+    "npx",
+    ["vercel", "inspect", aliasOrUrl, "--wait", "--timeout", "10m", "--format=json"],
+    { cwd }
+  );
+  const jsonStart = output.indexOf("{");
+  if (jsonStart === -1) {
+    fail(`could not parse Vercel inspect output for ${aliasOrUrl}.`);
+  }
+
+  try {
+    return JSON.parse(output.slice(jsonStart));
+  } catch {
+    fail(`Vercel inspect output for ${aliasOrUrl} was not valid JSON.`);
+  }
 }
 
 export function findWorktreeForBranch(branch, cwd = process.cwd()) {
