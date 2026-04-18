@@ -35,6 +35,44 @@ function formatCurrency(value: number | null) {
   return `$${value.toLocaleString()}`;
 }
 
+function DuplicateIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M8 8h10v10H8z" />
+      <path d="M6 16H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1" />
+    </svg>
+  );
+}
+
+function TrashIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M4 7h16" />
+      <path d="M10 11v6M14 11v6" />
+      <path d="M6 7l1 14h10l1-14" />
+      <path d="M9 7V4h6v3" />
+    </svg>
+  );
+}
+
 export function PropertyDetailsClient({
   initialProperty,
 }: {
@@ -53,7 +91,7 @@ export function PropertyDetailsClient({
     description: initialProperty.description,
   });
   const [saving, setSaving] = useState(false);
-  const [deleting, setDeleting] = useState(false);
+  const [deletingUnitId, setDeletingUnitId] = useState<string | null>(null);
   const [duplicateUnitId, setDuplicateUnitId] = useState<string | null>(null);
   const [duplicateUnitNumber, setDuplicateUnitNumber] = useState("");
   const [message, setMessage] = useState<string | null>(null);
@@ -98,34 +136,6 @@ export function PropertyDetailsClient({
       setError(caughtError instanceof Error ? caughtError.message : "Could not update property.");
     } finally {
       setSaving(false);
-    }
-  }
-
-  async function deleteProperty() {
-    const confirmed = window.confirm(
-      `Delete ${property.name}? This will remove the property and its apartments from your active portfolio.`,
-    );
-    if (!confirmed) return;
-
-    setDeleting(true);
-    setError(null);
-    setMessage(null);
-
-    try {
-      const response = await fetch(`/api/properties/${property.id}`, {
-        method: "DELETE",
-      });
-      const data = await response.json();
-
-      if (!response.ok) {
-        throw new Error(data.error ?? "Could not delete property.");
-      }
-
-      router.push("/properties");
-      router.refresh();
-    } catch (caughtError) {
-      setError(caughtError instanceof Error ? caughtError.message : "Could not delete property.");
-      setDeleting(false);
     }
   }
 
@@ -176,6 +186,37 @@ export function PropertyDetailsClient({
     }
   }
 
+  async function deleteUnit(unit: UnitDetails) {
+    const confirmed = window.confirm(`Delete apartment ${unit.unitNumber}?`);
+    if (!confirmed) return;
+
+    setDeletingUnitId(unit.id);
+    setError(null);
+    setMessage(null);
+
+    try {
+      const response = await fetch(`/api/properties/${property.id}/units/${unit.id}`, {
+        method: "DELETE",
+      });
+      const data = await response.json();
+
+      if (!response.ok) {
+        throw new Error(data.error ?? "Could not delete apartment.");
+      }
+
+      setProperty((current) => ({
+        ...current,
+        units: current.units.filter((currentUnit) => currentUnit.id !== unit.id),
+      }));
+      setMessage(`Apartment ${unit.unitNumber} deleted.`);
+      router.refresh();
+    } catch (caughtError) {
+      setError(caughtError instanceof Error ? caughtError.message : "Could not delete apartment.");
+    } finally {
+      setDeletingUnitId(null);
+    }
+  }
+
   return (
     <article className="rounded-lg border border-slate-200 bg-white shadow-sm">
       <div className="space-y-6 p-6">
@@ -199,14 +240,6 @@ export function PropertyDetailsClient({
               onClick={() => setEditing((current) => !current)}
             >
               {editing ? "Cancel edit" : "Edit"}
-            </button>
-            <button
-              type="button"
-              className="rounded-lg border border-red-200 px-3 py-1 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:opacity-60"
-              onClick={deleteProperty}
-              disabled={deleting}
-            >
-              {deleting ? "Deleting..." : "Delete"}
             </button>
           </div>
         </div>
@@ -360,10 +393,13 @@ export function PropertyDetailsClient({
                       </td>
                       <td className="px-4 py-3">{formatCurrency(unit.rentAmount)}</td>
                       <td className="px-4 py-3 capitalize">{unit.status}</td>
-                      <td className="px-4 py-3 text-right">
+                      <td className="px-4 py-3">
+                        <div className="flex justify-end gap-2">
                         <button
                           type="button"
-                          className="rounded-lg border border-slate-200 px-3 py-1 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                          aria-label={`Duplicate apartment ${unit.unitNumber}`}
+                          title="Duplicate apartment"
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 hover:text-slate-900"
                           onClick={() => {
                             setDuplicateUnitId(unit.id);
                             setDuplicateUnitNumber("");
@@ -371,8 +407,19 @@ export function PropertyDetailsClient({
                             setMessage(null);
                           }}
                         >
-                          Duplicate
+                          <DuplicateIcon className="h-4 w-4" />
                         </button>
+                        <button
+                          type="button"
+                          aria-label={`Delete apartment ${unit.unitNumber}`}
+                          title="Delete apartment"
+                          className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-red-200 text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
+                          onClick={() => void deleteUnit(unit)}
+                          disabled={deletingUnitId === unit.id}
+                        >
+                          <TrashIcon className="h-4 w-4" />
+                        </button>
+                        </div>
                       </td>
                     </tr>
                   ))}

@@ -41,12 +41,23 @@ function SearchIcon({ className = "" }: { className?: string }) {
 
 export function PropertiesList({ properties }: { properties: PropertyListItem[] }) {
   const [search, setSearch] = useState("");
+  const [propertyName, setPropertyName] = useState("all");
   const [status, setStatus] = useState("all");
+
+  const propertyOptions = useMemo(
+    () =>
+      Array.from(new Set(properties.map((property) => property.propertyName))).sort(
+        (a, b) => a.localeCompare(b),
+      ),
+    [properties],
+  );
 
   const filteredProperties = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
 
     return properties.filter((property) => {
+      const matchesProperty =
+        propertyName === "all" || property.propertyName === propertyName;
       const matchesStatus = status === "all" || property.status === status;
       const matchesSearch =
         !normalizedSearch ||
@@ -63,9 +74,9 @@ export function PropertiesList({ properties }: { properties: PropertyListItem[] 
           .toLowerCase()
           .includes(normalizedSearch);
 
-      return matchesStatus && matchesSearch;
+      return matchesProperty && matchesStatus && matchesSearch;
     });
-  }, [properties, search, status]);
+  }, [properties, propertyName, search, status]);
 
   const apartmentNoun = properties.length === 1 ? "apartment" : "apartments";
 
@@ -76,18 +87,33 @@ export function PropertiesList({ properties }: { properties: PropertyListItem[] 
 
   return (
     <div className="space-y-6">
-      <div className="flex flex-col gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm sm:flex-row">
+      <div className="grid gap-3 rounded-lg border border-slate-200 bg-white p-4 shadow-sm md:grid-cols-[minmax(0,1fr)_220px_176px]">
         <label className="relative block flex-1">
-          <span className="sr-only">Filter apartments by property name</span>
+          <span className="sr-only">Search apartments</span>
           <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input
             className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 pl-10 pr-3 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-emerald-500 focus:bg-white focus:ring-2 focus:ring-emerald-500/15"
-            placeholder="Filter by property name, apartment, address, city, state, or zip"
+            placeholder="Search apartment, address, city, state, or zip"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
         </label>
-        <label className="block sm:w-44">
+        <label className="block">
+          <span className="sr-only">Filter apartments by property name</span>
+          <select
+            className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700 outline-none transition-colors focus:border-emerald-500 focus:bg-white focus:ring-2 focus:ring-emerald-500/15"
+            value={propertyName}
+            onChange={(event) => setPropertyName(event.target.value)}
+          >
+            <option value="all">All properties</option>
+            {propertyOptions.map((option) => (
+              <option key={option} value={option}>
+                {option}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="block">
           <span className="sr-only">Filter apartments by status</span>
           <select
             className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm capitalize text-slate-700 outline-none transition-colors focus:border-emerald-500 focus:bg-white focus:ring-2 focus:ring-emerald-500/15"
