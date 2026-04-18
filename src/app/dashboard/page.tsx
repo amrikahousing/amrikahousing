@@ -50,6 +50,15 @@ function Icon({ name, className = "" }: { name: string; className?: string }) {
     );
   }
 
+  if (name === "apartment") {
+    return (
+      <svg {...shared}>
+        <path d="M5 21V4.5A1.5 1.5 0 0 1 6.5 3h11A1.5 1.5 0 0 1 19 4.5V21" />
+        <path d="M9 7h2M13 7h2M9 11h2M13 11h2M9 15h2M13 15h2M4 21h16" />
+      </svg>
+    );
+  }
+
   if (name === "users") {
     return (
       <svg {...shared}>
@@ -110,6 +119,9 @@ export default async function DashboardPage() {
 
   const [
     totalProperties,
+    totalApartments,
+    vacantApartments,
+    maintenanceApartments,
     activeLeases,
     openRequests,
     urgentOpenRequests,
@@ -123,6 +135,35 @@ export default async function DashboardPage() {
           where: {
             organizations: { clerk_org_id: orgId },
             deleted_at: null,
+          },
+        }),
+        prisma.units.count({
+          where: {
+            deleted_at: null,
+            properties: {
+              deleted_at: null,
+              organizations: { clerk_org_id: orgId },
+            },
+          },
+        }),
+        prisma.units.count({
+          where: {
+            status: "vacant",
+            deleted_at: null,
+            properties: {
+              deleted_at: null,
+              organizations: { clerk_org_id: orgId },
+            },
+          },
+        }),
+        prisma.units.count({
+          where: {
+            status: "maintenance",
+            deleted_at: null,
+            properties: {
+              deleted_at: null,
+              organizations: { clerk_org_id: orgId },
+            },
           },
         }),
         prisma.leases.count({
@@ -243,12 +284,15 @@ export default async function DashboardPage() {
           take: 6,
         }),
       ])
-    : [0, 0, 0, 0, [], [], [], []];
+    : [0, 0, 0, 0, 0, 0, 0, [], [], [], []];
 
   const monthlyRevenue = activeLeaseRows.reduce(
     (sum, lease) => sum + Number(lease.rent_amount ?? 0),
     0,
   );
+  const occupiedApartments = Math.max(totalApartments - vacantApartments - maintenanceApartments, 0);
+  const apartmentOccupancyRate =
+    totalApartments === 0 ? 0 : clampScore((occupiedApartments / totalApartments) * 100);
 
   const stats = [
     {
@@ -256,6 +300,24 @@ export default async function DashboardPage() {
       value: totalProperties.toLocaleString(),
       icon: "building",
       subtext: "Live portfolio",
+    },
+    {
+      name: "Total Apartments",
+      value: totalApartments.toLocaleString(),
+      icon: "apartment",
+      subtext: `${occupiedApartments.toLocaleString()} occupied across the portfolio`,
+    },
+    {
+      name: "Vacant Apartments",
+      value: vacantApartments.toLocaleString(),
+      icon: "apartment",
+      subtext: `${apartmentOccupancyRate}% apartment occupancy`,
+    },
+    {
+      name: "Apartments in Maintenance",
+      value: maintenanceApartments.toLocaleString(),
+      icon: "wrench",
+      subtext: "Units marked for repair or turnover",
     },
     {
       name: "Active Leases",

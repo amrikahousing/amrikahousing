@@ -3,17 +3,21 @@
 import Link from "next/link";
 import { useMemo, useState } from "react";
 
-export type PropertyListItem = {
+export type PropertyGroup = {
   id: string;
-  propertyId: string;
-  propertyName: string;
-  unitNumber: string;
+  name: string;
   address: string;
   city: string;
   state: string;
   zip: string;
   type: string;
   description: string | null;
+  apartments: ApartmentListItem[];
+};
+
+export type ApartmentListItem = {
+  id: string;
+  unitNumber: string;
   bedrooms: number;
   bathrooms: number;
   squareFeet: number | null;
@@ -39,31 +43,57 @@ function SearchIcon({ className = "" }: { className?: string }) {
   );
 }
 
-export function PropertiesList({ properties }: { properties: PropertyListItem[] }) {
+function EditIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.8"
+    >
+      <path d="m14.5 5.5 4 4" />
+      <path d="M4 20h4l10.5-10.5a2.8 2.8 0 0 0-4-4L4 16v4Z" />
+    </svg>
+  );
+}
+
+function formatCurrency(value: number | null) {
+  if (value === null) return "Rent not set";
+  return `$${value.toLocaleString()}/mo`;
+}
+
+function statusClass(status: string) {
+  switch (status) {
+    case "occupied":
+      return "border-sky-200 bg-sky-50 text-sky-700";
+    case "maintenance":
+      return "border-amber-200 bg-amber-50 text-amber-700";
+    default:
+      return "border-emerald-200 bg-emerald-50 text-emerald-700";
+  }
+}
+
+export function PropertiesList({ properties }: { properties: PropertyGroup[] }) {
   const [search, setSearch] = useState("");
   const [propertyName, setPropertyName] = useState("all");
   const [status, setStatus] = useState("all");
 
   const propertyOptions = useMemo(
-    () =>
-      Array.from(new Set(properties.map((property) => property.propertyName))).sort(
-        (a, b) => a.localeCompare(b),
-      ),
+    () => properties.map((property) => property.name).sort((a, b) => a.localeCompare(b)),
     [properties],
   );
 
-  const filteredProperties = useMemo(() => {
+  const filteredGroups = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
 
-    return properties.filter((property) => {
-      const matchesProperty =
-        propertyName === "all" || property.propertyName === propertyName;
-      const matchesStatus = status === "all" || property.status === status;
-      const matchesSearch =
-        !normalizedSearch ||
-        [
-          property.propertyName,
-          property.unitNumber,
+    return properties
+      .map((property) => {
+        const propertyText = [
+          property.name,
           property.address,
           property.city,
           property.state,
@@ -71,37 +101,40 @@ export function PropertiesList({ properties }: { properties: PropertyListItem[] 
           property.description ?? "",
         ]
           .join(" ")
-          .toLowerCase()
-          .includes(normalizedSearch);
+          .toLowerCase();
+        const apartments = property.apartments.filter((apartment) => {
+          const matchesStatus = status === "all" || apartment.status === status;
+          const apartmentText = [
+            apartment.unitNumber,
+            apartment.status,
+            apartment.bedrooms,
+            apartment.bathrooms,
+            apartment.squareFeet ?? "",
+            apartment.rentAmount ?? "",
+          ]
+            .join(" ")
+            .toLowerCase();
+          const matchesSearch =
+            !normalizedSearch ||
+            propertyText.includes(normalizedSearch) ||
+            apartmentText.includes(normalizedSearch);
 
-      return matchesProperty && matchesStatus && matchesSearch;
-    });
+          return matchesStatus && matchesSearch;
+        });
+
+        return { ...property, apartments };
+      })
+      .filter((property) => matchesVisibleProperty(property, propertyName));
   }, [properties, propertyName, search, status]);
 
-  const apartmentNoun = properties.length === 1 ? "apartment" : "apartments";
-
-  function formatCurrency(value: number | null) {
-    if (value === null) return "Rent not set";
-    return `$${value.toLocaleString()}/mo`;
-  }
-
-  function EditIcon({ className = "" }: { className?: string }) {
-    return (
-      <svg
-        aria-hidden="true"
-        className={className}
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-        strokeWidth="1.8"
-      >
-        <path d="m14.5 5.5 4 4" />
-        <path d="M4 20h4l10.5-10.5a2.8 2.8 0 0 0-4-4L4 16v4Z" />
-      </svg>
-    );
-  }
+  const visibleApartmentCount = filteredGroups.reduce(
+    (count, property) => count + property.apartments.length,
+    0,
+  );
+  const totalApartmentCount = properties.reduce(
+    (count, property) => count + property.apartments.length,
+    0,
+  );
 
   return (
     <div className="space-y-6">
@@ -111,7 +144,7 @@ export function PropertiesList({ properties }: { properties: PropertyListItem[] 
           <SearchIcon className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
           <input
             className="h-10 w-full rounded-lg border border-slate-200 bg-slate-50 pl-10 pr-3 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-emerald-500 focus:bg-white focus:ring-2 focus:ring-emerald-500/15"
-            placeholder="Search apartment, address, city, state, or zip"
+            placeholder="Search property, apartment, address, city, state, or zip"
             value={search}
             onChange={(event) => setSearch(event.target.value)}
           />
@@ -146,72 +179,104 @@ export function PropertiesList({ properties }: { properties: PropertyListItem[] 
         </label>
       </div>
 
-      <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        {filteredProperties.map((property) => (
-          <article
-            key={property.id}
-            className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md"
-          >
-            <div className="flex items-start justify-between gap-3">
-              <div className="min-w-0">
-                <p className="truncate text-lg font-semibold text-slate-900">
-                  Apartment {property.unitNumber}
-                </p>
-                <p className="mt-1 truncate text-sm text-slate-600">
-                  {property.propertyName}
-                </p>
-                <p className="mt-1 truncate text-sm text-slate-500">
-                  {property.address}
-                </p>
-                <p className="mt-0.5 truncate text-xs text-slate-500">
-                  {property.city}, {property.state} {property.zip}
-                </p>
+      <div className="space-y-5">
+        {filteredGroups.map((property) => {
+          const vacantCount = property.apartments.filter(
+            (apartment) => apartment.status === "vacant",
+          ).length;
+
+          return (
+            <section
+              key={property.id}
+              className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm"
+            >
+              <div className="border-b border-slate-200 bg-slate-50/80 p-5">
+                <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h2 className="truncate text-xl font-semibold text-slate-900">
+                        {property.name}
+                      </h2>
+                      <span className="rounded border border-slate-200 bg-white px-2 py-0.5 text-xs capitalize text-slate-500">
+                        {property.type}
+                      </span>
+                    </div>
+                    <p className="mt-1 text-sm text-slate-600">{property.address}</p>
+                    <p className="text-sm text-slate-500">
+                      {property.city}, {property.state} {property.zip}
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-600">
+                      {property.apartments.length} apartment{property.apartments.length !== 1 ? "s" : ""}
+                    </span>
+                    <span className="rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+                      {vacantCount} vacant
+                    </span>
+                    <Link
+                      href={`/properties/${property.id}`}
+                      className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-600 transition-colors hover:bg-slate-50 hover:text-slate-900"
+                      aria-label={`Edit ${property.name}`}
+                    >
+                      <EditIcon className="h-4 w-4" />
+                    </Link>
+                  </div>
+                </div>
               </div>
-              <div className="flex shrink-0 items-center gap-2">
-                <span className="rounded border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs capitalize text-emerald-700">
-                  {property.status}
-                </span>
-                <Link
-                  href={`/properties/${property.propertyId}`}
-                  aria-label={`Edit apartment ${property.unitNumber} at ${property.propertyName}`}
-                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition-colors hover:bg-slate-50 hover:text-slate-900"
-                >
-                  <EditIcon className="h-4 w-4" />
-                </Link>
+
+              <div className="grid gap-3 p-5 md:grid-cols-2 xl:grid-cols-3">
+                {property.apartments.map((apartment) => (
+                  <Link
+                    key={apartment.id}
+                    href={`/properties/${property.id}`}
+                    className="group rounded-lg border border-slate-200 bg-white p-4 transition-colors hover:border-emerald-200 hover:bg-emerald-50/40"
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm text-slate-500">Apartment</p>
+                        <p className="mt-0.5 text-xl font-semibold text-slate-900">
+                          {apartment.unitNumber}
+                        </p>
+                      </div>
+                      <span
+                        className={`rounded border px-2 py-0.5 text-xs capitalize ${statusClass(apartment.status)}`}
+                      >
+                        {apartment.status}
+                      </span>
+                    </div>
+                    <div className="mt-4 grid grid-cols-2 gap-3 text-sm text-slate-500">
+                      <span>{apartment.bedrooms} bed{apartment.bedrooms === 1 ? "" : "s"}</span>
+                      <span>{apartment.bathrooms} bath{apartment.bathrooms === 1 ? "" : "s"}</span>
+                      <span>{apartment.squareFeet ? `${apartment.squareFeet.toLocaleString()} sq ft` : "Sq ft not set"}</span>
+                      <span className="font-medium text-slate-700">
+                        {formatCurrency(apartment.rentAmount)}
+                      </span>
+                    </div>
+                  </Link>
+                ))}
               </div>
-            </div>
+            </section>
+          );
+        })}
 
-            {property.description ? (
-              <p className="mt-4 line-clamp-2 min-h-[40px] text-sm text-slate-500">
-                {property.description}
-              </p>
-            ) : (
-              <p className="mt-4 min-h-[40px] text-sm text-slate-400">
-                No description added yet.
-              </p>
-            )}
-
-            <div className="mt-4 grid grid-cols-2 gap-3 text-sm text-slate-500">
-              <span>{property.bedrooms} bed{property.bedrooms === 1 ? "" : "s"}</span>
-              <span>{property.bathrooms} bath{property.bathrooms === 1 ? "" : "s"}</span>
-              <span>{property.squareFeet ? `${property.squareFeet.toLocaleString()} sq ft` : "Sq ft not set"}</span>
-              <span className="font-medium text-slate-700">
-                {formatCurrency(property.rentAmount)}
-              </span>
-            </div>
-          </article>
-        ))}
-
-        {filteredProperties.length === 0 ? (
-          <div className="col-span-full rounded-lg border border-slate-200 bg-white p-10 text-center text-slate-500 shadow-sm">
-            No apartments matched that filter.
+        {filteredGroups.length === 0 ? (
+          <div className="rounded-lg border border-slate-200 bg-white p-10 text-center text-slate-500 shadow-sm">
+            No apartment groups matched that filter.
           </div>
         ) : null}
       </div>
 
       <p className="text-sm text-slate-500">
-        Showing {filteredProperties.length} of {properties.length} {apartmentNoun}.
+        Showing {visibleApartmentCount} of {totalApartmentCount} apartments across{" "}
+        {filteredGroups.length} of {properties.length} properties.
       </p>
     </div>
   );
+}
+
+function matchesVisibleProperty(
+  property: PropertyGroup,
+  propertyName: string,
+) {
+  return (propertyName === "all" || property.name === propertyName) && property.apartments.length > 0;
 }

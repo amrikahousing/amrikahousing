@@ -367,34 +367,48 @@ export function PropertyDetailsClient({
         <section>
           <h2 className="text-lg font-semibold text-slate-900">Apartments</h2>
           {property.units.length > 0 ? (
-            <div className="mt-3 overflow-x-auto rounded-lg border border-slate-200">
-              <table className="min-w-full divide-y divide-slate-200 text-sm">
-                <thead className="bg-slate-50 text-slate-500">
-                  <tr>
-                    <th className="px-4 py-3 text-left font-medium">Apt</th>
-                    <th className="px-4 py-3 text-left font-medium">Beds</th>
-                    <th className="px-4 py-3 text-left font-medium">Baths</th>
-                    <th className="px-4 py-3 text-left font-medium">Sq ft</th>
-                    <th className="px-4 py-3 text-left font-medium">Rent</th>
-                    <th className="px-4 py-3 text-left font-medium">Status</th>
-                    <th className="px-4 py-3 text-right font-medium">Actions</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-200 bg-white text-slate-700">
-                  {property.units.map((unit) => (
-                    <tr key={unit.id}>
-                      <td className="px-4 py-3 font-medium text-slate-900">
+            <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+              {property.units.map((unit) => (
+                <article
+                  key={unit.id}
+                  className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition-shadow hover:shadow-md"
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm text-slate-500">Apartment</p>
+                      <p className="mt-0.5 text-2xl font-semibold text-slate-900">
                         {unit.unitNumber}
-                      </td>
-                      <td className="px-4 py-3">{unit.bedrooms}</td>
-                      <td className="px-4 py-3">{unit.bathrooms}</td>
-                      <td className="px-4 py-3">
+                      </p>
+                    </div>
+                    <span className="rounded border border-emerald-200 bg-emerald-50 px-2 py-0.5 text-xs capitalize text-emerald-700">
+                      {unit.status}
+                    </span>
+                  </div>
+
+                  <div className="mt-4 grid grid-cols-2 gap-3 text-sm">
+                    <div className="rounded-lg bg-slate-50 p-3">
+                      <p className="text-xs text-slate-500">Beds</p>
+                      <p className="mt-1 font-semibold text-slate-900">{unit.bedrooms}</p>
+                    </div>
+                    <div className="rounded-lg bg-slate-50 p-3">
+                      <p className="text-xs text-slate-500">Baths</p>
+                      <p className="mt-1 font-semibold text-slate-900">{unit.bathrooms}</p>
+                    </div>
+                    <div className="rounded-lg bg-slate-50 p-3">
+                      <p className="text-xs text-slate-500">Sq ft</p>
+                      <p className="mt-1 font-semibold text-slate-900">
                         {unit.squareFeet?.toLocaleString() ?? "--"}
-                      </td>
-                      <td className="px-4 py-3">{formatCurrency(unit.rentAmount)}</td>
-                      <td className="px-4 py-3 capitalize">{unit.status}</td>
-                      <td className="px-4 py-3">
-                        <div className="flex justify-end gap-2">
+                      </p>
+                    </div>
+                    <div className="rounded-lg bg-slate-50 p-3">
+                      <p className="text-xs text-slate-500">Rent</p>
+                      <p className="mt-1 font-semibold text-slate-900">
+                        {formatCurrency(unit.rentAmount)}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="mt-4 flex justify-end gap-2">
                         <button
                           type="button"
                           aria-label={`Duplicate apartment ${unit.unitNumber}`}
@@ -419,12 +433,9 @@ export function PropertyDetailsClient({
                         >
                           <TrashIcon className="h-4 w-4" />
                         </button>
-                        </div>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </div>
+                </article>
+              ))}
             </div>
           ) : (
             <p className="mt-2 text-slate-500">No apartments found for this property.</p>
