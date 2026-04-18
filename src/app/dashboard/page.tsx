@@ -1,99 +1,31 @@
-import { currentUser } from "@clerk/nextjs/server";
+import { auth, currentUser } from "@clerk/nextjs/server";
+import { redirect } from "next/navigation";
 import { AppShell, type AppShellUser } from "@/components/AppShell";
-
-const revenueData = [
-  { month: "Jan", revenue: 18000 },
-  { month: "Feb", revenue: 21000 },
-  { month: "Mar", revenue: 19500 },
-  { month: "Apr", revenue: 24500 },
-  { month: "May", revenue: 23000 },
-  { month: "Jun", revenue: 24500 },
-];
-
-const stats = [
-  {
-    name: "Total Properties",
-    value: "12",
-    icon: "building",
-    subtext: "Live portfolio",
-  },
-  {
-    name: "Active Leases",
-    value: "18",
-    icon: "users",
-    subtext: "6 renewals this month",
-  },
-  {
-    name: "Open Requests",
-    value: "7",
-    icon: "wrench",
-    subtext: "2 urgent items",
-  },
-  {
-    name: "Monthly Revenue",
-    value: "$24,500",
-    icon: "wallet",
-    subtext: "From active leases",
-  },
-];
-
-const alerts = [
-  {
-    title: "Oak Terrace 2B needs income review",
-    detail: "Applicant documents are waiting for approval.",
-    severity: "high",
-  },
-  {
-    title: "Pine Lofts HVAC inspection",
-    detail: "Vendor requested a same-day confirmation.",
-    severity: "medium",
-  },
-  {
-    title: "Cedar House lease draft",
-    detail: "Manager approval is the final step.",
-    severity: "low",
-  },
-];
-
-const portfolioHealth = [
-  {
-    propertyId: "oak-terrace",
-    address: "Oak Terrace 2B",
-    city: "Atlanta",
-    state: "GA",
-    score: 91,
-    occupancy: 96,
-    rent: 94,
-    maintenance: 88,
-    noi: 90,
-  },
-  {
-    propertyId: "maple-court",
-    address: "Maple Court 4A",
-    city: "Decatur",
-    state: "GA",
-    score: 84,
-    occupancy: 89,
-    rent: 92,
-    maintenance: 76,
-    noi: 81,
-  },
-  {
-    propertyId: "cedar-house",
-    address: "Cedar House",
-    city: "Marietta",
-    state: "GA",
-    score: 78,
-    occupancy: 82,
-    rent: 86,
-    maintenance: 70,
-    noi: 74,
-  },
-];
+import { prisma } from "@/lib/db";
 
 function metadataString(metadata: Record<string, unknown>, key: string) {
   const value = metadata[key];
   return typeof value === "string" && value.trim() ? value : null;
+}
+
+function formatCurrency(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  }).format(value);
+}
+
+function clampScore(value: number) {
+  return Math.max(0, Math.min(100, Math.round(value)));
+}
+
+function monthStart(date: Date) {
+  return new Date(date.getFullYear(), date.getMonth(), 1);
+}
+
+function monthLabel(date: Date) {
+  return new Intl.DateTimeFormat("en-US", { month: "short" }).format(date);
 }
 
 function Icon({ name, className = "" }: { name: string; className?: string }) {
@@ -153,7 +85,9 @@ function Icon({ name, className = "" }: { name: string; className?: string }) {
 }
 
 export default async function DashboardPage() {
-  const user = await currentUser();
+  const [{ userId, orgId }, user] = await Promise.all([auth(), currentUser()]);
+  if (!userId) redirect("/login");
+
   const unsafeMetadata = (user?.unsafeMetadata ?? {}) as Record<string, unknown>;
   const organizationName = metadataString(unsafeMetadata, "organizationName");
   const firstName =
@@ -166,7 +100,276 @@ export default async function DashboardPage() {
     role,
     organizationName,
   };
-  const tallestRevenue = Math.max(...revenueData.map((item) => item.revenue));
+
+  const months = Array.from({ length: 6 }, (_, index) => {
+    const date = new Date();
+    date.setMonth(date.getMonth() - (5 - index), 1);
+    date.setHours(0, 0, 0, 0);
+    return date;
+  });
+
+  const [
+    totalProperties,
+    activeLeases,
+    openRequests,
+    urgentOpenRequests,
+    activeLeaseRows,
+    recentPayments,
+    recentAlerts,
+    properties,
+  ] = orgId
+    ? await Promise.all([
+        prisma.properties.count({
+          where: {
+            organizations: { clerk_org_id: orgId },
+            deleted_at: null,
+          },
+        }),
+        prisma.leases.count({
+          where: {
+            status: "active",
+            deleted_at: null,
+            units: {
+              deleted_at: null,
+              properties: {
+                deleted_at: null,
+                organizations: { clerk_org_id: orgId },
+              },
+            },
+          },
+        }),
+        prisma.maintenance_requests.count({
+          where: {
+            organizations: { clerk_org_id: orgId },
+            status: { in: ["open", "in_progress"] },
+          },
+        }),
+        prisma.maintenance_requests.count({
+          where: {
+            organizations: { clerk_org_id: orgId },
+            status: { in: ["open", "in_progress"] },
+            priority: { in: ["high", "emergency"] },
+          },
+        }),
+        prisma.leases.findMany({
+          where: {
+            status: "active",
+            deleted_at: null,
+            units: {
+              deleted_at: null,
+              properties: {
+                deleted_at: null,
+                organizations: { clerk_org_id: orgId },
+              },
+            },
+          },
+          select: { rent_amount: true },
+        }),
+        prisma.payments.findMany({
+          where: {
+            leases: {
+              units: {
+                deleted_at: null,
+                properties: {
+                  deleted_at: null,
+                  organizations: { clerk_org_id: orgId },
+                },
+              },
+            },
+            OR: [
+              { paid_at: { gte: monthStart(months[0]) } },
+              { due_date: { gte: monthStart(months[0]) } },
+            ],
+          },
+          select: {
+            amount: true,
+            paid_at: true,
+            due_date: true,
+            status: true,
+            leases: {
+              select: {
+                unit_id: true,
+                units: {
+                  select: {
+                    property_id: true,
+                  },
+                },
+              },
+            },
+          },
+        }),
+        prisma.maintenance_requests.findMany({
+          where: {
+            organizations: { clerk_org_id: orgId },
+            status: { in: ["open", "in_progress"] },
+          },
+          include: {
+            units: {
+              include: {
+                properties: true,
+              },
+            },
+          },
+          orderBy: [{ priority: "desc" }, { created_at: "desc" }],
+          take: 3,
+        }),
+        prisma.properties.findMany({
+          where: {
+            organizations: { clerk_org_id: orgId },
+            deleted_at: null,
+          },
+          include: {
+            units: {
+              where: { deleted_at: null },
+              include: {
+                leases: {
+                  where: { deleted_at: null },
+                  select: {
+                    id: true,
+                    status: true,
+                  },
+                },
+                maintenance_requests: {
+                  select: {
+                    id: true,
+                    priority: true,
+                    status: true,
+                  },
+                },
+              },
+            },
+          },
+          orderBy: { created_at: "desc" },
+          take: 6,
+        }),
+      ])
+    : [0, 0, 0, 0, [], [], [], []];
+
+  const monthlyRevenue = activeLeaseRows.reduce(
+    (sum, lease) => sum + Number(lease.rent_amount ?? 0),
+    0,
+  );
+
+  const stats = [
+    {
+      name: "Total Properties",
+      value: totalProperties.toLocaleString(),
+      icon: "building",
+      subtext: "Live portfolio",
+    },
+    {
+      name: "Active Leases",
+      value: activeLeases.toLocaleString(),
+      icon: "users",
+      subtext: `${Math.max(activeLeases, 0)} currently occupied agreements`,
+    },
+    {
+      name: "Open Requests",
+      value: openRequests.toLocaleString(),
+      icon: "wrench",
+      subtext: `${urgentOpenRequests} urgent item${urgentOpenRequests === 1 ? "" : "s"}`,
+    },
+    {
+      name: "Monthly Revenue",
+      value: formatCurrency(monthlyRevenue),
+      icon: "wallet",
+      subtext: "Projected from active leases",
+    },
+  ];
+
+  const revenueData = months.map((date) => {
+    const start = monthStart(date);
+    const end = new Date(start.getFullYear(), start.getMonth() + 1, 1);
+    const revenue = recentPayments
+      .filter((payment) => {
+        if (payment.status === "failed" || payment.status === "cancelled") {
+          return false;
+        }
+        const effectiveDate = payment.paid_at ?? payment.due_date;
+        if (!effectiveDate) return false;
+        return effectiveDate >= start && effectiveDate < end;
+      })
+      .reduce((sum, payment) => sum + Number(payment.amount ?? 0), 0);
+
+    return {
+      month: monthLabel(start),
+      revenue,
+    };
+  });
+
+  const alerts =
+    recentAlerts.length > 0
+      ? recentAlerts.map((item) => ({
+          title: item.title,
+          detail: `${item.units.properties.name}${item.units.unit_number ? ` • Unit ${item.units.unit_number}` : ""}`,
+          severity:
+            item.priority === "emergency" || item.priority === "high"
+              ? "high"
+              : item.priority === "normal"
+                ? "medium"
+                : "low",
+        }))
+      : [
+          {
+            title: "No active alerts",
+            detail: "Open maintenance issues will appear here.",
+            severity: "low",
+          },
+        ];
+
+  const portfolioHealth = properties.map((property) => {
+    const totalUnits = property.units.length;
+    const occupiedUnits = property.units.filter(
+      (unit) =>
+        unit.status === "occupied" ||
+        unit.leases?.status === "active",
+    ).length;
+    const propertyOpenRequests = property.units.flatMap((unit) =>
+      unit.maintenance_requests.filter((request) =>
+        ["open", "in_progress"].includes(request.status),
+      ),
+    );
+    const severeRequestCount = propertyOpenRequests.filter((request) =>
+      ["high", "emergency"].includes(request.priority),
+    ).length;
+    const occupancy = totalUnits === 0 ? 0 : (occupiedUnits / totalUnits) * 100;
+
+    const propertyPayments = recentPayments.filter(
+      (payment) => payment.leases.units.property_id === property.id,
+    );
+    const completedPayments = propertyPayments.filter(
+      (payment) => payment.status === "paid" || payment.status === "completed",
+    ).length;
+    const rent = propertyPayments.length
+      ? (completedPayments / propertyPayments.length) * 100
+      : occupancy;
+
+    const maintenance = clampScore(
+      100 - propertyOpenRequests.length * 12 - severeRequestCount * 10,
+    );
+    const noi = clampScore(occupancy * 0.45 + rent * 0.35 + maintenance * 0.2);
+    const score = clampScore((occupancy + rent + maintenance + noi) / 4);
+
+    return {
+      propertyId: property.id,
+      address: property.name,
+      city: property.city,
+      state: property.state,
+      score,
+      occupancy: clampScore(occupancy),
+      rent: clampScore(rent),
+      maintenance,
+      noi,
+    };
+  });
+
+  const tallestRevenue = Math.max(1, ...revenueData.map((item) => item.revenue));
+  const lastUpdated = new Intl.DateTimeFormat("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  }).format(new Date());
 
   return (
     <AppShell user={shellUser}>
@@ -184,7 +387,7 @@ export default async function DashboardPage() {
             </p>
           </div>
           <div className="self-start rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-500 shadow-sm sm:self-auto">
-            Last updated: Today, 9:41 AM
+            Last updated: {lastUpdated}
           </div>
         </header>
 
@@ -283,39 +486,45 @@ export default async function DashboardPage() {
             </h2>
           </div>
           <div className="space-y-3 p-6">
-            {portfolioHealth.map((item) => (
-              <article
-                key={item.propertyId}
-                className="rounded-lg border border-slate-200 p-3"
-              >
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <h3 className="font-medium text-slate-900">
-                      {item.address}
-                    </h3>
-                    <p className="text-xs text-slate-500">
-                      {item.city}, {item.state}
-                    </p>
+            {portfolioHealth.length === 0 ? (
+              <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">
+                Add properties to start tracking portfolio health.
+              </div>
+            ) : (
+              portfolioHealth.map((item) => (
+                <article
+                  key={item.propertyId}
+                  className="rounded-lg border border-slate-200 p-3"
+                >
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <h3 className="font-medium text-slate-900">
+                        {item.address}
+                      </h3>
+                      <p className="text-xs text-slate-500">
+                        {item.city}, {item.state}
+                      </p>
+                    </div>
+                    <span
+                      className={[
+                        "rounded px-2 py-1 text-xs font-semibold",
+                        item.score >= 80
+                          ? "bg-emerald-600 text-white"
+                          : "border border-slate-200 text-slate-700",
+                      ].join(" ")}
+                    >
+                      {item.score}/100
+                    </span>
                   </div>
-                  <span
-                    className={[
-                      "rounded px-2 py-1 text-xs font-semibold",
-                      item.score >= 80
-                        ? "bg-emerald-600 text-white"
-                        : "border border-slate-200 text-slate-700",
-                    ].join(" ")}
-                  >
-                    {item.score}/100
-                  </span>
-                </div>
-                <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-600 md:grid-cols-4">
-                  <span>Occupancy: {item.occupancy}</span>
-                  <span>On-time Rent: {item.rent}</span>
-                  <span>Maintenance: {item.maintenance}</span>
-                  <span>NOI Trend: {item.noi}</span>
-                </div>
-              </article>
-            ))}
+                  <div className="mt-3 grid grid-cols-2 gap-2 text-xs text-slate-600 md:grid-cols-4">
+                    <span>Occupancy: {item.occupancy}</span>
+                    <span>On-time Rent: {item.rent}</span>
+                    <span>Maintenance: {item.maintenance}</span>
+                    <span>NOI Trend: {item.noi}</span>
+                  </div>
+                </article>
+              ))
+            )}
           </div>
         </section>
       </div>

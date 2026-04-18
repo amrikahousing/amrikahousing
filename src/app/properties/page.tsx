@@ -2,6 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
+import { PropertiesList } from "@/components/PropertiesList";
 import { prisma } from "@/lib/db";
 
 export default async function PropertiesPage() {
@@ -18,6 +19,19 @@ export default async function PropertiesPage() {
         orderBy: { created_at: "desc" },
       })
     : [];
+
+  const propertyCards = properties.map((property) => ({
+    id: property.id,
+    name: property.name,
+    address: property.address,
+    city: property.city,
+    state: property.state,
+    zip: property.zip,
+    type: property.type,
+    description: property.description,
+    unitCount: property.units.length,
+    vacantCount: property.units.filter((unit) => unit.status === "vacant").length,
+  }));
 
   return (
     <AppShell>
@@ -50,35 +64,7 @@ export default async function PropertiesPage() {
             </div>
           </div>
         ) : (
-          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
-            {properties.map((p: typeof properties[number]) => {
-              const vacantCount = p.units.filter((u: typeof p.units[number]) => u.status === "vacant").length;
-              return (
-                <article
-                  key={p.id}
-                  className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md"
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="truncate font-semibold text-slate-900">{p.name}</p>
-                      <p className="mt-0.5 truncate text-sm text-slate-500">
-                        {p.address}, {p.city}, {p.state} {p.zip}
-                      </p>
-                    </div>
-                    <span className="shrink-0 rounded border border-slate-200 px-2 py-0.5 text-xs capitalize text-slate-500">
-                      {p.type}
-                    </span>
-                  </div>
-                  <div className="mt-3 flex gap-3 text-sm text-slate-500">
-                    <span>{p.units.length} unit{p.units.length !== 1 ? "s" : ""}</span>
-                    {vacantCount > 0 && (
-                      <span className="text-emerald-600">{vacantCount} vacant</span>
-                    )}
-                  </div>
-                </article>
-              );
-            })}
-          </div>
+          <PropertiesList properties={propertyCards} />
         )}
       </div>
     </AppShell>

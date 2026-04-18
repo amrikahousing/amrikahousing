@@ -2,10 +2,10 @@
 
 import { useMemo, useState } from "react";
 
-type UserRole = "manager" | "tenant";
-type RequestPriority = "low" | "medium" | "high" | "emergency";
-type RequestStatus = "open" | "in_progress" | "completed" | "rejected";
-type RequestCategory =
+export type UserRole = "manager" | "tenant";
+export type RequestPriority = "low" | "medium" | "high" | "emergency";
+export type RequestStatus = "open" | "in_progress" | "completed" | "rejected";
+export type RequestCategory =
   | "plumbing"
   | "electrical"
   | "hvac"
@@ -14,17 +14,17 @@ type RequestCategory =
   | "security"
   | "general";
 
-type Property = {
-  id: number;
+export type Property = {
+  id: string;
   address: string;
   city: string;
   state: string;
   zipCode: string;
 };
 
-type MaintenanceRequest = {
-  id: number;
-  propertyId: number;
+export type MaintenanceRequest = {
+  id: string;
+  propertyId: string;
   tenantId: string;
   title: string;
   description: string;
@@ -42,107 +42,9 @@ type MaintenanceRequest = {
 type MaintenanceClientProps = {
   role: UserRole;
   userId: string;
+  initialProperties: Property[];
+  initialRequests: MaintenanceRequest[];
 };
-
-const properties: Property[] = [
-  {
-    id: 1,
-    address: "Oak Terrace 2B",
-    city: "Atlanta",
-    state: "GA",
-    zipCode: "30303",
-  },
-  {
-    id: 2,
-    address: "Maple Court 4A",
-    city: "Decatur",
-    state: "GA",
-    zipCode: "30030",
-  },
-  {
-    id: 3,
-    address: "Cedar House",
-    city: "Marietta",
-    state: "GA",
-    zipCode: "30060",
-  },
-  {
-    id: 4,
-    address: "Pine Lofts 8C",
-    city: "Sandy Springs",
-    state: "GA",
-    zipCode: "30328",
-  },
-];
-
-const initialRequests: MaintenanceRequest[] = [
-  {
-    id: 1,
-    propertyId: 1,
-    tenantId: "tenant-demo",
-    title: "Kitchen faucet leaking",
-    description: "A steady drip is coming from the kitchen faucet handle.",
-    category: "plumbing",
-    priority: "medium",
-    status: "open",
-    slaDueAt: "2026-04-17T18:00:00.000Z",
-    escalatedAt: null,
-    assignedVendor: "Peachtree Plumbing",
-    assignmentNote: "Vendor can visit tomorrow morning.",
-    aiAnalysis:
-      "Likely plumbing fixture repair. Ask vendor to inspect cartridge and supply line.",
-    createdAt: "2026-04-15T14:25:00.000Z",
-  },
-  {
-    id: 2,
-    propertyId: 4,
-    tenantId: "tenant-demo",
-    title: "No cool air from HVAC",
-    description: "Thermostat is on, but the unit only blows warm air.",
-    category: "hvac",
-    priority: "high",
-    status: "in_progress",
-    slaDueAt: "2026-04-16T21:00:00.000Z",
-    escalatedAt: null,
-    assignedVendor: "Northside HVAC",
-    assignmentNote: "Technician assigned after 2 PM.",
-    aiAnalysis: null,
-    createdAt: "2026-04-14T17:10:00.000Z",
-  },
-  {
-    id: 3,
-    propertyId: 3,
-    tenantId: "tenant-cedar",
-    title: "Front door lock sticks",
-    description: "The front lock catches and takes several tries to open.",
-    category: "security",
-    priority: "medium",
-    status: "open",
-    slaDueAt: "2026-04-18T16:00:00.000Z",
-    escalatedAt: null,
-    assignedVendor: null,
-    assignmentNote: null,
-    aiAnalysis: null,
-    createdAt: "2026-04-13T13:40:00.000Z",
-  },
-  {
-    id: 4,
-    propertyId: 2,
-    tenantId: "tenant-maple",
-    title: "Water near laundry room",
-    description: "Water is pooling behind the washing machine.",
-    category: "appliance",
-    priority: "emergency",
-    status: "open",
-    slaDueAt: "2026-04-16T14:00:00.000Z",
-    escalatedAt: "2026-04-16T14:20:00.000Z",
-    assignedVendor: "Rapid Appliance Repair",
-    assignmentNote: "Escalated for same-day service.",
-    aiAnalysis:
-      "Possible washer hose or drain leak. Shut off supply valves and dispatch appliance vendor.",
-    createdAt: "2026-04-16T12:05:00.000Z",
-  },
-];
 
 const inputClass =
   "h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/15";
@@ -349,7 +251,12 @@ function buildTimeline(request: MaintenanceRequest) {
   return events.filter(Boolean) as Array<{ label: string; detail: string }>;
 }
 
-export function MaintenanceClient({ role, userId }: MaintenanceClientProps) {
+export function MaintenanceClient({
+  role,
+  userId,
+  initialProperties,
+  initialRequests,
+}: MaintenanceClientProps) {
   const [requests, setRequests] =
     useState<MaintenanceRequest[]>(initialRequests);
   const [searchQuery, setSearchQuery] = useState("");
@@ -361,15 +268,15 @@ export function MaintenanceClient({ role, userId }: MaintenanceClientProps) {
   const [autoEscalationEnabled, setAutoEscalationEnabled] = useState(true);
   const [autoVendorAssignmentEnabled, setAutoVendorAssignmentEnabled] =
     useState(true);
-  const [analyzingRequestId, setAnalyzingRequestId] = useState<number | null>(
+  const [analyzingRequestId, setAnalyzingRequestId] = useState<string | null>(
     null,
   );
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
 
   const propertyById = useMemo(() => {
-    return new Map(properties.map((property) => [property.id, property]));
-  }, []);
+    return new Map(initialProperties.map((property) => [property.id, property]));
+  }, [initialProperties]);
 
   const categoryOptions = useMemo(() => {
     return Array.from(new Set(requests.map((request) => request.category))).sort();
@@ -385,8 +292,7 @@ export function MaintenanceClient({ role, userId }: MaintenanceClientProps) {
     const scopedRequests =
       role === "tenant"
         ? requests.filter(
-            (request) =>
-              request.tenantId === userId || request.tenantId === "tenant-demo",
+            (request) => request.tenantId === userId,
           )
         : requests;
     const normalizedQuery = searchQuery.trim().toLowerCase();
@@ -453,7 +359,7 @@ export function MaintenanceClient({ role, userId }: MaintenanceClientProps) {
     setSelectedPriority("all");
   }
 
-  function updateStatus(id: number, status: RequestStatus) {
+  function updateStatus(id: string, status: RequestStatus) {
     setRequests((current) =>
       current.map((request) =>
         request.id === id ? { ...request, status } : request,
@@ -461,7 +367,7 @@ export function MaintenanceClient({ role, userId }: MaintenanceClientProps) {
     );
   }
 
-  function analyzeRequest(id: number) {
+  function analyzeRequest(id: string) {
     setAnalyzingRequestId(id);
     window.setTimeout(() => {
       setRequests((current) =>
@@ -485,11 +391,10 @@ export function MaintenanceClient({ role, userId }: MaintenanceClientProps) {
     event.preventDefault();
     if (!title.trim() || !description.trim()) return;
 
-    const nextId = Math.max(...requests.map((request) => request.id)) + 1;
     const nextRequest: MaintenanceRequest = {
-      id: nextId,
-      propertyId: properties[0].id,
-      tenantId: userId || "tenant-demo",
+      id: crypto.randomUUID(),
+      propertyId: initialProperties[0]?.id ?? "",
+      tenantId: userId,
       title: title.trim(),
       description: description.trim(),
       category: "general",
@@ -503,13 +408,14 @@ export function MaintenanceClient({ role, userId }: MaintenanceClientProps) {
       createdAt: new Date().toISOString(),
     };
 
+    if (!nextRequest.propertyId) return;
     setRequests((current) => [nextRequest, ...current]);
     setTitle("");
     setDescription("");
   }
 
   if (role === "tenant") {
-    const activeProperty = properties[0];
+    const activeProperty = initialProperties[0];
 
     return (
       <div className="space-y-8">
@@ -535,7 +441,7 @@ export function MaintenanceClient({ role, userId }: MaintenanceClientProps) {
                   Property
                 </p>
                 <p className="mt-2 font-medium text-slate-900">
-                  {propertyLabel(activeProperty)}
+                  {propertyLabel(activeProperty) ?? "No linked property found"}
                 </p>
               </div>
 
@@ -567,6 +473,7 @@ export function MaintenanceClient({ role, userId }: MaintenanceClientProps) {
 
               <button
                 type="submit"
+                disabled={!activeProperty}
                 className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-emerald-700"
               >
                 Submit Request
@@ -704,7 +611,7 @@ export function MaintenanceClient({ role, userId }: MaintenanceClientProps) {
               className={`${inputClass} bg-slate-50`}
             >
               <option value="all">All properties</option>
-              {properties.map((property) => (
+              {initialProperties.map((property) => (
                 <option key={property.id} value={property.id}>
                   {propertyLabel(property)}
                 </option>
@@ -752,7 +659,7 @@ export function MaintenanceClient({ role, userId }: MaintenanceClientProps) {
             {selectedPropertyId !== "all" ? (
               <Badge className="border-slate-200 bg-slate-100 text-slate-700">
                 Property:{" "}
-                {propertyLabel(propertyById.get(Number(selectedPropertyId))) ??
+                {propertyLabel(propertyById.get(selectedPropertyId)) ??
                   selectedPropertyId}
                 <button
                   type="button"
