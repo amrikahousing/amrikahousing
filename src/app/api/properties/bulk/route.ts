@@ -1,6 +1,6 @@
 import { requireOrgAccess, isAccessError } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import type { AiParsedProperty } from "@/app/api/ai-import/route";
+import type { AiParsedProperty } from "@/lib/ai-import-types";
 import type { PrismaClient } from "@/generated/prisma/client";
 
 type Tx = Omit<PrismaClient, "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends">;

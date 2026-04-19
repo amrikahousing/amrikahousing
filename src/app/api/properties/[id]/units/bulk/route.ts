@@ -1,6 +1,6 @@
 import { requireOrgAccess, isAccessError } from "@/lib/auth";
 import { prisma } from "@/lib/db";
-import type { AiParsedUnit } from "@/app/api/ai-import/route";
+import type { AiParsedUnit } from "@/lib/ai-import-types";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
