@@ -100,7 +100,7 @@ function Icon({ name, className = "" }: { name: string; className?: string }) {
 }
 
 export default async function DashboardPage() {
-  const [{ userId, orgId }, user] = await Promise.all([auth(), currentUser()]);
+  const [{ userId, orgId, orgRole }, user] = await Promise.all([auth(), currentUser()]);
   if (!userId) redirect("/login");
 
   const unsafeMetadata = (user?.unsafeMetadata ?? {}) as Record<string, unknown>;
@@ -108,12 +108,14 @@ export default async function DashboardPage() {
   const firstName =
     user?.firstName ?? metadataString(unsafeMetadata, "firstName") ?? null;
   const role = metadataString(unsafeMetadata, "role") ?? "property_manager";
+  const isOrgAdmin = orgRole === "org:admin";
   const shellUser: AppShellUser = {
     email: user?.primaryEmailAddress?.emailAddress ?? null,
     firstName,
     imageUrl: user?.imageUrl ?? null,
-    role,
+    role: isOrgAdmin ? "admin" : role,
     organizationName,
+    isOrgAdmin,
   };
 
   const months = Array.from({ length: 6 }, (_, index) => {

@@ -2,6 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { AiImportWizard } from "@/components/AiImportWizard";
+import { normalizePropertyType } from "@/lib/property-types";
 
 export default async function AiImportPage({
   searchParams,
@@ -16,7 +17,7 @@ export default async function AiImportPage({
     ? {
         id: sp.propertyId,
         name: sp.name ?? "",
-        type: sp.type ?? "rental",
+        type: normalizePropertyType(sp.type),
         address: sp.address ?? "",
         city: sp.city ?? "",
         state: sp.state ?? "",

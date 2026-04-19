@@ -1,4 +1,4 @@
-import { currentUser } from "@clerk/nextjs/server";
+import { auth, clerkClient, currentUser } from "@clerk/nextjs/server";
 import { AppShell } from "@/components/AppShell";
 import { ProfileForm } from "@/components/ProfileForm";
 
@@ -12,8 +12,22 @@ function metadataBoolean(metadata: Record<string, unknown>, key: string) {
 }
 
 export default async function ProfilePage() {
-  const user = await currentUser();
+  const [{ orgId }, user] = await Promise.all([auth(), currentUser()]);
   const metadata = (user?.unsafeMetadata ?? {}) as Record<string, unknown>;
+  let organizationName = metadataString(metadata, "organizationName");
+
+  if (orgId) {
+    try {
+      const clerk = await clerkClient();
+      const organization = await clerk.organizations.getOrganization({
+        organizationId: orgId,
+      });
+      organizationName = organization.name;
+    } catch {
+      // Keep the metadata fallback when Clerk organization lookup is unavailable.
+    }
+  }
+
   const twoFactorMethod = metadataString(metadata, "twoFactorMethod");
   const normalizedMethod =
     twoFactorMethod === "email" || twoFactorMethod === "phone"
@@ -36,6 +50,11 @@ export default async function ProfilePage() {
         <ProfileForm
           initialProfile={{
             email: user?.primaryEmailAddress?.emailAddress ?? "",
+            firstName:
+              user?.firstName || metadataString(metadata, "firstName"),
+            lastName:
+              user?.lastName || metadataString(metadata, "lastName"),
+            organizationName,
             phoneNumber: metadataString(metadata, "phoneNumber"),
             city: metadataString(metadata, "city"),
             state: metadataString(metadata, "state"),

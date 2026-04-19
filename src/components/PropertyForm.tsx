@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { UnitRowBuilder, emptyUnit } from "./UnitRowBuilder";
 import type { UnitDraft } from "./UnitRowBuilder";
+import { PROPERTY_TYPE_OPTIONS, normalizePropertyType } from "@/lib/property-types";
 
 const inputClass =
   "w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20";
@@ -18,7 +19,7 @@ export function PropertyForm() {
   const [units, setUnits] = useState<UnitDraft[]>([emptyUnit()]);
 
   const [form, setForm] = useState({
-    name: "", type: "rental", address: "", city: "", state: "", zip: "", description: "",
+    name: "", type: normalizePropertyType(), address: "", city: "", state: "", zip: "", description: "",
   });
 
   function set(field: keyof typeof form, value: string) {
@@ -69,8 +70,9 @@ export function PropertyForm() {
           <div>
             <label className={labelClass}>Type *</label>
             <select className={inputClass} value={form.type} onChange={(e) => set("type", e.target.value)}>
-              <option value="rental">Rental</option>
-              <option value="association">Association (HOA/Condo)</option>
+              {PROPERTY_TYPE_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>{option.label}</option>
+              ))}
             </select>
           </div>
           <div className="sm:col-span-2">

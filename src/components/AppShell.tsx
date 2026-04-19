@@ -1,4 +1,4 @@
-import { currentUser } from "@clerk/nextjs/server";
+import { auth, currentUser } from "@clerk/nextjs/server";
 import { AppSidebar } from "./AppSidebar";
 
 export type AppShellUser = {
@@ -7,6 +7,7 @@ export type AppShellUser = {
   imageUrl: string | null;
   role: string;
   organizationName: string | null;
+  isOrgAdmin: boolean;
 };
 
 function metadataString(
@@ -18,7 +19,7 @@ function metadataString(
 }
 
 export async function getAppShellUser(): Promise<AppShellUser> {
-  const user = await currentUser();
+  const [{ orgRole }, user] = await Promise.all([auth(), currentUser()]);
   const unsafeMetadata = user?.unsafeMetadata as Record<string, unknown> | null;
   const publicMetadata = user?.publicMetadata as Record<string, unknown> | null;
 
@@ -26,6 +27,7 @@ export async function getAppShellUser(): Promise<AppShellUser> {
     metadataString(unsafeMetadata, "role") ??
     metadataString(publicMetadata, "role") ??
     "property_manager";
+  const isOrgAdmin = orgRole === "org:admin";
   const organizationName =
     metadataString(unsafeMetadata, "organizationName") ??
     metadataString(publicMetadata, "organizationName");
@@ -38,8 +40,9 @@ export async function getAppShellUser(): Promise<AppShellUser> {
     email: user?.primaryEmailAddress?.emailAddress ?? null,
     firstName,
     imageUrl: user?.imageUrl ?? null,
-    role,
+    role: isOrgAdmin ? "admin" : role,
     organizationName,
+    isOrgAdmin,
   };
 }
 

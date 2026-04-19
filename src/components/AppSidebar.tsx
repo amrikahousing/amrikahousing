@@ -12,6 +12,7 @@ type AppSidebarProps = {
     imageUrl: string | null;
     role: string;
     organizationName: string | null;
+    isOrgAdmin: boolean;
   };
 };
 
@@ -19,6 +20,7 @@ type IconName =
   | "dashboard"
   | "building"
   | "wrench"
+  | "users"
   | "profile";
 
 const navigation: Array<{ name: string; href: string; icon: IconName }> = [
@@ -31,10 +33,12 @@ const implementedRoutes = new Set([
   "/dashboard",
   "/properties",
   "/maintenance",
+  "/team",
   "/profile",
 ]);
 
 const roleLabels: Record<string, string> = {
+  admin: "Admin",
   property_manager: "Property Manager",
   manager: "Property Manager",
   renter: "Renter",
@@ -70,6 +74,13 @@ function Icon({ name, className = "" }: { name: IconName; className?: string }) 
           <path d="m7 16-3 3 1 1 3-3" />
         </svg>
       );
+    case "users":
+      return (
+        <svg {...shared}>
+          <path d="M16 11a3.5 3.5 0 1 0 0-7 3.5 3.5 0 0 0 0 7ZM8 12a3 3 0 1 0 0-6 3 3 0 0 0 0 6Z" />
+          <path d="M3.5 20a5.5 5.5 0 0 1 9-4.2M13.5 20a5 5 0 0 1 8 0" />
+        </svg>
+      );
     case "profile":
       return (
         <svg {...shared}>
@@ -94,9 +105,12 @@ export function AppSidebar({ user }: AppSidebarProps) {
   const router = useRouter();
   const { signOut } = useClerk();
   const [isOpen, setIsOpen] = useState(false);
-  const roleLabel = roleLabels[user.role] ?? "Workspace";
+  const roleLabel = user.isOrgAdmin ? "Admin" : roleLabels[user.role] ?? "Workspace";
   const displayName = user.firstName ?? user.email ?? "Account";
   const initial = (user.firstName?.[0] ?? user.email?.[0] ?? "U").toUpperCase();
+  const visibleNavigation = user.isOrgAdmin
+    ? [...navigation, { name: "Team", href: "/team", icon: "users" as const }]
+    : navigation;
 
   const content = (
     <div className="flex h-full flex-col bg-slate-950 text-white">
@@ -116,17 +130,16 @@ export function AppSidebar({ user }: AppSidebarProps) {
           </Link>
 
           {user.organizationName ? (
-            <div className="mt-4 rounded-lg border border-slate-800 bg-slate-900/80 px-3 py-3">
+            <div className="mt-4 rounded-lg border border-slate-800 bg-slate-900/80 px-3 py-2.5">
               <p className="truncate text-sm font-semibold text-slate-100">
                 {user.organizationName}
               </p>
-              <p className="mt-1 text-xs text-slate-400">{roleLabel}</p>
             </div>
           ) : null}
         </div>
 
         <nav aria-label="Main navigation" className="space-y-1">
-          {navigation.map((item) => {
+          {visibleNavigation.map((item) => {
             const isActive =
               pathname === item.href ||
               (item.href !== "/dashboard" && pathname.startsWith(item.href));
@@ -175,9 +188,7 @@ export function AppSidebar({ user }: AppSidebarProps) {
           </div>
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium">{displayName}</p>
-            <p className="truncate text-xs text-slate-500">
-              {user.organizationName ?? roleLabel}
-            </p>
+            <p className="truncate text-xs text-slate-500">{roleLabel}</p>
           </div>
           <UserButton />
         </Link>

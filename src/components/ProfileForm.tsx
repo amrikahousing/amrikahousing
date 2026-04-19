@@ -6,6 +6,9 @@ import { useEffect, useState } from "react";
 type ProfileFormProps = {
   initialProfile: {
     email: string;
+    firstName: string;
+    lastName: string;
+    organizationName: string;
     phoneNumber: string;
     city: string;
     state: string;
@@ -40,6 +43,9 @@ const inputClass =
 export function ProfileForm({ initialProfile }: ProfileFormProps) {
   const { user } = useUser();
   const [email] = useState(initialProfile.email);
+  const [organizationName] = useState(initialProfile.organizationName);
+  const [firstName, setFirstName] = useState(initialProfile.firstName);
+  const [lastName, setLastName] = useState(initialProfile.lastName);
   const [phoneNumber, setPhoneNumber] = useState(initialProfile.phoneNumber);
   const [city, setCity] = useState(initialProfile.city);
   const [state, setState] = useState(initialProfile.state);
@@ -62,6 +68,11 @@ export function ProfileForm({ initialProfile }: ProfileFormProps) {
   async function saveProfile() {
     if (!user) return;
 
+    if (!firstName.trim()) {
+      setStatus("First name is required.");
+      return;
+    }
+
     if (twoFactorEnabled && !twoFactorMethod) {
       setStatus("Choose email or phone before enabling 2FA.");
       return;
@@ -77,8 +88,12 @@ export function ProfileForm({ initialProfile }: ProfileFormProps) {
 
     try {
       await user.update({
+        firstName: firstName.trim(),
+        lastName: lastName.trim() || null,
         unsafeMetadata: {
           ...user.unsafeMetadata,
+          firstName: firstName.trim(),
+          lastName: lastName.trim() || null,
           phoneNumber: phoneNumber.trim() || null,
           city: city.trim() || null,
           state: state.trim() || null,
@@ -124,6 +139,29 @@ export function ProfileForm({ initialProfile }: ProfileFormProps) {
         </div>
 
         <div className="space-y-4 p-6">
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field id="profile-first-name" label="First name">
+              <input
+                id="profile-first-name"
+                className={inputClass}
+                value={firstName}
+                onChange={(event) => setFirstName(event.target.value)}
+                placeholder="Jane"
+                autoComplete="given-name"
+              />
+            </Field>
+            <Field id="profile-last-name" label="Last name">
+              <input
+                id="profile-last-name"
+                className={inputClass}
+                value={lastName}
+                onChange={(event) => setLastName(event.target.value)}
+                placeholder="Doe"
+                autoComplete="family-name"
+              />
+            </Field>
+          </div>
+
           <Field id="profile-email" label="Email address">
             <input
               id="profile-email"
@@ -134,6 +172,18 @@ export function ProfileForm({ initialProfile }: ProfileFormProps) {
               disabled
             />
           </Field>
+
+          {organizationName ? (
+            <Field id="profile-organization" label="Organization">
+              <input
+                id="profile-organization"
+                className={inputClass}
+                value={organizationName}
+                readOnly
+                disabled
+              />
+            </Field>
+          ) : null}
 
           <Field id="profile-phone" label="Phone number">
             <input

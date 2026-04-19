@@ -2,6 +2,7 @@
 
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
+import { PROPERTY_TYPE_OPTIONS, getPropertyTypeLabel, normalizePropertyType } from "@/lib/property-types";
 
 type PropertyDetails = {
   id: string;
@@ -332,7 +333,7 @@ export function PropertyDetailsClient({
   const [editingProperty, setEditingProperty] = useState(false);
   const [propForm, setPropForm] = useState({
     name: initialProperty.name,
-    type: initialProperty.type,
+    type: normalizePropertyType(initialProperty.type),
     address: initialProperty.address,
     city: initialProperty.city,
     state: initialProperty.state,
@@ -565,7 +566,7 @@ export function PropertyDetailsClient({
                 </div>
                 <div className="mt-1 flex items-center gap-1.5 text-sm text-gray-600">
                   <HomeIcon className="h-4 w-4 shrink-0 text-gray-400" />
-                  <span className="capitalize">{property.type}</span>
+                  <span>{getPropertyTypeLabel(property.type)}</span>
                 </div>
               </div>
               <button
@@ -611,9 +612,10 @@ export function PropertyDetailsClient({
               </label>
               <label className={labelClass}>
                 Type
-                <select className={inputClass} value={propForm.type} onChange={(e) => setPropForm((f) => ({ ...f, type: e.target.value }))}>
-                  <option value="rental">Rental</option>
-                  <option value="association">Association</option>
+                <select className={inputClass} value={propForm.type} onChange={(e) => setPropForm((f) => ({ ...f, type: normalizePropertyType(e.target.value) }))}>
+                  {PROPERTY_TYPE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
                 </select>
               </label>
               <label className={`${labelClass} sm:col-span-2`}>

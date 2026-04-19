@@ -2,6 +2,7 @@ import { requireOrgAccess, isAccessError } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import type { AiParsedProperty } from "@/lib/ai-import-types";
 import type { PrismaClient } from "@/generated/prisma/client";
+import { normalizePropertyType } from "@/lib/property-types";
 
 type Tx = Omit<PrismaClient, "$connect" | "$disconnect" | "$on" | "$transaction" | "$use" | "$extends">;
 
@@ -34,7 +35,7 @@ export async function POST(request: Request) {
         data: {
           organization_id: ctx.orgDbId,
           name: p.name.trim(),
-          type: ["rental", "association"].includes(p.type) ? p.type : "rental",
+          type: normalizePropertyType(p.type),
           address: p.address.trim(),
           city: p.city.trim(),
           state: p.state.trim().toUpperCase(),

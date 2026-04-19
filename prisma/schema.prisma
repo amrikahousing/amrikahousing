@@ -132,7 +132,7 @@ model properties {
   id                   String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   organization_id      String                 @db.Uuid
   name                 String
-  type                 String                 @default("rental")
+  type                 String                 @default("multi-family")
   address              String
   city                 String
   state                String
