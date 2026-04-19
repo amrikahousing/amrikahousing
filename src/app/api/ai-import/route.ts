@@ -1,29 +1,21 @@
 import { requireOrgAccess, isAccessError } from "@/lib/auth";
-import Anthropic from "@anthropic-ai/sdk";
+import type { AiImportContext, AiParsedProperty } from "@/lib/ai-import-types";
 
-export type AiParsedUnit = {
-  unit_number: string;
-  bedrooms?: number;
-  bathrooms?: number;
-  square_feet?: number;
-  rent_amount?: number;
-  status?: "vacant" | "occupied" | "maintenance";
-};
-
-export type AiParsedProperty = {
+type AnthropicTool = {
   name: string;
-  type: "rental" | "association";
-  address: string;
-  city: string;
-  state: string;
-  zip: string;
-  description?: string;
-  units?: AiParsedUnit[];
+  description: string;
+  input_schema: Record<string, unknown>;
 };
 
-const client = new Anthropic();
+type AnthropicContentBlock =
+  | { type: "text"; text: string }
+  | { type: "tool_use"; id: string; name: string; input: unknown };
 
-const propertiesTool: Anthropic.Tool = {
+type AnthropicMessageResponse = {
+  content: AnthropicContentBlock[];
+};
+
+const propertiesTool: AnthropicTool = {
   name: "extract_properties",
   description: "Extract a structured list of real estate properties from user-provided text.",
   input_schema: {
@@ -65,15 +57,6 @@ const propertiesTool: Anthropic.Tool = {
   },
 };
 
-export type AiImportContext = {
-  name?: string;
-  type?: string;
-  address?: string;
-  city?: string;
-  state?: string;
-  zip?: string;
-};
-
 export async function POST(request: Request) {
   const ctx = await requireOrgAccess();
   if (isAccessError(ctx)) {
@@ -107,26 +90,44 @@ export async function POST(request: Request) {
     ? `Property context:\n${contextLines.join("\n")}\n\nUnit/property data:\n${prompt}`
     : prompt;
 
-  const message = await client.messages.create({
-    model: "claude-haiku-4-5",
-    max_tokens: 4096,
-    tools: [propertiesTool],
-    tool_choice: { type: "any" },
-    system:
-      "You are a property data extraction assistant. Extract all real estate properties from the user's text.\n" +
-      "Rules:\n" +
-      "- If property context is provided (name, address, city, state, zip), apply it to all extracted units and create ONE property.\n" +
-      "- If the input is a unit list without property details, group all units into ONE property and use empty strings for unknown address fields.\n" +
-      "- If the input describes multiple distinct properties, extract each as a separate property.\n" +
-      "- Bedroom type shorthands: 's' or 'studio' = 0 bedrooms, '1br'/'1BR' = 1 bedroom, '2br'/'2BR' = 2 bedrooms, etc.\n" +
-      "- Strip '$' and ',' from rent amounts and parse as a number.\n" +
-      "- State must be a 2-letter US code, uppercase. Zip must be 5 digits.\n" +
-      "- If no unit info is given for a property, omit the units array — a single unit will be auto-created.\n" +
-      "- Use empty string for required fields you cannot determine (address, city, state, zip). Do NOT guess or invent addresses.",
-    messages: [{ role: "user", content: userMessage }],
+  const apiKey = process.env.ANTHROPIC_API_KEY;
+  if (!apiKey) {
+    return Response.json({ error: "AI import is not configured." }, { status: 500 });
+  }
+
+  const response = await fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {
+      "anthropic-version": "2023-06-01",
+      "content-type": "application/json",
+      "x-api-key": apiKey,
+    },
+    body: JSON.stringify({
+      model: "claude-haiku-4-5",
+      max_tokens: 4096,
+      tools: [propertiesTool],
+      tool_choice: { type: "any" },
+      system:
+        "You are a property data extraction assistant. Extract all real estate properties from the user's text.\n" +
+        "Rules:\n" +
+        "- If property context is provided (name, address, city, state, zip), apply it to all extracted units and create ONE property.\n" +
+        "- If the input is a unit list without property details, group all units into ONE property and use empty strings for unknown address fields.\n" +
+        "- If the input describes multiple distinct properties, extract each as a separate property.\n" +
+        "- Bedroom type shorthands: 's' or 'studio' = 0 bedrooms, '1br'/'1BR' = 1 bedroom, '2br'/'2BR' = 2 bedrooms, etc.\n" +
+        "- Strip '$' and ',' from rent amounts and parse as a number.\n" +
+        "- State must be a 2-letter US code, uppercase. Zip must be 5 digits.\n" +
+        "- If no unit info is given for a property, omit the units array - a single unit will be auto-created.\n" +
+        "- Use empty string for required fields you cannot determine (address, city, state, zip). Do NOT guess or invent addresses.",
+      messages: [{ role: "user", content: userMessage }],
+    }),
   });
 
-  const toolUse = message.content.find((b): b is Anthropic.ToolUseBlock => b.type === "tool_use");
+  if (!response.ok) {
+    return Response.json({ error: "AI import failed. Please try again." }, { status: 502 });
+  }
+
+  const message = (await response.json()) as AnthropicMessageResponse;
+  const toolUse = message.content.find((b) => b.type === "tool_use");
   if (!toolUse) {
     return Response.json({ error: "Could not parse properties from your description. Please try again with more detail." }, { status: 422 });
   }

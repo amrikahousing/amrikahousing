@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import type { AiParsedProperty, AiParsedUnit, AiImportContext } from "@/app/api/ai-import/route";
+import type { AiParsedProperty, AiParsedUnit, AiImportContext } from "@/lib/ai-import-types";
 import type { SkippedUnit } from "@/app/api/properties/[id]/units/bulk/route";
 
 const inputClass =
