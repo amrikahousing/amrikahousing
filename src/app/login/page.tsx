@@ -477,10 +477,15 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
         return;
       }
 
+      const redirectUrl = "/login?password_reset=success";
       await signIn.reset();
-      await clerk.signOut({
-        redirectUrl: "/login?password_reset=success",
-      });
+
+      if (isSignedIn || clerk.isSignedIn) {
+        await clerk.signOut({ redirectUrl });
+        return;
+      }
+
+      window.location.href = redirectUrl;
     } catch (error) {
       setClientError(getErrorMessage(error, "Something went wrong. Please try again."));
     }
