@@ -1,5 +1,6 @@
 import { requireOrgAccess, isAccessError } from "@/lib/auth";
 import type { AiImportContext, AiParsedProperty } from "@/lib/ai-import-types";
+import { PROPERTY_TYPE_OPTIONS, normalizePropertyType } from "@/lib/property-types";
 
 type AnthropicTool = {
   name: string;
@@ -15,6 +16,8 @@ type AnthropicMessageResponse = {
   content: AnthropicContentBlock[];
 };
 
+const supportedPropertyTypeValues = PROPERTY_TYPE_OPTIONS.map((option) => option.value);
+
 const propertiesTool: AnthropicTool = {
   name: "extract_properties",
   description: "Extract a structured list of real estate properties from user-provided text.",
@@ -27,7 +30,11 @@ const propertiesTool: AnthropicTool = {
           type: "object",
           properties: {
             name: { type: "string", description: "Property name. Derive from address if not given, e.g. '123 Main St'." },
-            type: { type: "string", enum: ["rental", "association"], description: "Property type. Default to 'rental'." },
+            type: {
+              type: "string",
+              enum: supportedPropertyTypeValues,
+              description: "Property type. Use one of the supported property type values.",
+            },
             address: { type: "string", description: "Street address only, no city/state/zip." },
             city: { type: "string" },
             state: { type: "string", description: "2-letter US state code, uppercase." },
@@ -116,6 +123,7 @@ export async function POST(request: Request) {
         "- Bedroom type shorthands: 's' or 'studio' = 0 bedrooms, '1br'/'1BR' = 1 bedroom, '2br'/'2BR' = 2 bedrooms, etc.\n" +
         "- Strip '$' and ',' from rent amounts and parse as a number.\n" +
         "- State must be a 2-letter US code, uppercase. Zip must be 5 digits.\n" +
+        `- Property type must be one of: ${supportedPropertyTypeValues.join(", ")}.\n` +
         "- If no unit info is given for a property, omit the units array - a single unit will be auto-created.\n" +
         "- Use empty string for required fields you cannot determine (address, city, state, zip). Do NOT guess or invent addresses.",
       messages: [{ role: "user", content: userMessage }],
@@ -138,5 +146,10 @@ export async function POST(request: Request) {
     return Response.json({ error: "No properties found in your description." }, { status: 422 });
   }
 
-  return Response.json({ properties });
+  return Response.json({
+    properties: properties.map((property) => ({
+      ...property,
+      type: normalizePropertyType(property.type),
+    })),
+  });
 }

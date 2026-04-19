@@ -1,5 +1,6 @@
 import { requireOrgAccess, isAccessError } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { isSupportedPropertyType } from "@/lib/property-types";
 
 type UnitInput = {
   unit_number: string;
@@ -41,8 +42,8 @@ export async function POST(request: Request) {
   if (!city?.trim()) return Response.json({ error: "City is required" }, { status: 400 });
   if (!state?.trim()) return Response.json({ error: "State is required" }, { status: 400 });
   if (!zip?.trim()) return Response.json({ error: "Zip is required" }, { status: 400 });
-  if (!["rental", "association"].includes(type)) {
-    return Response.json({ error: "Type must be rental or association" }, { status: 400 });
+  if (!isSupportedPropertyType(type)) {
+    return Response.json({ error: "Type must be multi-family" }, { status: 400 });
   }
 
   const property = await prisma.properties.create({

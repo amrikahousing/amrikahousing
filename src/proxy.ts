@@ -15,9 +15,9 @@ const isOnboardingRoute = createRouteMatcher(["/onboarding(.*)"]);
 const isOrgRoute = createRouteMatcher([
   "/dashboard(.*)",
   "/properties(.*)",
-  "/import(.*)",
-  "/api/import(.*)",
+  "/team(.*)",
   "/api/properties(.*)",
+  "/api/property-managers(.*)",
 ]);
 
 export default clerkMiddleware(async (auth, request) => {

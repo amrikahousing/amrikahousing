@@ -4,6 +4,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import type { AiParsedProperty, AiParsedUnit, AiImportContext } from "@/lib/ai-import-types";
 import type { SkippedUnit } from "@/app/api/properties/[id]/units/bulk/route";
+import { PROPERTY_TYPE_OPTIONS, normalizePropertyType } from "@/lib/property-types";
 
 const inputClass =
   "w-full rounded-lg border border-slate-200 bg-white px-3 py-2.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20";
@@ -189,8 +190,9 @@ function PropertyCard({
         <div>
           <label className="mb-1 block text-xs font-semibold text-slate-600">Type</label>
           <select className={inputClass} value={property.type} onChange={(e) => set("type", e.target.value)}>
-            <option value="rental">Rental</option>
-            <option value="association">Association (HOA/Condo)</option>
+            {PROPERTY_TYPE_OPTIONS.map((option) => (
+              <option key={option.value} value={option.value}>{option.label}</option>
+            ))}
           </select>
         </div>
         <div className="sm:col-span-2">
@@ -270,7 +272,7 @@ export function AiImportWizard({ existingProperty }: { existingProperty?: Existi
 
   const [step, setStep] = useState<Step>("input");
   const [prompt, setPrompt] = useState("");
-  const [context, setContext] = useState<AiImportContext>({ type: "rental" });
+  const [context, setContext] = useState<AiImportContext>({ type: normalizePropertyType() });
   const [contextOpen, setContextOpen] = useState(false);
 
   // New-property mode state
@@ -462,7 +464,7 @@ export function AiImportWizard({ existingProperty }: { existingProperty?: Existi
         </div>
         <div className="flex gap-3">
           <button
-            onClick={() => { setStep("input"); setPrompt(""); setProperties([]); setContext({ type: "rental" }); setContextOpen(false); }}
+            onClick={() => { setStep("input"); setPrompt(""); setProperties([]); setContext({ type: normalizePropertyType() }); setContextOpen(false); }}
             className="rounded-lg border border-slate-200 bg-white px-4 py-2 text-sm text-slate-700 hover:bg-slate-50"
           >
             Add more
@@ -578,9 +580,10 @@ export function AiImportWizard({ existingProperty }: { existingProperty?: Existi
               </div>
               <div>
                 <label className="mb-1 block text-xs font-semibold text-slate-600">Type</label>
-                <select className={inputClass} value={context.type ?? "rental"} onChange={(e) => setCtx("type", e.target.value)}>
-                  <option value="rental">Rental</option>
-                  <option value="association">Association (HOA/Condo)</option>
+                <select className={inputClass} value={context.type ?? normalizePropertyType()} onChange={(e) => setCtx("type", e.target.value)}>
+                  {PROPERTY_TYPE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
                 </select>
               </div>
               <div className="sm:col-span-2">

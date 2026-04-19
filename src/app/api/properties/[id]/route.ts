@@ -1,5 +1,6 @@
 import { requireOrgAccess, isAccessError } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { isSupportedPropertyType } from "@/lib/property-types";
 
 type RouteContext = {
   params: Promise<{ id: string }>;
@@ -57,8 +58,8 @@ export async function PATCH(request: Request, context: RouteContext) {
   if (!city) return Response.json({ error: "City is required." }, { status: 400 });
   if (!state) return Response.json({ error: "State is required." }, { status: 400 });
   if (!zip) return Response.json({ error: "Zip is required." }, { status: 400 });
-  if (!type || !["rental", "association"].includes(type)) {
-    return Response.json({ error: "Type must be rental or association." }, { status: 400 });
+  if (!isSupportedPropertyType(type)) {
+    return Response.json({ error: "Type must be multi-family." }, { status: 400 });
   }
 
   const updatedProperty = await prisma.properties.update({

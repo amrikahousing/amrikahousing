@@ -1,3 +1,5 @@
+import type { SupportedPropertyType } from "./property-types";
+
 export type AiParsedUnit = {
   unit_number: string;
   bedrooms?: number;
@@ -9,7 +11,7 @@ export type AiParsedUnit = {
 
 export type AiParsedProperty = {
   name: string;
-  type: "rental" | "association";
+  type: SupportedPropertyType;
   address: string;
   city: string;
   state: string;

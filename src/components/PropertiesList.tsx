@@ -3,6 +3,7 @@
 import { useMemo, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { getPropertyTypeLabel } from "@/lib/property-types";
 
 export type PropertyGroup = {
   id: string;
@@ -349,8 +350,8 @@ function PropertyCard({
         <HomeIcon className="h-4 w-4 shrink-0 text-gray-400" />
         <div className="min-w-0">
           <p className="text-xs text-gray-500">Type</p>
-          <p className="truncate text-sm capitalize text-gray-900">
-            {property.type}
+          <p className="truncate text-sm text-gray-900">
+            {getPropertyTypeLabel(property.type)}
           </p>
         </div>
       </div>
