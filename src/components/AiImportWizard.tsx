@@ -298,7 +298,7 @@ export function AiImportWizard({ existingProperty }: { existingProperty?: Existi
     setIsParsing(true);
     setParseError(null);
     try {
-      const aiContext: AiImportContext = addUnitsMode
+      const aiContext: AiImportContext | undefined = addUnitsMode
         ? {
             name: existingProperty!.name,
             type: existingProperty!.type,
