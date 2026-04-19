@@ -174,24 +174,17 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
 
   useEffect(() => {
     const url = new URL(window.location.href);
-
     const ticket = url.searchParams.get("__clerk_ticket");
-    if (ticket) {
-      setInviteTicket(ticket);
-      setMode("signup");
-    } else if (url.searchParams.get("mode") === "signup") {
-      setMode("signup");
-    }
-
+    const shouldShowSignup = ticket || url.searchParams.get("mode") === "signup";
     const emailParam = url.searchParams.get("email");
-    if (emailParam) setEmail(emailParam);
 
+    let notice: string | null = null;
     if (url.searchParams.get("password_reset") === "success") {
-      setClientNotice("Your password was updated. Please sign in.");
+      notice = "Your password was updated. Please sign in.";
     } else if (url.searchParams.get("signed_out") === "1") {
-      setClientNotice("You have been signed out. Please sign in again.");
+      notice = "You have been signed out. Please sign in again.";
     } else if (url.searchParams.get("invite") === "used") {
-      setClientNotice("That invitation link has already been used. Please sign in to continue.");
+      notice = "That invitation link has already been used. Please sign in to continue.";
     }
 
     url.searchParams.delete("mode");
@@ -201,6 +194,20 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     url.searchParams.delete("email");
     url.searchParams.delete("invite");
     window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
+
+    let cancelled = false;
+    window.queueMicrotask(() => {
+      if (cancelled) return;
+
+      if (ticket) setInviteTicket(ticket);
+      if (shouldShowSignup) setMode("signup");
+      if (emailParam) setEmail(emailParam);
+      if (notice) setClientNotice(notice);
+    });
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   useEffect(() => {

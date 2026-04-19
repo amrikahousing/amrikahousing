@@ -17,9 +17,6 @@ export function validateImportRows(
   rows: Record<string, string>[],
   mappings: ColumnMapping[],
 ): ValidatedRow[] {
-  const fieldFor = (csvHeader: string): string | null =>
-    mappings.find((m) => m.csvHeader === csvHeader)?.schemaField ?? null;
-
   const getVal = (row: Record<string, string>, schemaField: string): string => {
     const header = Object.keys(row).find(
       (h) => mappings.find((m) => m.csvHeader === h && m.schemaField === schemaField),
