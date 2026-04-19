@@ -137,27 +137,13 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
   const confirmPasswordId = useId();
   const codeId = useId();
 
-  const [mode, setMode] = useState<AuthMode>(() => {
-    if (typeof window === "undefined") return initialMode;
-
-    const url = new URL(window.location.href);
-    if (url.searchParams.get("__clerk_ticket")) return "signup";
-    return url.searchParams.get("mode") === "signup" ? "signup" : initialMode;
-  });
-  const [inviteTicket] = useState<string | null>(() => {
-    if (typeof window === "undefined") return null;
-    return new URL(window.location.href).searchParams.get("__clerk_ticket");
-  });
+  const [mode, setMode] = useState<AuthMode>(initialMode);
+  const [inviteTicket, setInviteTicket] = useState<string | null>(null);
   const [showPassword, setShowPassword] = useState(false);
   const [showConfirmPassword, setShowConfirmPassword] = useState(false);
   const [headlineIndex, setHeadlineIndex] = useState(0);
   const [role, setRole] = useState<LoginRole>("property_manager");
-  const [email, setEmail] = useState(() => {
-    if (typeof window === "undefined") return "";
-
-    const url = new URL(window.location.href);
-    return url.searchParams.get("email") ?? "";
-  });
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [firstName, setFirstName] = useState("");
@@ -165,22 +151,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
   const [organizationName, setOrganizationName] = useState("");
   const [verificationCode, setVerificationCode] = useState("");
   const [clientError, setClientError] = useState<string | null>(null);
-  const [clientNotice, setClientNotice] = useState<string | null>(() => {
-    if (typeof window === "undefined") return null;
-
-    const url = new URL(window.location.href);
-    if (url.searchParams.get("password_reset") === "success") {
-      return "Your password was updated. Please sign in.";
-    }
-    if (url.searchParams.get("signed_out") === "1") {
-      return "You have been signed out. Please sign in again.";
-    }
-    if (url.searchParams.get("invite") === "used") {
-      return "That invitation link has already been used. Please sign in to continue.";
-    }
-
-    return null;
-  });
+  const [clientNotice, setClientNotice] = useState<string | null>(null);
 
   const { signIn, errors: signInErrors, fetchStatus: signInFetchStatus } =
     useSignIn();
@@ -202,14 +173,33 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
   );
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-
     const url = new URL(window.location.href);
+
+    const ticket = url.searchParams.get("__clerk_ticket");
+    if (ticket) {
+      setInviteTicket(ticket);
+      setMode("signup");
+    } else if (url.searchParams.get("mode") === "signup") {
+      setMode("signup");
+    }
+
+    const emailParam = url.searchParams.get("email");
+    if (emailParam) setEmail(emailParam);
+
+    if (url.searchParams.get("password_reset") === "success") {
+      setClientNotice("Your password was updated. Please sign in.");
+    } else if (url.searchParams.get("signed_out") === "1") {
+      setClientNotice("You have been signed out. Please sign in again.");
+    } else if (url.searchParams.get("invite") === "used") {
+      setClientNotice("That invitation link has already been used. Please sign in to continue.");
+    }
+
     url.searchParams.delete("mode");
     url.searchParams.delete("__clerk_ticket");
     url.searchParams.delete("password_reset");
     url.searchParams.delete("signed_out");
     url.searchParams.delete("email");
+    url.searchParams.delete("invite");
     window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
   }, []);
 

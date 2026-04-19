@@ -35,8 +35,11 @@ export default async function PropertyDetailsPage({
         <div className="space-y-6">
           <Link
             href="/properties"
-            className="inline-flex rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+            className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-600 hover:text-gray-900"
           >
+            <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m15 18-6-6 6-6" />
+            </svg>
             Back to Properties
           </Link>
           <div className="rounded-lg border border-slate-200 bg-white p-10 text-center text-slate-500 shadow-sm">
@@ -72,8 +75,11 @@ export default async function PropertyDetailsPage({
       <div className="space-y-6">
         <Link
           href="/properties"
-          className="inline-flex rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+          className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-600 hover:text-gray-900 transition-colors"
         >
+          <svg aria-hidden="true" className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="m15 18-6-6 6-6" />
+          </svg>
           Back to Properties
         </Link>
 
