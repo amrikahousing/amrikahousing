@@ -108,13 +108,14 @@ export default async function DashboardPage() {
   const firstName =
     user?.firstName ?? metadataString(unsafeMetadata, "firstName") ?? null;
   const role = metadataString(unsafeMetadata, "role") ?? "property_manager";
+  const isOrgAdmin = orgRole === "org:admin";
   const shellUser: AppShellUser = {
     email: user?.primaryEmailAddress?.emailAddress ?? null,
     firstName,
     imageUrl: user?.imageUrl ?? null,
-    role,
+    role: isOrgAdmin ? "admin" : role,
     organizationName,
-    isOrgAdmin: orgRole === "org:admin",
+    isOrgAdmin,
   };
 
   const months = Array.from({ length: 6 }, (_, index) => {

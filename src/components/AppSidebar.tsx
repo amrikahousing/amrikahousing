@@ -105,7 +105,7 @@ export function AppSidebar({ user }: AppSidebarProps) {
   const router = useRouter();
   const { signOut } = useClerk();
   const [isOpen, setIsOpen] = useState(false);
-  const roleLabel = roleLabels[user.role] ?? "Workspace";
+  const roleLabel = user.isOrgAdmin ? "Admin" : roleLabels[user.role] ?? "Workspace";
   const displayName = user.firstName ?? user.email ?? "Account";
   const initial = (user.firstName?.[0] ?? user.email?.[0] ?? "U").toUpperCase();
   const visibleNavigation = user.isOrgAdmin
@@ -130,11 +130,10 @@ export function AppSidebar({ user }: AppSidebarProps) {
           </Link>
 
           {user.organizationName ? (
-            <div className="mt-4 rounded-lg border border-slate-800 bg-slate-900/80 px-3 py-3">
+            <div className="mt-4 rounded-lg border border-slate-800 bg-slate-900/80 px-3 py-2.5">
               <p className="truncate text-sm font-semibold text-slate-100">
                 {user.organizationName}
               </p>
-              <p className="mt-1 text-xs text-slate-400">{roleLabel}</p>
             </div>
           ) : null}
         </div>
@@ -189,9 +188,7 @@ export function AppSidebar({ user }: AppSidebarProps) {
           </div>
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium">{displayName}</p>
-            <p className="truncate text-xs text-slate-500">
-              {user.organizationName ?? roleLabel}
-            </p>
+            <p className="truncate text-xs text-slate-500">{roleLabel}</p>
           </div>
           <UserButton />
         </Link>

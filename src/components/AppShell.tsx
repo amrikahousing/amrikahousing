@@ -27,6 +27,7 @@ export async function getAppShellUser(): Promise<AppShellUser> {
     metadataString(unsafeMetadata, "role") ??
     metadataString(publicMetadata, "role") ??
     "property_manager";
+  const isOrgAdmin = orgRole === "org:admin";
   const organizationName =
     metadataString(unsafeMetadata, "organizationName") ??
     metadataString(publicMetadata, "organizationName");
@@ -39,9 +40,9 @@ export async function getAppShellUser(): Promise<AppShellUser> {
     email: user?.primaryEmailAddress?.emailAddress ?? null,
     firstName,
     imageUrl: user?.imageUrl ?? null,
-    role,
+    role: isOrgAdmin ? "admin" : role,
     organizationName,
-    isOrgAdmin: orgRole === "org:admin",
+    isOrgAdmin,
   };
 }
 
