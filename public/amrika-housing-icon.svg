@@ -1,0 +1,14 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="title desc">
+  <title id="title">Amrika Housing icon</title>
+  <desc id="desc">Emerald square with a white apartment building and home roof mark.</desc>
+  <rect width="1024" height="1024" rx="180" fill="#10B981"/>
+  <path d="M218 814H806" stroke="white" stroke-width="52" stroke-linecap="round"/>
+  <path d="M318 814V392C318 348.922 352.922 314 396 314H574C617.078 314 652 348.922 652 392V814" stroke="white" stroke-width="52" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M652 500H706C749.078 500 784 534.922 784 578V814" stroke="white" stroke-width="52" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M268 394L482.922 204.804C501.03 188.864 528.076 188.769 546.296 204.581L690 329.32" stroke="white" stroke-width="52" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M424 438H546" stroke="white" stroke-width="48" stroke-linecap="round"/>
+  <path d="M424 552H546" stroke="white" stroke-width="48" stroke-linecap="round"/>
+  <path d="M424 666H546" stroke="white" stroke-width="48" stroke-linecap="round"/>
+  <path d="M676 622H724" stroke="white" stroke-width="44" stroke-linecap="round"/>
+  <path d="M676 718H724" stroke="white" stroke-width="44" stroke-linecap="round"/>
+</svg>

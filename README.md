@@ -20,6 +20,21 @@ You can start editing the page by modifying `app/page.tsx`. The page auto-update
 
 This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
 
+## Plaid
+
+The accounts dashboard can connect bank accounts through Plaid Link. Configure these server-side variables before using the Plaid flow:
+
+```bash
+PLAID_CLIENT_ID=your-client-id
+PLAID_SECRET=your-secret
+PLAID_ENV=sandbox
+PLAID_TOKEN_ENCRYPTION_KEY=long-random-server-secret
+```
+
+Use `sandbox`, `development`, or `production` for `PLAID_ENV`. `PLAID_TOKEN_ENCRYPTION_KEY` is used to encrypt Plaid access tokens before they are stored.
+
+The Plaid-ready app icon is available at `public/amrika-housing-icon-1024.png`. The editable source is `public/amrika-housing-icon.svg`.
+
 ## Learn More
 
 To learn more about Next.js, take a look at the following resources:

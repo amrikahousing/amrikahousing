@@ -14,8 +14,11 @@ const isOnboardingRoute = createRouteMatcher(["/onboarding(.*)"]);
 
 const isOrgRoute = createRouteMatcher([
   "/dashboard(.*)",
+  "/accounts(.*)",
   "/properties(.*)",
   "/team(.*)",
+  "/api/accounting(.*)",
+  "/api/plaid(.*)",
   "/api/properties(.*)",
   "/api/property-managers(.*)",
 ]);

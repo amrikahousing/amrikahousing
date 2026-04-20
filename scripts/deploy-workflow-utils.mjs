@@ -1,5 +1,6 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import {
+  readdirSync,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -55,6 +56,16 @@ export function run(command, args, options = {}) {
   }
 }
 
+export function runResult(command, args, options = {}) {
+  return spawnSync(command, args, {
+    cwd: options.cwd,
+    encoding: "utf8",
+    env: options.env ? { ...process.env, ...options.env } : process.env,
+    shell: false,
+    stdio: ["inherit", "pipe", "pipe"],
+  });
+}
+
 export function runAndCapture(command, args, options = {}) {
   const result = spawnSync(command, args, {
     cwd: options.cwd,
@@ -91,6 +102,51 @@ export function deploymentUrlFromOutput(output) {
 
 function sleep(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function extractFirstJsonObject(text) {
+  const start = text.indexOf("{");
+  if (start === -1) {
+    return null;
+  }
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = start; i < text.length; i += 1) {
+    const char = text[i];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === "\"") {
+      inString = true;
+      continue;
+    }
+
+    if (char === "{") {
+      depth += 1;
+      continue;
+    }
+
+    if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return text.slice(start, i + 1);
+      }
+    }
+  }
+
+  return null;
 }
 
 export function hostnameFromUrl(url) {
@@ -275,7 +331,43 @@ export function syncPrismaSchema({ cwd = process.cwd(), env, label }) {
 
   if (existsSync(migrationsDir)) {
     console.log(`Applying Prisma migrations to ${label}.`);
-    run("npx", ["prisma", "migrate", "deploy"], { cwd, env: prismaEnv });
+    const deploy = runResult("npx", ["prisma", "migrate", "deploy"], { cwd, env: prismaEnv });
+
+    if (deploy.stdout) {
+      process.stdout.write(deploy.stdout);
+    }
+
+    if (deploy.stderr) {
+      process.stderr.write(deploy.stderr);
+    }
+
+    if (deploy.error) {
+      fail(`npx prisma migrate deploy failed: ${deploy.error.message}`);
+    }
+
+    if (deploy.status === 0) {
+      return;
+    }
+
+    const combinedOutput = `${deploy.stdout ?? ""}\n${deploy.stderr ?? ""}`;
+    if (!combinedOutput.includes("P3005")) {
+      fail(`npx prisma migrate deploy exited with status ${deploy.status}.`);
+    }
+
+    console.log(`Detected existing non-empty schema for ${label}. Bootstrapping Prisma migration history.`);
+    run("npx", ["prisma", "db", "push"], { cwd, env: prismaEnv });
+
+    const migrations = readdirSync(migrationsDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort();
+
+    for (const migration of migrations) {
+      run("npx", ["prisma", "migrate", "resolve", "--applied", migration], {
+        cwd,
+        env: prismaEnv,
+      });
+    }
     return;
   }
 
@@ -284,20 +376,40 @@ export function syncPrismaSchema({ cwd = process.cwd(), env, label }) {
 }
 
 export function inspectVercelDeployment(aliasOrUrl, cwd = process.cwd()) {
-  const output = capture(
-    "npx",
-    ["vercel", "inspect", aliasOrUrl, "--wait", "--timeout", "10m", "--format=json"],
-    { cwd }
-  );
-  const jsonStart = output.indexOf("{");
-  if (jsonStart === -1) {
-    fail(`could not parse Vercel inspect output for ${aliasOrUrl}.`);
-  }
+  const args = ["vercel", "inspect", aliasOrUrl, "--wait", "--timeout", "10m", "--format=json"];
+  const maxAttempts = 4;
 
-  try {
-    return JSON.parse(output.slice(jsonStart));
-  } catch {
-    fail(`Vercel inspect output for ${aliasOrUrl} was not valid JSON.`);
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const result = runResult("npx", args, { cwd });
+    const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`.trim();
+
+    if (result.status === 0) {
+      const json = extractFirstJsonObject(output);
+      if (!json) {
+        fail(`could not parse Vercel inspect output for ${aliasOrUrl}.`);
+      }
+
+      try {
+        return JSON.parse(json);
+      } catch {
+        fail(`Vercel inspect output for ${aliasOrUrl} was not valid JSON.`);
+      }
+    }
+
+    const isTransient =
+      output.includes("Response Error (502)") ||
+      output.includes("Response Error (503)") ||
+      output.includes("Response Error (504)") ||
+      output.includes("unexpected error occurred in inspect");
+
+    if (!isTransient || attempt === maxAttempts) {
+      fail(`npx ${args.join(" ")} failed.${output ? ` ${output}` : ""}`);
+    }
+
+    console.warn(
+      `Vercel inspect failed for ${aliasOrUrl} with a transient error. Retrying (${attempt}/${maxAttempts})...`
+    );
+    sleep(5000);
   }
 }
 
