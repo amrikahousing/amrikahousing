@@ -263,6 +263,7 @@ export function MaintenanceClient({
   const [selectedPropertyId, setSelectedPropertyId] = useState("all");
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [selectedPriority, setSelectedPriority] = useState("all");
+  const [filtersOpen, setFiltersOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [autoTriageEnabled, setAutoTriageEnabled] = useState(true);
   const [autoEscalationEnabled, setAutoEscalationEnabled] = useState(true);
@@ -346,11 +347,13 @@ export function MaintenanceClient({
     userId,
   ]);
 
-  const activeFilterCount =
-    (searchQuery.trim() ? 1 : 0) +
+  const dropdownFilterCount =
     (selectedPropertyId !== "all" ? 1 : 0) +
     (selectedCategory !== "all" ? 1 : 0) +
     (selectedPriority !== "all" ? 1 : 0);
+
+  const activeFilterCount =
+    (searchQuery.trim() ? 1 : 0) + dropdownFilterCount;
 
   function resetFilters() {
     setSearchQuery("");
@@ -590,7 +593,7 @@ export function MaintenanceClient({
       </header>
 
       <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-center">
+        <div className="flex gap-3">
           <div className="relative flex-1">
             <Icon
               name="search"
@@ -603,8 +606,27 @@ export function MaintenanceClient({
               className={`${inputClass} pl-10`}
             />
           </div>
+          <button
+            type="button"
+            onClick={() => setFiltersOpen((o) => !o)}
+            className={`flex h-11 shrink-0 items-center gap-2 rounded-lg border px-3 text-sm font-medium transition-colors ${
+              filtersOpen || dropdownFilterCount > 0
+                ? "border-emerald-500 bg-emerald-50 text-emerald-700"
+                : "border-slate-300 bg-white text-slate-600 hover:bg-slate-50"
+            }`}
+          >
+            <Icon name="filter" className="h-4 w-4" />
+            Filters
+            {dropdownFilterCount > 0 ? (
+              <span className="flex h-5 w-5 items-center justify-center rounded-full bg-emerald-600 text-xs text-white">
+                {dropdownFilterCount}
+              </span>
+            ) : null}
+          </button>
+        </div>
 
-          <div className="grid gap-3 sm:grid-cols-3 lg:min-w-[520px]">
+        {filtersOpen ? (
+          <div className="mt-3 grid gap-3 sm:grid-cols-3">
             <select
               value={selectedPropertyId}
               onChange={(event) => setSelectedPropertyId(event.target.value)}
@@ -644,65 +666,78 @@ export function MaintenanceClient({
               ))}
             </select>
           </div>
-        </div>
+        ) : null}
 
-        <div className="mt-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
-          <div className="flex flex-wrap items-center gap-2">
-            {searchQuery.trim() ? (
-              <Badge className="border-slate-200 bg-slate-100 text-slate-700">
-                Search: {searchQuery.trim()}
-                <button type="button" onClick={() => setSearchQuery("")}>
-                  x
-                </button>
-              </Badge>
-            ) : null}
-            {selectedPropertyId !== "all" ? (
-              <Badge className="border-slate-200 bg-slate-100 text-slate-700">
-                Property:{" "}
-                {propertyLabel(propertyById.get(selectedPropertyId)) ??
-                  selectedPropertyId}
+        {activeFilterCount > 0 ? (
+          <div className="mt-3 flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+            <div className="flex flex-wrap items-center gap-2">
+              {searchQuery.trim() ? (
+                <Badge className="border-slate-200 bg-slate-100 text-slate-700">
+                  Search: {searchQuery.trim()}
+                  <button type="button" onClick={() => setSearchQuery("")}>
+                    x
+                  </button>
+                </Badge>
+              ) : null}
+              {selectedPropertyId !== "all" ? (
+                <Badge className="border-slate-200 bg-slate-100 text-slate-700">
+                  Property:{" "}
+                  {propertyLabel(propertyById.get(selectedPropertyId)) ??
+                    selectedPropertyId}
+                  <button
+                    type="button"
+                    onClick={() => setSelectedPropertyId("all")}
+                  >
+                    x
+                  </button>
+                </Badge>
+              ) : null}
+              {selectedCategory !== "all" ? (
+                <Badge className="border-slate-200 bg-slate-100 text-slate-700">
+                  Category: {selectedCategory.replaceAll("_", " ")}
+                  <button
+                    type="button"
+                    onClick={() => setSelectedCategory("all")}
+                  >
+                    x
+                  </button>
+                </Badge>
+              ) : null}
+              {selectedPriority !== "all" ? (
+                <Badge className="border-slate-200 bg-slate-100 text-slate-700">
+                  Severity: {selectedPriority}
+                  <button
+                    type="button"
+                    onClick={() => setSelectedPriority("all")}
+                  >
+                    x
+                  </button>
+                </Badge>
+              ) : null}
+            </div>
+
+            <div className="flex items-center justify-between gap-3 text-sm text-slate-500">
+              <span>
+                {visibleRequests.length} request
+                {visibleRequests.length === 1 ? "" : "s"} shown
+              </span>
+              {activeFilterCount > 0 ? (
                 <button
                   type="button"
-                  onClick={() => setSelectedPropertyId("all")}
+                  className="rounded-lg px-2 py-1 text-sm font-medium text-slate-600 hover:bg-slate-100"
+                  onClick={resetFilters}
                 >
-                  x
+                  Clear filters
                 </button>
-              </Badge>
-            ) : null}
-            {selectedCategory !== "all" ? (
-              <Badge className="border-slate-200 bg-slate-100 text-slate-700">
-                Category: {selectedCategory.replaceAll("_", " ")}
-                <button type="button" onClick={() => setSelectedCategory("all")}>
-                  x
-                </button>
-              </Badge>
-            ) : null}
-            {selectedPriority !== "all" ? (
-              <Badge className="border-slate-200 bg-slate-100 text-slate-700">
-                Severity: {selectedPriority}
-                <button type="button" onClick={() => setSelectedPriority("all")}>
-                  x
-                </button>
-              </Badge>
-            ) : null}
+              ) : null}
+            </div>
           </div>
-
-          <div className="flex items-center justify-between gap-3 text-sm text-slate-500">
-            <span>
-              {visibleRequests.length} request
-              {visibleRequests.length === 1 ? "" : "s"} shown
-            </span>
-            {activeFilterCount > 0 ? (
-              <button
-                type="button"
-                className="rounded-lg px-2 py-1 text-sm font-medium text-slate-600 hover:bg-slate-100"
-                onClick={resetFilters}
-              >
-                Clear filters
-              </button>
-            ) : null}
-          </div>
-        </div>
+        ) : (
+          <p className="mt-3 text-sm text-slate-500">
+            {visibleRequests.length} request
+            {visibleRequests.length === 1 ? "" : "s"} shown
+          </p>
+        )}
       </section>
 
       <section className="grid gap-4">

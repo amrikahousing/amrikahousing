@@ -19,7 +19,10 @@ function metadataString(
 }
 
 export async function getAppShellUser(): Promise<AppShellUser> {
-  const [{ orgRole }, user] = await Promise.all([auth(), currentUser()]);
+  const { orgRole, userId } = await auth();
+  const user = userId
+    ? await currentUser().catch(() => null)
+    : null;
   const unsafeMetadata = user?.unsafeMetadata as Record<string, unknown> | null;
   const publicMetadata = user?.publicMetadata as Record<string, unknown> | null;
 

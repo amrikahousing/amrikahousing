@@ -81,12 +81,70 @@ model organizations {
   created_at           DateTime               @default(now()) @db.Timestamptz(6)
   updated_at           DateTime               @default(now()) @db.Timestamptz(6)
   maintenance_requests maintenance_requests[]
+  accounting_transaction_categories accounting_transaction_categories[]
+  accounting_vendor_category_rules accounting_vendor_category_rules[]
   owners               owners[]
   properties           properties[]
   rental_applications  rental_applications[]
+  plaid_items          plaid_items[]
   tenants              tenants[]
   users                users[]
   vendors              vendors[]
+}
+
+model accounting_transaction_categories {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id String        @db.Uuid
+  transaction_id  String
+  source          String
+  category        String
+  created_by      String?
+  created_at      DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime      @default(now()) @db.Timestamptz(6)
+  organizations   organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([organization_id, source, transaction_id], name: "accounting_transaction_categories_org_source_transaction_key", map: "accounting_transaction_categories_org_source_transaction_key")
+  @@index([category], map: "idx_accounting_transaction_categories_category")
+  @@index([organization_id], map: "idx_accounting_transaction_categories_org")
+}
+
+model accounting_vendor_category_rules {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id String        @db.Uuid
+  vendor_key      String
+  vendor_name     String
+  category        String
+  bank            String        @default("")
+  account         String        @default("")
+  rule_source     String        @default("ai")
+  confidence      Float?
+  reason          String?
+  created_by      String?
+  created_at      DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime      @default(now()) @db.Timestamptz(6)
+  organizations   organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([organization_id, vendor_key, bank, account], name: "accounting_vendor_rules_org_vendor_context_key", map: "accounting_vendor_rules_org_vendor_context_key")
+  @@index([organization_id], map: "idx_accounting_vendor_rules_org")
+  @@index([vendor_key], map: "idx_accounting_vendor_rules_vendor")
+  @@index([category], map: "idx_accounting_vendor_rules_category")
+}
+
+model plaid_items {
+  id               String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id  String        @db.Uuid
+  item_id          String        @unique
+  access_token     String
+  institution_id   String?
+  institution_name String?
+  status           String        @default("connected")
+  transactions_cursor String?
+  created_by       String?
+  created_at       DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime      @default(now()) @db.Timestamptz(6)
+  organizations    organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([organization_id], map: "idx_plaid_items_org")
 }
 
 model owners {

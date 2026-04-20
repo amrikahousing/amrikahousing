@@ -18,6 +18,7 @@ type AppSidebarProps = {
 
 type IconName =
   | "dashboard"
+  | "accounts"
   | "building"
   | "wrench"
   | "users"
@@ -26,12 +27,14 @@ type IconName =
 const navigation: Array<{ name: string; href: string; icon: IconName }> = [
   { name: "Dashboard", href: "/dashboard", icon: "dashboard" },
   { name: "Properties", href: "/properties", icon: "building" },
+  { name: "Accounts", href: "/accounts", icon: "accounts" },
   { name: "Maintenance", href: "/maintenance", icon: "wrench" },
 ];
 
 const implementedRoutes = new Set([
   "/dashboard",
   "/properties",
+  "/accounts",
   "/maintenance",
   "/team",
   "/profile",
@@ -59,6 +62,14 @@ function Icon({ name, className = "" }: { name: IconName; className?: string }) 
   };
 
   switch (name) {
+    case "accounts":
+      return (
+        <svg {...shared}>
+          <path d="M4 7.5A2.5 2.5 0 0 1 6.5 5H19v14H6.5A2.5 2.5 0 0 1 4 16.5v-9Z" />
+          <path d="M17 12h3v4h-3a2 2 0 0 1 0-4Z" />
+          <path d="M8 9h5M8 13h3" />
+        </svg>
+      );
     case "building":
       return (
         <svg {...shared}>
