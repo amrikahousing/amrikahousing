@@ -1,5 +1,6 @@
 import { execFileSync, spawnSync } from "node:child_process";
 import {
+  readdirSync,
   copyFileSync,
   existsSync,
   mkdirSync,
@@ -53,6 +54,16 @@ export function run(command, args, options = {}) {
   if (result.status !== 0) {
     fail(`${command} ${args.join(" ")} exited with status ${result.status}.`);
   }
+}
+
+export function runResult(command, args, options = {}) {
+  return spawnSync(command, args, {
+    cwd: options.cwd,
+    encoding: "utf8",
+    env: options.env ? { ...process.env, ...options.env } : process.env,
+    shell: false,
+    stdio: ["inherit", "pipe", "pipe"],
+  });
 }
 
 export function runAndCapture(command, args, options = {}) {
@@ -275,7 +286,43 @@ export function syncPrismaSchema({ cwd = process.cwd(), env, label }) {
 
   if (existsSync(migrationsDir)) {
     console.log(`Applying Prisma migrations to ${label}.`);
-    run("npx", ["prisma", "migrate", "deploy"], { cwd, env: prismaEnv });
+    const deploy = runResult("npx", ["prisma", "migrate", "deploy"], { cwd, env: prismaEnv });
+
+    if (deploy.stdout) {
+      process.stdout.write(deploy.stdout);
+    }
+
+    if (deploy.stderr) {
+      process.stderr.write(deploy.stderr);
+    }
+
+    if (deploy.error) {
+      fail(`npx prisma migrate deploy failed: ${deploy.error.message}`);
+    }
+
+    if (deploy.status === 0) {
+      return;
+    }
+
+    const combinedOutput = `${deploy.stdout ?? ""}\n${deploy.stderr ?? ""}`;
+    if (!combinedOutput.includes("P3005")) {
+      fail(`npx prisma migrate deploy exited with status ${deploy.status}.`);
+    }
+
+    console.log(`Detected existing non-empty schema for ${label}. Bootstrapping Prisma migration history.`);
+    run("npx", ["prisma", "db", "push"], { cwd, env: prismaEnv });
+
+    const migrations = readdirSync(migrationsDir, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory())
+      .map((entry) => entry.name)
+      .sort();
+
+    for (const migration of migrations) {
+      run("npx", ["prisma", "migrate", "resolve", "--applied", migration], {
+        cwd,
+        env: prismaEnv,
+      });
+    }
     return;
   }
 
