@@ -331,20 +331,40 @@ export function syncPrismaSchema({ cwd = process.cwd(), env, label }) {
 }
 
 export function inspectVercelDeployment(aliasOrUrl, cwd = process.cwd()) {
-  const output = capture(
-    "npx",
-    ["vercel", "inspect", aliasOrUrl, "--wait", "--timeout", "10m", "--format=json"],
-    { cwd }
-  );
-  const jsonStart = output.indexOf("{");
-  if (jsonStart === -1) {
-    fail(`could not parse Vercel inspect output for ${aliasOrUrl}.`);
-  }
+  const args = ["vercel", "inspect", aliasOrUrl, "--wait", "--timeout", "10m", "--format=json"];
+  const maxAttempts = 4;
 
-  try {
-    return JSON.parse(output.slice(jsonStart));
-  } catch {
-    fail(`Vercel inspect output for ${aliasOrUrl} was not valid JSON.`);
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const result = runResult("npx", args, { cwd });
+    const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`.trim();
+
+    if (result.status === 0) {
+      const jsonStart = output.indexOf("{");
+      if (jsonStart === -1) {
+        fail(`could not parse Vercel inspect output for ${aliasOrUrl}.`);
+      }
+
+      try {
+        return JSON.parse(output.slice(jsonStart));
+      } catch {
+        fail(`Vercel inspect output for ${aliasOrUrl} was not valid JSON.`);
+      }
+    }
+
+    const isTransient =
+      output.includes("Response Error (502)") ||
+      output.includes("Response Error (503)") ||
+      output.includes("Response Error (504)") ||
+      output.includes("unexpected error occurred in inspect");
+
+    if (!isTransient || attempt === maxAttempts) {
+      fail(`npx ${args.join(" ")} failed.${output ? ` ${output}` : ""}`);
+    }
+
+    console.warn(
+      `Vercel inspect failed for ${aliasOrUrl} with a transient error. Retrying (${attempt}/${maxAttempts})...`
+    );
+    sleep(5000);
   }
 }
 
