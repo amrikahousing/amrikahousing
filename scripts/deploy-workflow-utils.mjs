@@ -104,6 +104,51 @@ function sleep(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
 }
 
+function extractFirstJsonObject(text) {
+  const start = text.indexOf("{");
+  if (start === -1) {
+    return null;
+  }
+
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = start; i < text.length; i += 1) {
+    const char = text[i];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (char === "\\") {
+        escaped = true;
+      } else if (char === "\"") {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (char === "\"") {
+      inString = true;
+      continue;
+    }
+
+    if (char === "{") {
+      depth += 1;
+      continue;
+    }
+
+    if (char === "}") {
+      depth -= 1;
+      if (depth === 0) {
+        return text.slice(start, i + 1);
+      }
+    }
+  }
+
+  return null;
+}
+
 export function hostnameFromUrl(url) {
   try {
     return new URL(url).hostname;
@@ -339,13 +384,13 @@ export function inspectVercelDeployment(aliasOrUrl, cwd = process.cwd()) {
     const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`.trim();
 
     if (result.status === 0) {
-      const jsonStart = output.indexOf("{");
-      if (jsonStart === -1) {
+      const json = extractFirstJsonObject(output);
+      if (!json) {
         fail(`could not parse Vercel inspect output for ${aliasOrUrl}.`);
       }
 
       try {
-        return JSON.parse(output.slice(jsonStart));
+        return JSON.parse(json);
       } catch {
         fail(`Vercel inspect output for ${aliasOrUrl} was not valid JSON.`);
       }
