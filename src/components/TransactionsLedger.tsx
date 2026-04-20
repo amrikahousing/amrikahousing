@@ -883,7 +883,7 @@ export function TransactionsLedger({
             {pendingRuleApply ? (
               <div className="border-b border-emerald-200 bg-emerald-50 px-6 py-4">
                 <p className="text-sm font-semibold text-emerald-950">
-                  Apply "{pendingRuleApply.category}" to {pendingRuleApply.count.toLocaleString()} matching transaction{pendingRuleApply.count === 1 ? "" : "s"}?
+                  Apply &quot;{pendingRuleApply.category}&quot; to {pendingRuleApply.count.toLocaleString()} matching transaction{pendingRuleApply.count === 1 ? "" : "s"}?
                 </p>
                 {pendingRuleApply.examples.length > 0 ? (
                   <p className="mt-1 text-xs text-emerald-700">
