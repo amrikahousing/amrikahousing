@@ -131,10 +131,18 @@ export async function POST(request: Request) {
   });
 
   if (!response.ok) {
+    const errText = await response.text().catch(() => "");
+    console.error("Anthropic API error:", response.status, errText);
     return Response.json({ error: "AI import failed. Please try again." }, { status: 502 });
   }
 
-  const message = (await response.json()) as AnthropicMessageResponse;
+  let message: AnthropicMessageResponse;
+  try {
+    message = (await response.json()) as AnthropicMessageResponse;
+  } catch (err) {
+    console.error("Failed to parse Anthropic response:", err);
+    return Response.json({ error: "AI import failed. Please try again." }, { status: 502 });
+  }
   const toolUse = message.content.find((b) => b.type === "tool_use");
   if (!toolUse) {
     return Response.json({ error: "Could not parse properties from your description. Please try again with more detail." }, { status: 422 });

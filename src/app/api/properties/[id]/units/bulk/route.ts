@@ -59,17 +59,22 @@ export async function POST(request: Request, context: RouteContext) {
   }
 
   if (toCreate.length > 0) {
-    await prisma.units.createMany({
-      data: toCreate.map((u) => ({
-        property_id: id,
-        unit_number: u.unit_number.trim(),
-        bedrooms: u.bedrooms ?? 0,
-        bathrooms: u.bathrooms ?? 0,
-        square_feet: u.square_feet ?? null,
-        rent_amount: u.rent_amount ?? null,
-        status: ["vacant", "occupied", "maintenance"].includes(u.status ?? "") ? u.status! : "vacant",
-      })),
-    });
+    try {
+      await prisma.units.createMany({
+        data: toCreate.map((u) => ({
+          property_id: id,
+          unit_number: u.unit_number.trim(),
+          bedrooms: u.bedrooms ?? 0,
+          bathrooms: u.bathrooms ?? 0,
+          square_feet: u.square_feet ?? null,
+          rent_amount: u.rent_amount ?? null,
+          status: ["vacant", "occupied", "maintenance"].includes(u.status ?? "") ? u.status! : "vacant",
+        })),
+      });
+    } catch (err) {
+      console.error("Failed to create units:", err);
+      return Response.json({ error: "Failed to save units. Please try again." }, { status: 500 });
+    }
   }
 
   return Response.json({ added: toCreate.length, skipped }, { status: 201 });
