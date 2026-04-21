@@ -29,48 +29,53 @@ export async function POST(request: Request) {
 
   const propertyIds: string[] = [];
 
-  await prisma.$transaction(async (tx: Tx) => {
-    for (const p of properties) {
-      const property = await tx.properties.create({
-        data: {
-          organization_id: ctx.orgDbId,
-          name: p.name.trim(),
-          type: normalizePropertyType(p.type),
-          address: p.address.trim(),
-          city: p.city.trim(),
-          state: p.state.trim().toUpperCase(),
-          zip: p.zip.trim(),
-          description: p.description?.trim() || null,
-        },
-      });
-
-      propertyIds.push(property.id);
-
-      const unitData = (p.units ?? []).slice(0, 50).map((u) => ({
-        property_id: property.id,
-        unit_number: u.unit_number || "1",
-        bedrooms: u.bedrooms ?? 0,
-        bathrooms: u.bathrooms ?? 0,
-        square_feet: u.square_feet ?? null,
-        rent_amount: u.rent_amount ?? null,
-        status: ["vacant", "occupied", "maintenance"].includes(u.status ?? "") ? u.status! : "vacant",
-      }));
-
-      if (unitData.length === 0) {
-        unitData.push({
-          property_id: property.id,
-          unit_number: "1",
-          bedrooms: 0,
-          bathrooms: 0,
-          square_feet: null,
-          rent_amount: null,
-          status: "vacant",
+  try {
+    await prisma.$transaction(async (tx: Tx) => {
+      for (const p of properties) {
+        const property = await tx.properties.create({
+          data: {
+            organization_id: ctx.orgDbId,
+            name: p.name.trim(),
+            type: normalizePropertyType(p.type),
+            address: p.address.trim(),
+            city: p.city.trim(),
+            state: p.state.trim().toUpperCase(),
+            zip: p.zip.trim(),
+            description: p.description?.trim() || null,
+          },
         });
-      }
 
-      await tx.units.createMany({ data: unitData });
-    }
-  });
+        propertyIds.push(property.id);
+
+        const unitData = (p.units ?? []).slice(0, 50).map((u) => ({
+          property_id: property.id,
+          unit_number: u.unit_number || "1",
+          bedrooms: u.bedrooms ?? 0,
+          bathrooms: u.bathrooms ?? 0,
+          square_feet: u.square_feet ?? null,
+          rent_amount: u.rent_amount ?? null,
+          status: ["vacant", "occupied", "maintenance"].includes(u.status ?? "") ? u.status! : "vacant",
+        }));
+
+        if (unitData.length === 0) {
+          unitData.push({
+            property_id: property.id,
+            unit_number: "1",
+            bedrooms: 0,
+            bathrooms: 0,
+            square_feet: null,
+            rent_amount: null,
+            status: "vacant",
+          });
+        }
+
+        await tx.units.createMany({ data: unitData });
+      }
+    });
+  } catch (err) {
+    console.error("Failed to create properties:", err);
+    return Response.json({ error: "Failed to save properties. Please try again." }, { status: 500 });
+  }
 
   return Response.json({ importedCount: propertyIds.length, propertyIds }, { status: 201 });
 }
