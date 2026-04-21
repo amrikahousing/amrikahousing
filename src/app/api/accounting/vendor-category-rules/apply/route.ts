@@ -50,34 +50,14 @@ export async function POST(request: Request) {
     excludeTransactionId: cleanText(body?.excludeTransactionId),
   });
 
-  await prisma.$transaction(
-    matches.map((transaction) =>
-      prisma.accounting_transaction_categories.upsert({
-        where: {
-          accounting_transaction_categories_org_source_transaction_key: {
-            organization_id: access.orgDbId,
-            source: transaction.source,
-            transaction_id: transaction.id,
-          },
-        },
-        create: {
-          organization_id: access.orgDbId,
-          source: transaction.source,
-          transaction_id: transaction.id,
-          category: rule.category,
-          created_by: access.userId,
-        },
-        update: {
-          category: rule.category,
-          updated_at: new Date(),
-        },
-      }),
-    ),
-  );
-
   return NextResponse.json({
     count: matches.length,
     transactionIds: matches.map((transaction) => transaction.id),
     category: rule.category,
+    categoryAudit: {
+      source: "vendor_rule",
+      updatedAt: null,
+      updatedBy: null,
+    },
   });
 }

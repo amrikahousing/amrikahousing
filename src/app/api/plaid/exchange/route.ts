@@ -5,6 +5,7 @@ import {
   exchangePlaidPublicToken,
   type PlaidLinkSuccessMetadata,
 } from "@/lib/plaid";
+import { syncPlaidItemsToDb } from "@/lib/accounting";
 
 type ExchangeBody = {
   publicToken?: unknown;
@@ -68,6 +69,8 @@ export async function POST(request: Request) {
       status: true,
     },
   });
+
+  await syncPlaidItemsToDb(access.orgId);
 
   return Response.json({
     item: {

@@ -72,10 +72,42 @@ export async function PATCH(request: Request) {
       account: true,
       confidence: true,
       reason: true,
+      updated_at: true,
     },
   });
 
   return NextResponse.json({ rule: updated });
+}
+
+export async function DELETE(request: Request) {
+  const access = await requireOrgAccess();
+  if (isAccessError(access)) {
+    return NextResponse.json({ error: access.error }, { status: access.status });
+  }
+
+  const body = (await request.json().catch(() => null)) as {
+    ruleId?: unknown;
+  } | null;
+  const ruleId = cleanOptionalText(body?.ruleId, 80);
+
+  if (!ruleId) {
+    return NextResponse.json({ error: "ruleId is required." }, { status: 400 });
+  }
+
+  const rule = await prisma.accounting_vendor_category_rules.findFirst({
+    where: { id: ruleId, organization_id: access.orgDbId },
+    select: { id: true },
+  });
+
+  if (!rule) {
+    return NextResponse.json({ error: "Rule not found." }, { status: 404 });
+  }
+
+  await prisma.accounting_vendor_category_rules.delete({
+    where: { id: ruleId },
+  });
+
+  return NextResponse.json({ ok: true });
 }
 
 export async function POST(request: Request) {
@@ -157,6 +189,7 @@ export async function POST(request: Request) {
       account: true,
       confidence: true,
       reason: true,
+      updated_at: true,
     },
   });
 

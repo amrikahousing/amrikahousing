@@ -5,6 +5,7 @@ import { AccountsYearSelect } from "@/components/AccountsYearSelect";
 import { AppShell } from "@/components/AppShell";
 import { ExpenseCategoryPieChart } from "@/components/ExpenseCategoryPieChart";
 import { PlaidLinkButton } from "@/components/PlaidLinkButton";
+import { PlaidSyncButton } from "@/components/PlaidSyncButton";
 import {
   type AccountSummary,
   getAccountingData,
@@ -557,13 +558,19 @@ export default async function AccountsPage({
           </article>
 
           <article className="rounded-lg border border-slate-200 bg-white shadow-sm">
-            <div className="border-b border-slate-200 p-5">
-              <h2 className="text-lg font-semibold text-slate-950">
-                Connected Accounts
-              </h2>
-              <p className="mt-1 text-sm text-slate-500">
-                Manage your linked bank accounts and credit cards
-              </p>
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-950">
+                  Connected Accounts
+                </h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Manage your linked bank accounts and credit cards
+                </p>
+              </div>
+              <div className="flex items-start gap-2">
+                <PlaidSyncButton />
+                <PlaidLinkButton />
+              </div>
             </div>
             <div className="space-y-3 p-5">
               {connectedAccounts.map((account) => (
@@ -599,7 +606,6 @@ export default async function AccountsPage({
                   </span>
                 </article>
               ))}
-              <PlaidLinkButton />
             </div>
           </article>
         </section>
