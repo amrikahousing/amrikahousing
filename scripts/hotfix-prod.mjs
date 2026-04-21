@@ -26,7 +26,6 @@ import {
   PRODUCTION_DEPLOYMENT_URL,
   assertDatabaseUrlHost,
   pullVercelEnv,
-  run,
   runGit,
   syncPrismaSchema,
   waitForVercelGitDeployment,
