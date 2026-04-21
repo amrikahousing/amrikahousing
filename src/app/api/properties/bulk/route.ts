@@ -78,6 +78,7 @@ export async function POST(request: Request) {
     return Response.json({ importedCount: propertyIds.length, propertyIds }, { status: 201 });
   } catch (err) {
     console.error("Failed to create properties:", err);
-    return Response.json({ error: "Failed to save properties. Please try again." }, { status: 500 });
+    const message = err instanceof Error ? err.message : String(err);
+    return Response.json({ error: message }, { status: 500 });
   }
 }
