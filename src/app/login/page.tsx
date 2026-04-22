@@ -197,6 +197,8 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     url.searchParams.delete("invite");
     window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
 
+    setIsSubmitting(false);
+
     let cancelled = false;
     window.queueMicrotask(() => {
       if (cancelled) return;
