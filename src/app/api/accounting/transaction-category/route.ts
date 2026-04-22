@@ -3,7 +3,7 @@ import { NextResponse } from "next/server";
 import { isAccessError, requireOrgAccess } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 
-const SOURCES = new Set(["plaid", "rent"]);
+const SOURCES = new Set(["plaid", "rent", "manual"]);
 
 function metadataString(metadata: Record<string, unknown> | null | undefined, key: string) {
   const value = metadata?.[key];
@@ -36,6 +36,65 @@ export async function PATCH(request: Request) {
       { error: "A valid transaction and source are required" },
       { status: 400 },
     );
+  }
+
+  if (source === "manual") {
+    if (!category) {
+      return NextResponse.json({ error: "A category is required" }, { status: 400 });
+    }
+
+    const { count } = await prisma.manual_transactions.updateMany({
+      where: {
+        id: transactionId,
+        organization_id: access.orgDbId,
+        deleted_at: null,
+      },
+      data: {
+        category,
+        updated_by: access.userId,
+        updated_at: new Date(),
+      },
+    });
+
+    if (count === 0) {
+      return NextResponse.json({ error: "Transaction not found" }, { status: 404 });
+    }
+
+    const transaction = await prisma.manual_transactions.findFirst({
+      where: {
+        id: transactionId,
+        organization_id: access.orgDbId,
+        deleted_at: null,
+      },
+      select: {
+        category: true,
+        updated_at: true,
+      },
+    });
+
+    const unsafeMetadata = user?.unsafeMetadata as Record<string, unknown> | null;
+    const publicMetadata = user?.publicMetadata as Record<string, unknown> | null;
+    const firstName =
+      user?.firstName ??
+      metadataString(unsafeMetadata, "firstName") ??
+      metadataString(publicMetadata, "firstName");
+    const lastName =
+      user?.lastName ??
+      metadataString(unsafeMetadata, "lastName") ??
+      metadataString(publicMetadata, "lastName");
+    const fullName = [firstName, lastName].filter(Boolean).join(" ");
+
+    return NextResponse.json({
+      category: transaction?.category ?? category,
+      categoryAudit: {
+        source: "manual",
+        updatedAt: (transaction?.updated_at ?? new Date()).toISOString(),
+        updatedBy:
+          fullName ||
+          user?.primaryEmailAddress?.emailAddress ||
+          access.userId,
+      },
+    });
   }
 
   if (!category) {

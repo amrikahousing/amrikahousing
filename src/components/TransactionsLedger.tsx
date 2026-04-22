@@ -1,9 +1,12 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import {
   type KeyboardEvent,
+  useEffect,
   useMemo,
+  useRef,
   useState,
 } from "react";
 import { mergeAccountingCategoryOptions } from "@/lib/accounting-categories";
@@ -29,6 +32,19 @@ type CategorySuggestion = {
   confidence: number | null;
   reason: string;
 };
+
+type ManualDraft = {
+  date: string;
+  description: string;
+  amount: string;
+  isIncome: boolean;
+  category: string;
+  account: string;
+  notes: string;
+  reference: string;
+};
+
+type ManualSaveStatus = "idle" | "saving" | "saved" | "error";
 
 type PastApplyPrompt = {
   ruleId: string;
@@ -69,6 +85,28 @@ type Filters = {
 
 const filterInputClass =
   "h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/15";
+const drawerInputClass =
+  "h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/15";
+
+function todayInputValue() {
+  const now = new Date();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${now.getFullYear()}-${month}-${day}`;
+}
+
+function emptyManualDraft(): ManualDraft {
+  return {
+    date: todayInputValue(),
+    description: "",
+    amount: "",
+    isIncome: false,
+    category: "Uncategorized",
+    account: "Manual",
+    notes: "",
+    reference: "",
+  };
+}
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("en-US", {
@@ -89,6 +127,61 @@ function formatDate(value: string | null) {
   }).format(new Date(value));
 }
 
+function parseDateInputValue(value: string, endOfDay = false) {
+  if (!value) return null;
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return null;
+  if (endOfDay) date.setHours(23, 59, 59, 999);
+  return date;
+}
+
+function normalizeText(value: string) {
+  return value.trim().toLowerCase();
+}
+
+function rowMatchesFilters(
+  transaction: SerializedAccountingTransaction,
+  filters: Filters,
+) {
+  if (filters.bank && transaction.bank !== filters.bank) return false;
+  if (filters.account && transaction.account !== filters.account) return false;
+  if (
+    filters.category &&
+    normalizeText(transaction.category) !== normalizeText(filters.category)
+  ) {
+    return false;
+  }
+  if (filters.type === "income" && !transaction.isIncome) return false;
+  if (filters.type === "expense" && transaction.isIncome) return false;
+
+  const rowDate = transaction.date ? new Date(transaction.date) : null;
+  const selectedYear = Number.parseInt(filters.year, 10);
+  if (filters.year !== "all" && Number.isInteger(selectedYear)) {
+    if (!rowDate || rowDate.getFullYear() !== selectedYear) return false;
+  }
+
+  const fromDate = parseDateInputValue(filters.from);
+  if (fromDate && (!rowDate || rowDate < fromDate)) return false;
+  const toDate = parseDateInputValue(filters.to, true);
+  if (toDate && (!rowDate || rowDate > toDate)) return false;
+
+  const query = normalizeText(filters.q);
+  if (query) {
+    const haystack = normalizeText(
+      [
+        transaction.description,
+        transaction.category,
+        transaction.account,
+        transaction.bank,
+        transaction.source,
+      ].join(" "),
+    );
+    if (!haystack.includes(query)) return false;
+  }
+
+  return true;
+}
+
 function formatAuditDate(value: string | null) {
   if (!value) return "";
 
@@ -105,6 +198,20 @@ function auditSourceLabel(source: SerializedAccountingTransaction["categoryAudit
   if (source === "vendor_rule") return "Vendor rule";
   if (source === "manual") return "Manual";
   return "";
+}
+
+function transactionAccountLabel(transaction: SerializedAccountingTransaction) {
+  const bank = transaction.bank.trim();
+  const account = transaction.account.trim();
+
+  if (transaction.source === "manual") {
+    if (!account || account.toLowerCase() === "manual") return "Manual entry";
+    return account;
+  }
+
+  if (!bank) return account;
+  if (!account || bank.toLowerCase() === account.toLowerCase()) return bank;
+  return `${bank} / ${account}`;
 }
 
 function groupLabelForDate(value: string | null) {
@@ -184,6 +291,14 @@ function buildFilterUrl(filters: Filters) {
   return `/accounts/transactions${qs ? `?${qs}` : ""}`;
 }
 
+function sortSerializedRows(transactions: SerializedAccountingTransaction[]) {
+  return [...transactions].sort(
+    (a, b) =>
+      (b.date ? new Date(b.date).getTime() : 0) -
+      (a.date ? new Date(a.date).getTime() : 0),
+  );
+}
+
 function mergeVendorRuleList(current: VendorRule[], rule: VendorRule) {
   const existingRuleIndex = current.findIndex((item) => item.id === rule.id);
   const nextRules =
@@ -192,6 +307,95 @@ function mergeVendorRuleList(current: VendorRule[], rule: VendorRule) {
       : [...current, rule];
 
   return nextRules.sort((a, b) => a.vendor_name.localeCompare(b.vendor_name));
+}
+
+function dateFromQuickToken(token: string) {
+  const currentYear = new Date().getFullYear();
+  const slashMatch = token.match(/^(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?$/);
+  if (slashMatch) {
+    const month = Number.parseInt(slashMatch[1], 10);
+    const day = Number.parseInt(slashMatch[2], 10);
+    const rawYear = slashMatch[3] ? Number.parseInt(slashMatch[3], 10) : currentYear;
+    const year = rawYear < 100 ? 2000 + rawYear : rawYear;
+    if (month >= 1 && month <= 12 && day >= 1 && day <= 31) {
+      return `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    }
+  }
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(token)) return token;
+  return null;
+}
+
+function categoryFromQuickInput(input: string, categories: string[]) {
+  const normalized = normalizeText(input);
+  const aliases: Array<[RegExp, string]> = [
+    [/\b(repair|repairs|maintenance|fix|plumb|electric|hvac)\b/, "Repairs and maintenance"],
+    [/\b(rent|tenant payment|lease payment)\b/, "Income"],
+    [/\b(utilit|water|gas|electric|power|internet)\b/, "Utilities"],
+    [/\b(insurance|premium)\b/, "Insurance"],
+    [/\b(tax|property tax)\b/, "Property taxes"],
+    [/\b(mortgage|loan)\b/, "Mortgage"],
+    [/\b(bank fee|fee)\b/, "Bank fees"],
+    [/\b(supply|supplies)\b/, "Supplies"],
+    [/\b(software|subscription|saas)\b/, "Software"],
+    [/\b(marketing|advertis)\b/, "Marketing"],
+    [/\b(uber|lyft|taxi|cab|rideshare|parking|fuel|gas station|toll)\b/, "Transportation"],
+    [/\b(home depot|lowe'?s|hardware)\b/, "Repairs and maintenance"],
+  ];
+
+  for (const [pattern, category] of aliases) {
+    if (pattern.test(normalized)) {
+      return optionValueForCategory(categories, category);
+    }
+  }
+
+  const directMatch = categories.find((category) =>
+    normalized.includes(category.toLowerCase()),
+  );
+  return directMatch ?? "Uncategorized";
+}
+
+function parseQuickManualTransaction(input: string, categories: string[]): ManualDraft {
+  const draft = emptyManualDraft();
+  const trimmed = input.trim();
+  if (!trimmed) return draft;
+
+  const tokens = trimmed.split(/\s+/);
+  const amountIndex = tokens.findIndex((token) =>
+    /^[-+]?\$?\d[\d,]*(?:\.\d{1,2})?$/.test(token),
+  );
+  const dateIndex = tokens.findIndex((token) => dateFromQuickToken(token) !== null);
+  const amountToken = amountIndex >= 0 ? tokens[amountIndex] : "";
+  const parsedAmount = amountToken.replace(/[$,]/g, "");
+  const parsedDate = dateIndex >= 0 ? dateFromQuickToken(tokens[dateIndex]) : null;
+  const unitMatch = trimmed.match(/\bunit\s+([a-z0-9-]+)/i);
+  const isIncome = /\b(income|rent|paid|payment|deposit|received)\b/i.test(trimmed);
+  const descriptionTokens = tokens.filter((_, index) => index !== amountIndex && index !== dateIndex);
+  let description = descriptionTokens.join(" ");
+
+  if (unitMatch?.[0]) {
+    description = description.replace(new RegExp(`\\bfor\\s+${unitMatch[0]}\\b`, "i"), "");
+    description = description.replace(new RegExp(`\\b${unitMatch[0]}\\b`, "i"), "");
+  }
+
+  const category = categoryFromQuickInput(trimmed, categories);
+  if (category !== "Uncategorized") {
+    description = description.replace(new RegExp(`\\b${category.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\b`, "i"), "");
+  }
+  description = description
+    .replace(/\b(for|expense|income|paid|payment|received)\b/gi, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+
+  return {
+    ...draft,
+    date: parsedDate ?? draft.date,
+    description: description || trimmed,
+    amount: parsedAmount,
+    isIncome,
+    category,
+    account: unitMatch ? `Unit ${unitMatch[1]}` : draft.account,
+  };
 }
 
 export function TransactionsLedger({
@@ -204,6 +408,7 @@ export function TransactionsLedger({
   categories,
   years,
 }: TransactionsLedgerProps) {
+  const router = useRouter();
   const [rows, setRows] = useState(transactions);
   const [statuses, setStatuses] = useState<Record<string, RowStatus>>({});
   const [customCategoryRows, setCustomCategoryRows] = useState<Record<string, boolean>>({});
@@ -235,6 +440,23 @@ export function TransactionsLedger({
   const [newRuleCustomCategory, setNewRuleCustomCategory] = useState("");
   const [addRuleStatus, setAddRuleStatus] = useState<"idle" | "saving" | "error">("idle");
   const [acceptAllStatus, setAcceptAllStatus] = useState<"idle" | "saving">("idle");
+  const [manualDrawerOpen, setManualDrawerOpen] = useState(false);
+  const [manualMode, setManualMode] = useState<"quick" | "details">("quick");
+  const [quickManualInput, setQuickManualInput] = useState("");
+  const [manualDraft, setManualDraft] = useState<ManualDraft>(() => emptyManualDraft());
+  const [manualSaveStatus, setManualSaveStatus] = useState<ManualSaveStatus>("idle");
+  const [manualSaveMessage, setManualSaveMessage] = useState("");
+  const [editingManualId, setEditingManualId] = useState<string | null>(null);
+  const [lastAddedManual, setLastAddedManual] = useState<SerializedAccountingTransaction | null>(null);
+  const [failedLogoUrls, setFailedLogoUrls] = useState<Record<string, boolean>>({});
+  const manualSaveInFlight = useRef(false);
+
+  useEffect(() => {
+    setRows(transactions);
+    setStatuses({});
+    setCustomCategoryRows({});
+  }, [transactions]);
+
   const dropdownFilterCount =
     (filters.bank ? 1 : 0) +
     (filters.account ? 1 : 0) +
@@ -248,6 +470,14 @@ export function TransactionsLedger({
   const categoryList = useMemo(
     () => mergeAccountingCategoryOptions([...categoryOptions, ...rows.map((row) => row.category)]),
     [categoryOptions, rows],
+  );
+  const quickManualPreview = useMemo(
+    () => parseQuickManualTransaction(quickManualInput, categoryList),
+    [categoryList, quickManualInput],
+  );
+  const recentManualTransactions = useMemo(
+    () => rows.filter((row) => row.source === "manual").slice(0, 6),
+    [rows],
   );
   const activeFilterChips: Array<{ key: keyof Filters; label: string }> = [
     filters.q.trim() ? { key: "q", label: `Search: ${filters.q.trim()}` } : null,
@@ -825,6 +1055,138 @@ export function TransactionsLedger({
     }
   }
 
+  function openManualDrawer(
+    mode: "quick" | "details" = "quick",
+    draft?: ManualDraft,
+    editingId?: string | null,
+  ) {
+    setManualMode(mode);
+    setManualDraft(draft ?? emptyManualDraft());
+    setEditingManualId(editingId ?? null);
+    setManualSaveStatus("idle");
+    setManualSaveMessage("");
+    setManualDrawerOpen(true);
+  }
+
+  function draftFromTransaction(
+    transaction: SerializedAccountingTransaction,
+    opts?: { today?: boolean },
+  ): ManualDraft {
+    return {
+      date: opts?.today ? todayInputValue() : transaction.date?.slice(0, 10) ?? todayInputValue(),
+      description: transaction.description,
+      amount: String(transaction.amount),
+      isIncome: transaction.isIncome,
+      category: transaction.category,
+      account: transaction.account || "Manual",
+      notes: "",
+      reference: "",
+    };
+  }
+
+  async function saveManualTransaction(draft: ManualDraft) {
+    if (manualSaveInFlight.current) return;
+
+    const payload = {
+      date: draft.date,
+      description: draft.description,
+      amount: draft.amount,
+      isIncome: draft.isIncome,
+      category: draft.category,
+      account: draft.account,
+      notes: draft.notes,
+      reference: draft.reference,
+    };
+    const isEditing = Boolean(editingManualId);
+
+    setManualSaveStatus("saving");
+    setManualSaveMessage("");
+    manualSaveInFlight.current = true;
+
+    try {
+      const response = await fetch("/api/accounting/manual-transactions", {
+        method: isEditing ? "PATCH" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(
+          isEditing ? { transactionId: editingManualId, ...payload } : payload,
+        ),
+      });
+      const result = (await response.json()) as {
+        transaction?: SerializedAccountingTransaction;
+        error?: string;
+      };
+      if (!response.ok || !result.transaction) {
+        throw new Error(result.error ?? "Could not save transaction.");
+      }
+
+      setRows((current) => {
+        const withoutExisting = current.filter((row) => row.id !== result.transaction!.id);
+        if (!rowMatchesFilters(result.transaction!, filters)) return withoutExisting;
+        return sortSerializedRows([result.transaction!, ...withoutExisting]);
+      });
+      setLastAddedManual(result.transaction);
+      setManualSaveStatus("saved");
+      setManualSaveMessage(isEditing ? "Updated." : "Added.");
+      setManualDrawerOpen(false);
+      setQuickManualInput("");
+      setManualDraft(emptyManualDraft());
+      setEditingManualId(null);
+      router.refresh();
+    } catch (error) {
+      setManualSaveStatus("error");
+      setManualSaveMessage(
+        error instanceof Error ? error.message : "Could not save transaction.",
+      );
+    } finally {
+      manualSaveInFlight.current = false;
+    }
+  }
+
+  async function handleSaveQuickManual() {
+    await saveManualTransaction(quickManualPreview);
+  }
+
+  async function handleUndoManual(transaction: SerializedAccountingTransaction) {
+    setManualSaveStatus("saving");
+    try {
+      const response = await fetch("/api/accounting/manual-transactions", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ transactionId: transaction.id, deleted: true }),
+      });
+      if (!response.ok) throw new Error("Could not remove transaction.");
+      setRows((current) => current.filter((row) => row.id !== transaction.id));
+      setLastAddedManual(null);
+      setManualSaveStatus("idle");
+      router.refresh();
+    } catch {
+      setManualSaveStatus("error");
+      setManualSaveMessage("Could not undo. Try again.");
+    }
+  }
+
+  async function handleDeleteManualRow(transaction: SerializedAccountingTransaction) {
+    const confirmed = window.confirm(`Delete ${transaction.description}?`);
+    if (!confirmed) return;
+
+    setStatuses((current) => ({ ...current, [transaction.id]: "saving" }));
+    try {
+      const response = await fetch("/api/accounting/manual-transactions", {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ transactionId: transaction.id, deleted: true }),
+      });
+      if (!response.ok) throw new Error("Could not delete transaction.");
+      setRows((current) => current.filter((row) => row.id !== transaction.id));
+      if (lastAddedManual?.id === transaction.id) {
+        setLastAddedManual(null);
+      }
+      router.refresh();
+    } catch {
+      setStatuses((current) => ({ ...current, [transaction.id]: "error" }));
+    }
+  }
+
   function handleDownloadCsv() {
     const csv = buildCsv(rows);
     const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
@@ -837,6 +1199,12 @@ export function TransactionsLedger({
     link.remove();
     URL.revokeObjectURL(url);
   }
+
+  const activeManualDraft = manualMode === "quick" ? quickManualPreview : manualDraft;
+  const canSaveManual =
+    activeManualDraft.description.trim().length > 0 &&
+    Number.parseFloat(activeManualDraft.amount.replace(/[$,\s]/g, "")) > 0 &&
+    activeManualDraft.date.length > 0;
 
   return (
     <>
@@ -1020,6 +1388,18 @@ export function TransactionsLedger({
       <div className="flex flex-wrap items-center justify-end gap-2">
         <button
           type="button"
+          onClick={() => openManualDrawer("quick")}
+          title="Add manual transaction"
+          className="inline-flex h-10 items-center gap-2 rounded-lg bg-slate-950 px-3 text-sm font-semibold text-white hover:bg-slate-800"
+        >
+          <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.25" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M12 5v14" />
+            <path d="M5 12h14" />
+          </svg>
+          Add transaction
+        </button>
+        <button
+          type="button"
           onClick={handleOpenVendorMap}
           title="Vendor-category mappings"
           className="inline-flex h-10 items-center gap-2 rounded-lg border border-emerald-600 bg-emerald-50 px-3 text-sm font-semibold text-emerald-700 hover:bg-emerald-100"
@@ -1044,13 +1424,45 @@ export function TransactionsLedger({
         </button>
       </div>
 
+      {lastAddedManual ? (
+        <div className="flex flex-col gap-3 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-950 sm:flex-row sm:items-center sm:justify-between">
+          <p className="font-medium">
+            {manualSaveMessage || "Added."} {lastAddedManual.description} · {formatCurrency(lastAddedManual.amount)}
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => openManualDrawer("details", draftFromTransaction(lastAddedManual, { today: true }))}
+              className="h-8 rounded-lg bg-white px-3 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-200 hover:bg-emerald-100"
+            >
+              Duplicate
+            </button>
+            <button
+              type="button"
+              onClick={() => openManualDrawer("details", draftFromTransaction(lastAddedManual), lastAddedManual.id)}
+              className="h-8 rounded-lg bg-white px-3 text-xs font-semibold text-emerald-800 ring-1 ring-emerald-200 hover:bg-emerald-100"
+            >
+              Edit
+            </button>
+            <button
+              type="button"
+              onClick={() => handleUndoManual(lastAddedManual)}
+              disabled={manualSaveStatus === "saving"}
+              className="h-8 rounded-lg px-3 text-xs font-semibold text-emerald-800 hover:bg-emerald-100 disabled:opacity-50"
+            >
+              Undo
+            </button>
+          </div>
+        </div>
+      ) : null}
+
       {rows.length === 0 ? (
         <div className="p-8 text-center">
           <p className="text-sm font-medium text-slate-700">
             No transactions match these filters.
           </p>
           <p className="mt-1 text-sm text-slate-500">
-            Try clearing a filter or syncing another Plaid account.
+            Try clearing a filter, syncing another Plaid account, or adding a manual transaction.
           </p>
         </div>
       ) : (
@@ -1064,9 +1476,11 @@ export function TransactionsLedger({
                 {group.rows.map((transaction, index) => {
                   const status = statuses[transaction.id] ?? "idle";
                   const isCustomCategory = customCategoryRows[transaction.id] ?? false;
-                  const accountLabel = [transaction.bank, transaction.account]
-                    .filter(Boolean)
-                    .join(" / ");
+                  const accountLabel = transactionAccountLabel(transaction);
+                  const logoUrl =
+                    transaction.merchantLogoUrl && !failedLogoUrls[transaction.merchantLogoUrl]
+                      ? transaction.merchantLogoUrl
+                      : null;
 
                   return (
                     <div
@@ -1078,18 +1492,25 @@ export function TransactionsLedger({
                       }
                     >
                       <div className="flex min-w-0 items-center gap-3">
-                        {transaction.merchantLogoUrl ? (
-                          <div
-                            className="h-10 w-10 shrink-0 rounded-lg border border-slate-200 bg-white bg-contain bg-center bg-no-repeat shadow-sm"
-                            aria-label={`${transaction.merchantName ?? transaction.description} logo`}
-                            role="img"
-                            style={{ backgroundImage: `url("${transaction.merchantLogoUrl}")` }}
-                          />
-                        ) : (
-                          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-xs font-bold text-slate-700">
-                            {transactionInitials(transaction.description)}
-                          </div>
-                        )}
+                        <div className="relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg border border-slate-200 bg-slate-100 text-xs font-bold text-slate-700 shadow-sm">
+                          <span>{transactionInitials(transaction.description)}</span>
+                          {logoUrl ? (
+                            // eslint-disable-next-line @next/next/no-img-element
+                            <img
+                              src={logoUrl}
+                              alt={`${transaction.merchantName ?? transaction.description} logo`}
+                              className="absolute inset-0 h-full w-full bg-white object-contain p-1"
+                              loading="lazy"
+                              onError={(event) => {
+                                event.currentTarget.style.display = "none";
+                                setFailedLogoUrls((current) => ({
+                                  ...current,
+                                  [logoUrl]: true,
+                                }));
+                              }}
+                            />
+                          ) : null}
+                        </div>
                         <div className="min-w-0">
                           <p className="truncate text-base font-semibold text-slate-950" title={transaction.description}>
                             {transaction.description}
@@ -1213,6 +1634,22 @@ export function TransactionsLedger({
                             {transaction.isIncome ? "+" : "-"}
                             {formatCurrency(transaction.amount)}
                           </span>
+                          {transaction.source === "manual" ? (
+                            <button
+                              type="button"
+                              onClick={() => handleDeleteManualRow(transaction)}
+                              title="Delete manual transaction"
+                              className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600"
+                            >
+                              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                <path d="M3 6h18" />
+                                <path d="M8 6V4h8v2" />
+                                <path d="M19 6l-1 14H6L5 6" />
+                                <path d="M10 11v5" />
+                                <path d="M14 11v5" />
+                              </svg>
+                            </button>
+                          ) : null}
                           <svg className="hidden h-5 w-5 shrink-0 text-slate-300 sm:block" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                             <path d="M9 18l6-6-6-6" />
                           </svg>
@@ -1227,6 +1664,293 @@ export function TransactionsLedger({
         </div>
       )}
     </section>
+
+      {manualDrawerOpen ? (
+        <div className="fixed inset-0 z-50 flex justify-end bg-black/35" onClick={() => setManualDrawerOpen(false)}>
+          <aside
+            className="flex h-full w-full max-w-xl flex-col bg-white shadow-2xl"
+            aria-label="Manual transaction drawer"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-center justify-between border-b border-slate-200 px-5 py-4">
+              <div>
+                <h2 className="text-base font-semibold text-slate-950">
+                  {editingManualId ? "Edit transaction" : "Add transaction"}
+                </h2>
+                <p className="mt-0.5 text-xs text-slate-500">
+                  Manual records stay separate from Plaid sync.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setManualDrawerOpen(false)}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-lg text-slate-400 hover:bg-slate-100 hover:text-slate-700"
+                title="Close"
+              >
+                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="border-b border-slate-200 px-5 py-3">
+              <div className="inline-flex rounded-lg bg-slate-100 p-1">
+                <button
+                  type="button"
+                  onClick={() => setManualMode("quick")}
+                  className={
+                    manualMode === "quick"
+                      ? "h-8 rounded-md bg-white px-3 text-sm font-semibold text-slate-950 shadow-sm"
+                      : "h-8 rounded-md px-3 text-sm font-semibold text-slate-500 hover:text-slate-800"
+                  }
+                >
+                  Quick add
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (manualMode === "quick" && quickManualInput.trim()) {
+                      setManualDraft(quickManualPreview);
+                    }
+                    setManualMode("details");
+                  }}
+                  className={
+                    manualMode === "details"
+                      ? "h-8 rounded-md bg-white px-3 text-sm font-semibold text-slate-950 shadow-sm"
+                      : "h-8 rounded-md px-3 text-sm font-semibold text-slate-500 hover:text-slate-800"
+                  }
+                >
+                  Details
+                </button>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto px-5 py-5">
+              {manualMode === "quick" ? (
+                <div className="space-y-5">
+                  <label className="space-y-2">
+                    <span className="text-sm font-semibold text-slate-700">Quick add</span>
+                    <input
+                      value={quickManualInput}
+                      onChange={(event) => setQuickManualInput(event.currentTarget.value)}
+                      placeholder="Home Depot 4/18 248.90 repairs for Unit 2B"
+                      className="h-12 w-full rounded-lg border border-slate-300 bg-white px-3 text-base text-slate-950 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/15"
+                    />
+                  </label>
+
+                  {recentManualTransactions.length > 0 ? (
+                    <div className="space-y-2">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                        Recent manual
+                      </p>
+                      <div className="flex flex-wrap gap-2">
+                        {recentManualTransactions.map((transaction) => (
+                          <button
+                            key={transaction.id}
+                            type="button"
+                            onClick={() => {
+                              setManualDraft(draftFromTransaction(transaction, { today: true }));
+                              setManualMode("details");
+                            }}
+                            className="rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+                          >
+                            {transaction.description}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+                      Preview
+                    </p>
+                    <div className="mt-3 grid grid-cols-2 gap-3 text-sm">
+                      <div>
+                        <p className="text-xs text-slate-500">Date</p>
+                        <p className="font-semibold text-slate-950">{quickManualPreview.date}</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-slate-500">Type</p>
+                        <p className="font-semibold text-slate-950">
+                          {quickManualPreview.isIncome ? "Income" : "Expense"}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-slate-500">Amount</p>
+                        <p className="font-semibold text-slate-950">
+                          {quickManualPreview.amount || "$0.00"}
+                        </p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-slate-500">Category</p>
+                        <p className="font-semibold text-slate-950">{quickManualPreview.category}</p>
+                      </div>
+                      <div className="col-span-2">
+                        <p className="text-xs text-slate-500">Description</p>
+                        <p className="font-semibold text-slate-950">
+                          {quickManualPreview.description || "Waiting for details"}
+                        </p>
+                      </div>
+                      <div className="col-span-2">
+                        <p className="text-xs text-slate-500">Account</p>
+                        <p className="font-semibold text-slate-950">{quickManualPreview.account}</p>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <label className="space-y-2">
+                    <span className="text-sm font-semibold text-slate-700">Date</span>
+                    <input
+                      type="date"
+                      value={manualDraft.date}
+                      onChange={(event) =>
+                        setManualDraft((draft) => ({ ...draft, date: event.currentTarget.value }))
+                      }
+                      className={drawerInputClass}
+                    />
+                  </label>
+                  <label className="space-y-2">
+                    <span className="text-sm font-semibold text-slate-700">Amount</span>
+                    <input
+                      value={manualDraft.amount}
+                      onChange={(event) =>
+                        setManualDraft((draft) => ({ ...draft, amount: event.currentTarget.value }))
+                      }
+                      inputMode="decimal"
+                      placeholder="0.00"
+                      className={drawerInputClass}
+                    />
+                  </label>
+                  <label className="space-y-2 sm:col-span-2">
+                    <span className="text-sm font-semibold text-slate-700">Description</span>
+                    <input
+                      value={manualDraft.description}
+                      onChange={(event) =>
+                        setManualDraft((draft) => ({ ...draft, description: event.currentTarget.value }))
+                      }
+                      placeholder="Vendor or memo"
+                      className={drawerInputClass}
+                    />
+                  </label>
+                  <label className="space-y-2">
+                    <span className="text-sm font-semibold text-slate-700">Type</span>
+                    <select
+                      value={manualDraft.isIncome ? "income" : "expense"}
+                      onChange={(event) =>
+                        setManualDraft((draft) => ({
+                          ...draft,
+                          isIncome: event.currentTarget.value === "income",
+                        }))
+                      }
+                      className={drawerInputClass}
+                    >
+                      <option value="expense">Expense</option>
+                      <option value="income">Income</option>
+                    </select>
+                  </label>
+                  <label className="space-y-2">
+                    <span className="text-sm font-semibold text-slate-700">Category</span>
+                    <select
+                      value={optionValueForCategory(categoryList, manualDraft.category)}
+                      onChange={(event) =>
+                        setManualDraft((draft) => ({ ...draft, category: event.currentTarget.value }))
+                      }
+                      className={`${drawerInputClass} capitalize`}
+                    >
+                      {categoryList.map((category) => (
+                        <option key={category} value={category}>
+                          {category}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="space-y-2 sm:col-span-2">
+                    <span className="text-sm font-semibold text-slate-700">Account or unit</span>
+                    <input
+                      value={manualDraft.account}
+                      onChange={(event) =>
+                        setManualDraft((draft) => ({ ...draft, account: event.currentTarget.value }))
+                      }
+                      placeholder="Manual, Unit 2B, Operating account"
+                      className={drawerInputClass}
+                    />
+                  </label>
+                  <label className="space-y-2">
+                    <span className="text-sm font-semibold text-slate-700">Reference</span>
+                    <input
+                      value={manualDraft.reference}
+                      onChange={(event) =>
+                        setManualDraft((draft) => ({ ...draft, reference: event.currentTarget.value }))
+                      }
+                      placeholder="Check, invoice, memo"
+                      className={drawerInputClass}
+                    />
+                  </label>
+                  <label className="space-y-2">
+                    <span className="text-sm font-semibold text-slate-700">Notes</span>
+                    <input
+                      value={manualDraft.notes}
+                      onChange={(event) =>
+                        setManualDraft((draft) => ({ ...draft, notes: event.currentTarget.value }))
+                      }
+                      placeholder="Optional"
+                      className={drawerInputClass}
+                    />
+                  </label>
+                </div>
+              )}
+
+              {manualSaveStatus === "error" && manualSaveMessage ? (
+                <p className="mt-4 text-sm font-semibold text-red-600">{manualSaveMessage}</p>
+              ) : null}
+            </div>
+
+            <div className="flex items-center justify-between gap-3 border-t border-slate-200 px-5 py-4">
+              <button
+                type="button"
+                onClick={() => setManualDrawerOpen(false)}
+                className="h-10 rounded-lg px-4 text-sm font-semibold text-slate-600 hover:bg-slate-100"
+              >
+                Cancel
+              </button>
+              <div className="flex items-center gap-2">
+                {manualMode === "quick" ? (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setManualDraft(quickManualPreview);
+                      setManualMode("details");
+                    }}
+                    className="h-10 rounded-lg px-4 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                  >
+                    Edit details
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() =>
+                    manualMode === "quick"
+                      ? handleSaveQuickManual()
+                      : saveManualTransaction(manualDraft)
+                  }
+                  disabled={!canSaveManual || manualSaveStatus === "saving"}
+                  className="h-10 rounded-lg bg-slate-950 px-5 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                >
+                  {manualSaveStatus === "saving"
+                    ? "Saving..."
+                    : editingManualId
+                      ? "Save changes"
+                      : "Add transaction"}
+                </button>
+              </div>
+            </div>
+          </aside>
+        </div>
+      ) : null}
 
       {showVendorMap ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={() => setShowVendorMap(false)}>

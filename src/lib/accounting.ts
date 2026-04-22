@@ -4,6 +4,7 @@ import {
   findVendorRuleForTransaction,
   type AccountingVendorRule,
 } from "@/lib/accounting-vendor-rules";
+import { manualMerchantMetadata } from "@/lib/manual-merchant-logos";
 import { decryptPlaidAccessToken, syncPlaidTransactions } from "@/lib/plaid";
 
 export type AccountingTransaction = {
@@ -26,7 +27,7 @@ export type AccountingTransaction = {
   bank: string;
   amount: number;
   isIncome: boolean;
-  source: "plaid" | "rent";
+  source: "plaid" | "rent" | "manual";
 };
 
 export type SerializedAccountingTransaction = Omit<
@@ -42,8 +43,11 @@ export type SerializedAccountingTransaction = Omit<
 };
 
 export type AccountSummary = {
+  id: string;
+  plaidItemId: string | null;
   name: string;
   provider: string;
+  institutionLogoUrl: string | null;
   balance: number;
   sync: string;
   status: string;
@@ -73,6 +77,8 @@ type PlaidAccount = {
   account_id?: unknown;
   name?: unknown;
   official_name?: unknown;
+  subtype?: unknown;
+  type?: unknown;
 };
 
 type PlaidCounterparty = {
@@ -87,6 +93,7 @@ export type AccountingData = {
   transactions: AccountingTransaction[];
   plaidTransactions: AccountingTransaction[];
   rentTransactions: AccountingTransaction[];
+  manualTransactions: AccountingTransaction[];
   accountSummaries: AccountSummary[];
 };
 
@@ -229,10 +236,13 @@ async function getActorNames(actorIds: string[], orgId: string) {
 
 type PlaidItemRecord = {
   id: string;
+  item_id: string;
   organization_id: string;
   institution_name: string | null;
   status: string;
+  sync_enabled: boolean;
   transactions_cursor: string | null;
+  last_synced_at: Date | null;
   access_token: string;
 };
 
@@ -240,6 +250,8 @@ type PlaidTxRow = {
   plaid_item_id: string;
   organization_id: string;
   plaid_transaction_id: string;
+  source: string;
+  connection_id: string | null;
   account_id: string;
   account_name: string | null;
   date: Date | null;
@@ -286,6 +298,8 @@ function mapPlaidTxToRow(
     plaid_item_id: item.id,
     organization_id: item.organization_id,
     plaid_transaction_id: transaction.transaction_id,
+    source: "plaid",
+    connection_id: item.item_id,
     account_id: accountKey,
     account_name: accountsById.get(accountKey) ?? item.institution_name ?? null,
     date: parsePlaidDate(transaction.date),
@@ -309,12 +323,27 @@ function buildAccountsById(
   const map = new Map<string, string>();
   for (const account of accounts as PlaidAccount[]) {
     if (typeof account.account_id !== "string") continue;
-    const name =
+    const officialName =
       typeof account.official_name === "string" && account.official_name.trim()
-        ? account.official_name
-        : typeof account.name === "string" && account.name.trim()
-          ? account.name
-          : institutionName ?? "Plaid account";
+        ? account.official_name.trim()
+        : null;
+    const shortName =
+      typeof account.name === "string" && account.name.trim()
+        ? account.name.trim()
+        : null;
+    const subtype =
+      typeof account.subtype === "string" && account.subtype.trim()
+        ? account.subtype.trim()
+        : typeof account.type === "string" && account.type.trim()
+          ? account.type.trim()
+          : null;
+
+    // Prefer official_name, then name; if those equal the institution name
+    // (uninformative), append subtype to disambiguate multiple sub-accounts.
+    let name = officialName ?? shortName ?? institutionName ?? "Plaid account";
+    if (name === institutionName && subtype) {
+      name = `${institutionName} ${subtype}`;
+    }
     map.set(account.account_id, name);
   }
   return map;
@@ -322,7 +351,12 @@ function buildAccountsById(
 
 export async function syncPlaidItemsToDb(orgId: string): Promise<PlaidSyncResult> {
   const plaidItems = await prisma.plaid_items.findMany({
-    where: { organizations: { clerk_org_id: orgId } },
+    where: {
+      organizations: { clerk_org_id: orgId },
+      status: "connected",
+      sync_enabled: true,
+      hidden_at: null,
+    },
     orderBy: { created_at: "desc" },
   });
 
@@ -370,6 +404,9 @@ export async function syncPlaidItemsToDb(orgId: string): Promise<PlaidSyncResult
               plaid_transaction_id: row.plaid_transaction_id,
             },
             data: {
+              source: row.source,
+              connection_id: row.connection_id,
+              account_name: row.account_name,
               merchant_name: row.merchant_name,
               merchant_entity_id: row.merchant_entity_id,
               merchant_logo_url: row.merchant_logo_url,
@@ -395,6 +432,8 @@ export async function syncPlaidItemsToDb(orgId: string): Promise<PlaidSyncResult
             amount: row.amount,
             is_income: row.is_income,
             category: row.category,
+            source: row.source,
+            connection_id: row.connection_id,
             account_name: row.account_name,
             merchant_name: row.merchant_name,
             merchant_entity_id: row.merchant_entity_id,
@@ -419,12 +458,14 @@ export async function syncPlaidItemsToDb(orgId: string): Promise<PlaidSyncResult
         totalRemoved += removedIds.length;
       }
 
-      if (syncResult.nextCursor) {
-        await prisma.plaid_items.update({
-          where: { id: item.id },
-          data: { transactions_cursor: syncResult.nextCursor, updated_at: new Date() },
-        });
-      }
+      await prisma.plaid_items.update({
+        where: { id: item.id },
+        data: {
+          transactions_cursor: syncResult.nextCursor ?? item.transactions_cursor,
+          last_synced_at: new Date(),
+          updated_at: new Date(),
+        },
+      });
 
       synced++;
     } catch {
@@ -435,16 +476,55 @@ export async function syncPlaidItemsToDb(orgId: string): Promise<PlaidSyncResult
   return { synced, added: totalAdded, modified: totalModified, removed: totalRemoved };
 }
 
-const plaidTransactionsQuery = (orgId: string) =>
-  prisma.plaid_transactions.findMany({
-    where: { plaid_items: { organizations: { clerk_org_id: orgId } } },
-    include: { plaid_items: { select: { institution_name: true, status: true } } },
+async function plaidTransactionsQuery(orgId: string) {
+  return prisma.plaid_transactions.findMany({
+    where: {
+      plaid_items: {
+        organizations: { clerk_org_id: orgId },
+        hidden_at: null,
+      },
+    },
+    include: {
+      plaid_items: {
+        select: {
+          id: true,
+          institution_name: true,
+          status: true,
+          sync_enabled: true,
+          last_synced_at: true,
+          plaid_institutions: {
+            select: {
+              logo_url: true,
+            },
+          },
+        },
+      },
+    },
     orderBy: { date: "desc" },
     take: 1000,
   });
+}
+
+async function plaidItemsQuery(orgId: string) {
+  return prisma.plaid_items.findMany({
+    where: { organizations: { clerk_org_id: orgId }, hidden_at: null },
+    select: {
+      id: true,
+      institution_name: true,
+      status: true,
+      sync_enabled: true,
+      last_synced_at: true,
+      plaid_institutions: {
+        select: {
+          logo_url: true,
+        },
+      },
+    },
+  });
+}
 
 export async function getAccountingData(orgId: string): Promise<AccountingData> {
-  const [payments, initialPlaidTxRows, categoryOverrides, vendorRules, plaidItemCount] =
+  const [payments, manualRows, initialPlaidTxRows, categoryOverrides, vendorRules, plaidItems] =
     await Promise.all([
     prisma.payments.findMany({
       where: {
@@ -472,6 +552,14 @@ export async function getAccountingData(orgId: string): Promise<AccountingData> 
       },
       orderBy: [{ paid_at: "desc" }, { due_date: "desc" }, { created_at: "desc" }],
       take: 250,
+    }),
+    prisma.manual_transactions.findMany({
+      where: {
+        organizations: { clerk_org_id: orgId },
+        deleted_at: null,
+      },
+      orderBy: [{ date: "desc" }, { created_at: "desc" }],
+      take: 1000,
     }),
     plaidTransactionsQuery(orgId),
     prisma.accounting_transaction_categories.findMany({
@@ -506,21 +594,35 @@ export async function getAccountingData(orgId: string): Promise<AccountingData> 
         updated_at: true,
       },
     }),
-    prisma.plaid_items.count({
-      where: { organizations: { clerk_org_id: orgId } },
-    }),
+    plaidItemsQuery(orgId),
   ]);
 
   let plaidTxRows = initialPlaidTxRows;
-  if (plaidTxRows.length === 0 && plaidItemCount > 0) {
-    await syncPlaidItemsToDb(orgId);
-    plaidTxRows = await plaidTransactionsQuery(orgId);
+  const syncablePlaidItems = plaidItems.filter(
+    (item) => item.status === "connected" && item.sync_enabled,
+  );
+  if (syncablePlaidItems.length > 0) {
+    const itemIdsWithTx = new Set(initialPlaidTxRows.map((r) => r.plaid_items.id));
+    const anyItemMissingTx = syncablePlaidItems.some(
+      (item) => !itemIdsWithTx.has(item.id),
+    );
+    const anyTxMissingDetails = initialPlaidTxRows.some(
+      (row) => row.category_icon_url === null,
+    );
+    if (anyItemMissingTx || anyTxMissingDetails) {
+      await syncPlaidItemsToDb(orgId);
+      plaidTxRows = await plaidTransactionsQuery(orgId);
+    }
   }
 
   const rules: AccountingVendorRule[] = vendorRules;
   const actorIds = Array.from(
     new Set(
       [
+        ...manualRows.flatMap((transaction) => [
+          transaction.updated_by,
+          transaction.created_by,
+        ]),
         ...categoryOverrides.flatMap((override) => [
           override.updated_by,
           override.created_by,
@@ -591,17 +693,47 @@ export async function getAccountingData(orgId: string): Promise<AccountingData> 
     const key = row.account_id;
     if (!plaidAccountSummaries.has(key)) {
       plaidAccountSummaries.set(key, {
+        id: key,
+        plaidItemId: row.plaid_items.id,
         name: row.account_name ?? row.plaid_items.institution_name ?? "Account",
         provider: row.plaid_items.institution_name ?? "Plaid",
+        institutionLogoUrl: row.plaid_items.plaid_institutions?.logo_url ?? null,
         balance: 0,
         sync: "synced",
-        status: row.plaid_items.status === "connected" ? "Connected" : "Needs attention",
+        status:
+          row.plaid_items.status === "connected" && row.plaid_items.sync_enabled
+            ? "Connected"
+            : "Disconnected",
         icon: "bank",
       });
     }
     const summary = plaidAccountSummaries.get(key)!;
     const amt = Math.abs(Number(row.amount));
     summary.balance += row.is_income ? amt : -amt;
+  }
+
+  // Ensure items with no transactions still appear so they can be removed
+  const itemIdsInSummaries = new Set(
+    Array.from(plaidAccountSummaries.values()).map((s) => s.plaidItemId),
+  );
+  for (const item of plaidItems) {
+    if (!itemIdsInSummaries.has(item.id)) {
+      const key = `item:${item.id}`;
+      plaidAccountSummaries.set(key, {
+        id: key,
+        plaidItemId: item.id,
+        name: item.institution_name ?? "Connected Account",
+        provider: item.institution_name ?? "Plaid",
+        institutionLogoUrl: item.plaid_institutions?.logo_url ?? null,
+        balance: 0,
+        sync: item.last_synced_at ? "synced" : "sync needed",
+        status:
+          item.status === "connected" && item.sync_enabled
+            ? "Connected"
+            : "Disconnected",
+        icon: "bank",
+      });
+    }
   }
 
   const rentTransactions: AccountingTransaction[] = payments.map((payment) => {
@@ -639,13 +771,45 @@ export async function getAccountingData(orgId: string): Promise<AccountingData> 
     };
   });
 
+  const manualTransactions: AccountingTransaction[] = manualRows.map((transaction) => {
+    const merchant = manualMerchantMetadata(transaction.description);
+
+    return {
+      id: transaction.id,
+      date: transaction.date,
+      description: transaction.description,
+      merchantName: merchant.merchantName,
+      merchantEntityId: null,
+      merchantLogoUrl: merchant.merchantLogoUrl,
+      merchantWebsite: merchant.merchantWebsite,
+      categoryIconUrl: null,
+      counterpartyType: null,
+      category: transaction.category,
+      categoryAudit: {
+        source: "manual",
+        updatedAt: transaction.updated_at,
+        updatedBy: displayActorName(
+          transaction.updated_by ?? transaction.created_by,
+          actorsByClerkId,
+        ),
+      },
+      account: transaction.account_label,
+      bank: "Manual",
+      amount: Math.abs(Number(transaction.amount)),
+      isIncome: transaction.is_income,
+      source: "manual",
+    };
+  });
+
   return {
     transactions: sortTransactionsByDate([
       ...plaidTransactions.map(applyCategoryOverride),
       ...rentTransactions.map(applyCategoryOverride),
+      ...manualTransactions,
     ]),
     plaidTransactions: plaidTransactions.map(applyCategoryOverride),
     rentTransactions: rentTransactions.map(applyCategoryOverride),
+    manualTransactions,
     accountSummaries: Array.from(plaidAccountSummaries.values()),
   };
 }

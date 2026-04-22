@@ -51,18 +51,17 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "ruleId and category are required." }, { status: 400 });
   }
 
-  const rule = await prisma.accounting_vendor_category_rules.findFirst({
+  const { count } = await prisma.accounting_vendor_category_rules.updateMany({
     where: { id: ruleId, organization_id: access.orgDbId },
-    select: { id: true },
+    data: { category, updated_at: new Date() },
   });
 
-  if (!rule) {
+  if (count === 0) {
     return NextResponse.json({ error: "Rule not found." }, { status: 404 });
   }
 
-  const updated = await prisma.accounting_vendor_category_rules.update({
+  const updated = await prisma.accounting_vendor_category_rules.findUnique({
     where: { id: ruleId },
-    data: { category, updated_at: new Date() },
     select: {
       id: true,
       vendor_name: true,
@@ -94,18 +93,13 @@ export async function DELETE(request: Request) {
     return NextResponse.json({ error: "ruleId is required." }, { status: 400 });
   }
 
-  const rule = await prisma.accounting_vendor_category_rules.findFirst({
+  const { count } = await prisma.accounting_vendor_category_rules.deleteMany({
     where: { id: ruleId, organization_id: access.orgDbId },
-    select: { id: true },
   });
 
-  if (!rule) {
+  if (count === 0) {
     return NextResponse.json({ error: "Rule not found." }, { status: 404 });
   }
-
-  await prisma.accounting_vendor_category_rules.delete({
-    where: { id: ruleId },
-  });
 
   return NextResponse.json({ ok: true });
 }

@@ -34,7 +34,17 @@ export type PlaidLinkSuccessMetadata = {
   institution?: {
     institution_id?: string | null;
     name?: string | null;
+    logo?: string | null;
   } | null;
+};
+
+type PlaidInstitutionResponse = {
+  institution?: {
+    institution_id?: string;
+    name?: string;
+    logo?: string | null;
+  };
+  request_id: string;
 };
 
 const TOKEN_ENCRYPTION_ALGORITHM = "aes-256-gcm";
@@ -132,6 +142,39 @@ export async function exchangePlaidPublicToken(publicToken: string) {
     accessToken: body.access_token,
     itemId: body.item_id,
   };
+}
+
+export async function getPlaidInstitution({
+  institutionId,
+}: {
+  institutionId: string;
+}) {
+  const config = getPlaidConfig();
+  if ("error" in config) return { error: config.error, status: 501 };
+
+  const response = await fetch(`${config.baseUrl}/institutions/get_by_id`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      client_id: config.clientId,
+      secret: config.secret,
+      institution_id: institutionId,
+      country_codes: ["US"],
+      options: {
+        include_optional_metadata: true,
+      },
+    }),
+  });
+  const body = (await response.json()) as PlaidInstitutionResponse & PlaidErrorResponse;
+
+  if (!response.ok) {
+    return {
+      error: plaidErrorMessage(body, "Could not fetch Plaid institution."),
+      status: response.status,
+    };
+  }
+
+  return { institution: body.institution ?? null };
 }
 
 export function encryptPlaidAccessToken(accessToken: string) {

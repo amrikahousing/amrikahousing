@@ -1,5 +1,6 @@
 import { isAccessError, requireOrgAccess } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { cachePlaidInstitutionLogo } from "@/lib/institution-logos";
 import {
   encryptPlaidAccessToken,
   exchangePlaidPublicToken,
@@ -45,22 +46,41 @@ export async function POST(request: Request) {
     );
   }
 
+  const existingItem = await prisma.plaid_items.findUnique({
+    where: { item_id: exchange.itemId },
+    select: { organization_id: true },
+  });
+  if (existingItem && existingItem.organization_id !== access.orgDbId) {
+    return Response.json(
+      { error: "This bank account is already connected to another organization." },
+      { status: 409 },
+    );
+  }
+
+  const institutionCache = await cachePlaidInstitutionLogo(institution).catch(() => null);
+  const institutionId = institutionCache ? institution?.institution_id ?? null : null;
+  const institutionName = institutionCache?.name ?? institution?.name ?? null;
+
   const item = await prisma.plaid_items.upsert({
     where: { item_id: exchange.itemId },
     update: {
       access_token: encryptedAccessToken,
-      institution_id: institution?.institution_id ?? null,
-      institution_name: institution?.name ?? null,
+      institution_id: institutionId,
+      institution_name: institutionName,
       status: "connected",
+      sync_enabled: true,
+      hidden_at: null,
+      disconnected_at: null,
       updated_at: new Date(),
     },
     create: {
       organization_id: access.orgDbId,
       item_id: exchange.itemId,
       access_token: encryptedAccessToken,
-      institution_id: institution?.institution_id ?? null,
-      institution_name: institution?.name ?? null,
+      institution_id: institutionId,
+      institution_name: institutionName,
       status: "connected",
+      sync_enabled: true,
       created_by: access.userId,
     },
     select: {

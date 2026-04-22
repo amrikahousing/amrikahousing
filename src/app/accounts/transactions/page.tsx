@@ -153,6 +153,7 @@ export default async function TransactionsPage({
         transactions: [],
         plaidTransactions: [],
         rentTransactions: [],
+        manualTransactions: [],
         accountSummaries: [],
       };
   const allTransactions = accountingData.transactions;
