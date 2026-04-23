@@ -5,6 +5,8 @@ import { neon } from "@neondatabase/serverless";
 
 const PRISMA_MIGRATION_ADVISORY_LOCK = 72707369;
 const STALE_LOCK_MIN_AGE_SECONDS = 10;
+const LOCK_RETRY_DELAY_MS = 5000;
+const MAX_LOCK_RETRY_ATTEMPTS = 3;
 
 function argValue(name) {
   const index = process.argv.indexOf(name);
@@ -40,11 +42,16 @@ function combinedOutput(result) {
 
 function shouldInspectPrismaAdvisoryLock(result) {
   const output = combinedOutput(result);
+  const mentionsPrismaLock =
+    output.includes(`pg_advisory_lock(${PRISMA_MIGRATION_ADVISORY_LOCK})`) ||
+    output.includes("Timed out trying to acquire a postgres advisory lock") ||
+    output.includes("migrate-advisory-locking");
+
   return (
     result.status !== 0 &&
-    ((output.includes("P1002") &&
-      output.includes(`pg_advisory_lock(${PRISMA_MIGRATION_ADVISORY_LOCK})`)) ||
-      output.includes("Schema engine error"))
+    ((output.includes("P1002") && mentionsPrismaLock) ||
+      (output.includes("Schema engine error") && mentionsPrismaLock) ||
+      mentionsPrismaLock)
   );
 }
 
@@ -123,26 +130,40 @@ async function main() {
     process.exit(result.status ?? 1);
   }
 
-  console.warn(`Prisma migration failed for ${label}. Checking for a stale advisory lock holder.`);
+  for (let attempt = 1; attempt <= MAX_LOCK_RETRY_ATTEMPTS; attempt += 1) {
+    console.warn(
+      `Prisma migration failed for ${label} because the migration advisory lock is held. Checking lock holder (${attempt}/${MAX_LOCK_RETRY_ATTEMPTS}).`
+    );
 
-  let terminated = false;
-  try {
-    terminated = await terminateStalePrismaLock({ label });
-  } catch (error) {
-    console.warn(`Could not inspect or clear the Prisma migration lock for ${label}: ${error.message}`);
-  }
+    let terminated = false;
+    try {
+      terminated = await terminateStalePrismaLock({ label });
+    } catch (error) {
+      console.warn(`Could not inspect or clear the Prisma migration lock for ${label}: ${error.message}`);
+    }
 
-  if (!terminated) {
-    process.exit(result.status ?? 1);
-  }
+    const delay = terminated ? 2000 : LOCK_RETRY_DELAY_MS;
+    console.warn(
+      terminated
+        ? "Retrying Prisma migrations after clearing the stale lock."
+        : "Retrying Prisma migrations after waiting for the active lock holder."
+    );
+    sleep(delay);
 
-  sleep(2000);
-  console.warn("Retrying Prisma migrations after clearing the stale lock.");
-  result = runPrismaMigrateDeploy();
+    result = runPrismaMigrateDeploy();
 
-  if (result.error) {
-    console.error(`npx prisma migrate deploy failed: ${result.error.message}`);
-    process.exit(1);
+    if (result.error) {
+      console.error(`npx prisma migrate deploy failed: ${result.error.message}`);
+      process.exit(1);
+    }
+
+    if (result.status === 0) {
+      return;
+    }
+
+    if (!shouldInspectPrismaAdvisoryLock(result)) {
+      process.exit(result.status ?? 1);
+    }
   }
 
   process.exit(result.status ?? 1);
