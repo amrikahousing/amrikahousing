@@ -13,6 +13,7 @@ import {
   ensureBranchPushed,
   ensureVercelProject,
   hostnameFromUrl,
+  installDependencies,
   pullVercelEnv,
   run,
   runAndCapture,
@@ -34,6 +35,7 @@ if (dryRun) {
 }
 
 console.log("Checking the test branch before deploy.");
+installDependencies(root);
 console.log("Checking Vercel preview env points to Neon preview/neon-preview-test.");
 const previewEnv = pullVercelEnv({ cwd: root, environment: "preview", gitBranch: "neon-preview-test" });
 

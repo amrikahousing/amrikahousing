@@ -16,6 +16,7 @@ import {
   fail,
   findWorktreeForBranch,
   inspectVercelDeployment,
+  installDependencies,
   pullVercelEnv,
   run,
   runGit,
@@ -43,6 +44,7 @@ if (!yes && !dryRun) {
 }
 
 console.log("Checking the tested branch before promotion.");
+installDependencies(root);
 console.log("Checking Vercel preview env points to Neon preview/neon-preview-test.");
 const previewEnv = pullVercelEnv({ cwd: root, environment: "preview", gitBranch: "neon-preview-test" });
 try {
@@ -92,6 +94,7 @@ runGit(["merge", "--no-ff", "origin/neon-preview-test", "-m", "Merge tested prev
 });
 
 console.log("Checking main after merge.");
+installDependencies(mainWorktree);
 run("npm", ["run", "lint"], { cwd: mainWorktree });
 
 console.log("Checking Vercel production env points to Neon production.");
