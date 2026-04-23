@@ -275,6 +275,11 @@ export function ensureVercelProject(cwd = process.cwd()) {
   return project;
 }
 
+export function installDependencies(cwd = process.cwd()) {
+  console.log("Installing dependencies with npm ci.");
+  run("npm", ["ci"], { cwd });
+}
+
 export function copyVercelProjectLink(fromCwd, toCwd) {
   const from = cwdRealpath(fromCwd);
   const to = cwdRealpath(toCwd);
