@@ -9,6 +9,8 @@ export type AccountingVendorRule = {
   account: string;
   confidence: number | null;
   reason: string | null;
+  created_by?: string | null;
+  updated_at?: Date | null;
 };
 
 const NOISY_PREFIXES = [

@@ -144,14 +144,49 @@ export function PlaidLinkButton() {
   }
 
   return (
-    <div className="space-y-2">
+    <div className="flex flex-col items-end gap-1">
       <button
         type="button"
         onClick={connectAccount}
         disabled={isConnecting}
-        className="flex w-full items-center justify-center rounded-lg border border-dashed border-slate-300 px-4 py-3 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+        aria-label="Add bank account with Plaid"
+        title="Add bank account with Plaid"
+        className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
       >
-        {isConnecting ? "Opening Plaid..." : "+ Add New Account (Plaid Integration)"}
+        {isConnecting ? (
+          <svg
+            className="h-4 w-4 animate-spin"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8" />
+            <path d="M21 3v5h-5" />
+          </svg>
+        ) : (
+          <svg
+            className="h-4 w-4"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="2"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+            aria-hidden="true"
+          >
+            <path d="M4 10h16M6 10v8M10 10v8M14 10v8M18 10v8M3 20h18" />
+            <path d="m12 4 8 4H4l8-4Z" />
+            <path d="M12 8v8" />
+            <path d="M8 12h8" />
+          </svg>
+        )}
+        <span className="sr-only">
+          {isConnecting ? "Opening Plaid" : "Add bank account with Plaid"}
+        </span>
       </button>
       {message ? <p className="text-sm text-emerald-700">{message}</p> : null}
       {error ? <p className="text-sm text-red-600">{error}</p> : null}

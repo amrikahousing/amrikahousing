@@ -2,7 +2,6 @@ import { auth } from "@clerk/nextjs/server";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
-import { TransactionFiltersPanel } from "@/components/TransactionFiltersPanel";
 import { TransactionsLedger } from "@/components/TransactionsLedger";
 import { mergeAccountingCategoryOptions } from "@/lib/accounting-categories";
 import {
@@ -56,11 +55,11 @@ function uniqueValues(
 
 function yearsFor(transactions: AccountingTransaction[]) {
   const years = new Set<number>();
+  years.add(new Date().getFullYear());
   for (const transaction of transactions) {
     if (transaction.date) years.add(transaction.date.getFullYear());
   }
 
-  if (years.size === 0) years.add(new Date().getFullYear());
   return Array.from(years).sort((a, b) => b - a);
 }
 
@@ -80,7 +79,8 @@ function filterTransactions(
   const fromDate = parseDateInput(filters.from);
   const toDate = parseDateInput(filters.to, true);
   const selectedYear = Number.parseInt(filters.year, 10);
-  const hasSelectedYear = Number.isInteger(selectedYear);
+  const hasSelectedYear =
+    filters.year !== "all" && Number.isInteger(selectedYear);
   const query = normalize(filters.q);
   const selectedCategory = normalize(filters.category);
 
@@ -135,12 +135,13 @@ export default async function TransactionsPage({
   if (!userId) redirect("/login");
 
   const resolvedSearchParams = searchParams ? await searchParams : {};
+  const currentYear = String(new Date().getFullYear());
   const filters = {
     bank: readParam(resolvedSearchParams, "bank"),
     account: readParam(resolvedSearchParams, "account"),
     category: readParam(resolvedSearchParams, "category"),
     type: readParam(resolvedSearchParams, "type"),
-    year: readParam(resolvedSearchParams, "year"),
+    year: readParam(resolvedSearchParams, "year") || currentYear,
     from: readParam(resolvedSearchParams, "from"),
     to: readParam(resolvedSearchParams, "to"),
     q: readParam(resolvedSearchParams, "q"),
@@ -152,6 +153,7 @@ export default async function TransactionsPage({
         transactions: [],
         plaidTransactions: [],
         rentTransactions: [],
+        manualTransactions: [],
         accountSummaries: [],
       };
   const allTransactions = accountingData.transactions;
@@ -234,19 +236,16 @@ export default async function TransactionsPage({
           </article>
         </section>
 
-        <TransactionFiltersPanel
-          filters={filters}
-          banks={banks}
-          accounts={accounts}
-          categories={categories}
-          years={years}
-        />
-
         <TransactionsLedger
           key={visibleTransactions.map((transaction) => transaction.id).join("|")}
           transactions={visibleTransactions.map(serializeAccountingTransaction)}
           allTransactionCount={allTransactions.length}
           categoryOptions={categories}
+          filters={filters}
+          banks={banks}
+          accounts={accounts}
+          categories={categories}
+          years={years}
         />
       </div>
     </AppShell>

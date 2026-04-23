@@ -1,12 +1,14 @@
 import { auth } from "@clerk/nextjs/server";
+import Image from "next/image";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AccountsYearSelect } from "@/components/AccountsYearSelect";
 import { AppShell } from "@/components/AppShell";
 import { ExpenseCategoryPieChart } from "@/components/ExpenseCategoryPieChart";
 import { PlaidLinkButton } from "@/components/PlaidLinkButton";
+import { PlaidRemoveButton } from "@/components/PlaidRemoveButton";
+import { PlaidSyncButton } from "@/components/PlaidSyncButton";
 import {
-  type AccountSummary,
   getAccountingData,
   sortTransactionsByDate,
 } from "@/lib/accounting";
@@ -178,13 +180,11 @@ export default async function AccountsPage({
         transactions: [],
         plaidTransactions: [],
         rentTransactions: [],
+        manualTransactions: [],
         accountSummaries: [],
       };
   const transactions = accountingData.transactions;
-  const recentTransactions = sortTransactionsByDate([
-    ...accountingData.plaidTransactions,
-    ...accountingData.rentTransactions,
-  ]).slice(0, 8);
+  const recentTransactions = sortTransactionsByDate(transactions).slice(0, 8);
   const activeTransactions = transactions.filter((transaction) => transaction.date);
   const currentMonthTransactions = activeTransactions.filter((transaction) => {
     if (!transaction.date) return false;
@@ -323,36 +323,7 @@ export default async function AccountsPage({
     },
   ];
 
-  const fallbackAccounts: AccountSummary[] = [
-    {
-      name: "Business Checking",
-      provider: "Chase",
-      balance: totalBalance,
-      sync: "2 min ago",
-      status: "Connected",
-      icon: "bank",
-    },
-    {
-      name: "Savings Account",
-      provider: "Chase",
-      balance: Math.max(0, netProfit),
-      sync: "5 mins ago",
-      status: "Connected",
-      icon: "bank",
-    },
-    {
-      name: "Corporate Card",
-      provider: "American Express",
-      balance: -monthlyExpenses,
-      sync: "1 hour ago",
-      status: "Connected",
-      icon: "card",
-    },
-  ];
-  const connectedAccounts =
-    accountingData.accountSummaries.length > 0
-      ? accountingData.accountSummaries
-      : fallbackAccounts;
+  const connectedAccounts = accountingData.accountSummaries;
 
   return (
     <AppShell>
@@ -557,49 +528,88 @@ export default async function AccountsPage({
           </article>
 
           <article className="rounded-lg border border-slate-200 bg-white shadow-sm">
-            <div className="border-b border-slate-200 p-5">
-              <h2 className="text-lg font-semibold text-slate-950">
-                Connected Accounts
-              </h2>
-              <p className="mt-1 text-sm text-slate-500">
-                Manage your linked bank accounts and credit cards
-              </p>
+            <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
+              <div>
+                <h2 className="text-lg font-semibold text-slate-950">
+                  Connected Accounts
+                </h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Manage your linked bank accounts and credit cards
+                </p>
+                <p className="mt-1 text-xs text-slate-400">
+                  We will keep your past transactions unless you choose to delete them.
+                </p>
+              </div>
+              <div className="flex items-start gap-2">
+                <PlaidSyncButton />
+                <PlaidLinkButton />
+              </div>
             </div>
-            <div className="space-y-3 p-5">
-              {connectedAccounts.map((account) => (
-                <article
-                  key={`${account.provider}-${account.name}`}
-                  className="flex items-center gap-4 rounded-lg border border-slate-200 p-4"
-                >
-                  <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-slate-100 text-slate-600">
-                    <Icon name={account.icon} className="h-5 w-5" />
+            <div className="p-5">
+              {connectedAccounts.length === 0 ? (
+                <div className="flex flex-col items-center gap-3 py-10 text-center">
+                  <div className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-400">
+                    <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                      <rect x="2" y="5" width="20" height="14" rx="2" />
+                      <path d="M2 10h20" />
+                    </svg>
                   </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="truncate font-semibold text-slate-950">
-                      {account.name}
-                    </p>
-                    <p className="text-sm text-slate-500">{account.provider}</p>
-                  </div>
-                  <div className="text-right">
-                    <p className="font-bold text-slate-950">
-                      {account.balance < 0 ? "-" : ""}
-                      {formatCurrency(Math.abs(account.balance))}
-                    </p>
-                    <p className="text-xs text-slate-500">
-                      Last sync: {account.sync}
-                    </p>
-                  </div>
-                  <span
-                    className={cx(
-                      "whitespace-nowrap text-xs font-medium",
-                      account.status === "Connected" ? "text-emerald-600" : "text-red-600",
-                    )}
-                  >
-                    {account.status === "Connected" ? "OK" : "!"} {account.status}
-                  </span>
-                </article>
-              ))}
-              <PlaidLinkButton />
+                  <p className="text-sm font-medium text-slate-700">No accounts linked yet</p>
+                  <p className="text-sm text-slate-500">Connect a bank account to track transactions automatically.</p>
+                  <PlaidLinkButton />
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  {connectedAccounts.map((account) => (
+                    <article
+                      key={account.id}
+                      className="flex items-center gap-4 rounded-lg border border-slate-200 p-4"
+                    >
+                      <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-slate-100 text-slate-600">
+                        {account.institutionLogoUrl ? (
+                          <Image
+                            src={account.institutionLogoUrl}
+                            alt={`${account.provider} logo`}
+                            width={32}
+                            height={32}
+                            className="h-8 w-8 object-contain"
+                            loading="lazy"
+                            unoptimized
+                          />
+                        ) : (
+                          <Icon name={account.icon} className="h-5 w-5" />
+                        )}
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <p className="truncate font-semibold text-slate-950">
+                          {account.name}
+                        </p>
+                        <p className="text-sm text-slate-500">{account.provider}</p>
+                      </div>
+                      <div className="text-right">
+                        <p className="font-bold text-slate-950">
+                          {account.balance < 0 ? "-" : ""}
+                          {formatCurrency(Math.abs(account.balance))}
+                        </p>
+                        <p className="text-xs text-slate-500">
+                          Last sync: {account.sync}
+                        </p>
+                      </div>
+                      <span
+                        className={cx(
+                          "whitespace-nowrap text-xs font-medium",
+                          account.status === "Connected" ? "text-emerald-600" : "text-red-600",
+                        )}
+                      >
+                        {account.status === "Connected" ? "OK" : "!"} {account.status}
+                      </span>
+                      {account.plaidItemId ? (
+                        <PlaidRemoveButton plaidItemId={account.plaidItemId} />
+                      ) : null}
+                    </article>
+                  ))}
+                </div>
+              )}
             </div>
           </article>
         </section>
@@ -679,17 +689,18 @@ export default async function AccountsPage({
                       <td className="whitespace-nowrap px-5 py-4 text-slate-600">
                         {formatShortDate(item.date)}
                       </td>
-                      <td className="max-w-72 truncate px-5 py-4 font-medium text-slate-950">
+                      <td className="max-w-72 px-5 py-4 font-medium text-slate-950">
                         <span
                           className={cx(
-                            "mr-2",
-                            item.isIncome ? "text-emerald-600" : "text-red-600",
+                            "mr-2 inline-block size-2 rounded-full align-middle",
+                            item.isIncome ? "bg-emerald-500" : "bg-red-500",
                           )}
                           aria-hidden="true"
-                        >
-                          {item.isIncome ? "up" : "down"}
+                        />
+                        <span className="sr-only">
+                          {item.isIncome ? "Income: " : "Expense: "}
                         </span>
-                        {item.description}
+                        <span className="align-middle">{item.description}</span>
                         {item.source === "plaid" ? (
                           <span className="ml-2 rounded bg-blue-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-blue-700">
                             Plaid

@@ -1,4 +1,5 @@
 import { auth, currentUser } from "@clerk/nextjs/server";
+import { syncLocalUser } from "@/lib/auth";
 import { AppSidebar } from "./AppSidebar";
 
 export type AppShellUser = {
@@ -19,10 +20,13 @@ function metadataString(
 }
 
 export async function getAppShellUser(): Promise<AppShellUser> {
-  const { orgRole, userId } = await auth();
+  const { orgRole, userId, orgId } = await auth();
   const user = userId
     ? await currentUser().catch(() => null)
     : null;
+  if (userId && orgId) {
+    await syncLocalUser({ userId, orgId, user });
+  }
   const unsafeMetadata = user?.unsafeMetadata as Record<string, unknown> | null;
   const publicMetadata = user?.publicMetadata as Record<string, unknown> | null;
 

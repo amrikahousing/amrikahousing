@@ -159,8 +159,9 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     useSignUp();
   const { isSignedIn } = useAuth();
   const clerk = useClerk();
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const isLoading =
-    signInFetchStatus === "fetching" || signUpFetchStatus === "fetching";
+    isSubmitting || signInFetchStatus === "fetching" || signUpFetchStatus === "fetching";
 
   const headlineWords = useMemo(
     () =>
@@ -199,6 +200,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     window.queueMicrotask(() => {
       if (cancelled) return;
 
+      setIsSubmitting(false);
       if (ticket) setInviteTicket(ticket);
       if (shouldShowSignup) setMode("signup");
       if (emailParam) setEmail(emailParam);
@@ -347,6 +349,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     e.preventDefault();
     setClientError(null);
     setClientNotice(null);
+    setIsSubmitting(true);
 
     const redirectToCleanSignIn = async () => {
       const redirectUrl = new URL("/login", window.location.origin);
@@ -367,6 +370,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
         const { error: resetError } = await signIn.reset();
         if (resetError) {
           setClientError(getErrorMessage(resetError, "We could not restart sign in."));
+          setIsSubmitting(false);
           return;
         }
       }
@@ -379,6 +383,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
         }
 
         setClientError(getErrorMessage(error, "We could not sign you in."));
+        setIsSubmitting(false);
         return;
       }
 
@@ -386,16 +391,19 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
         const { error: sendError } = await signIn.mfa.sendEmailCode();
         if (sendError) {
           setClientError(getErrorMessage(sendError, "We could not send a verification code."));
+          setIsSubmitting(false);
           return;
         }
         setVerificationCode("");
         switchMode("signin_mfa");
+        setIsSubmitting(false);
         return;
       }
 
       await completeSignIn();
     } catch (error) {
       setClientError(getErrorMessage(error, "Something went wrong. Please try again."));
+      setIsSubmitting(false);
     }
   }
 
@@ -410,6 +418,8 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
       return;
     }
 
+    setIsSubmitting(true);
+
     try {
       if (isSignedIn || clerk.isSignedIn) {
         await clerk.signOut();
@@ -419,6 +429,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
         const { error: resetError } = await signIn.reset();
         if (resetError) {
           setClientError(getErrorMessage(resetError, "We could not restart password reset."));
+          setIsSubmitting(false);
           return;
         }
       }
@@ -427,6 +438,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
 
       if (error) {
         setClientError(getErrorMessage(error, "We could not send a reset code."));
+        setIsSubmitting(false);
         return;
       }
 
@@ -434,6 +446,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
 
       if (sendError) {
         setClientError(getErrorMessage(sendError, "We could not send a reset code."));
+        setIsSubmitting(false);
         return;
       }
 
@@ -442,8 +455,10 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
       setPassword("");
       setConfirmPassword("");
       setMode("reset");
+      setIsSubmitting(false);
     } catch (error) {
       setClientError(getErrorMessage(error, "Something went wrong. Please try again."));
+      setIsSubmitting(false);
     }
   }
 
@@ -457,6 +472,8 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
       return;
     }
 
+    setIsSubmitting(true);
+
     try {
       const { error: codeError } =
         await signIn.resetPasswordEmailCode.verifyCode({
@@ -464,6 +481,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
         });
       if (codeError) {
         setClientError(getErrorMessage(codeError, "We could not verify that code."));
+        setIsSubmitting(false);
         return;
       }
 
@@ -474,6 +492,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
         });
       if (passwordError) {
         setClientError(getErrorMessage(passwordError, "We could not update your password."));
+        setIsSubmitting(false);
         return;
       }
 
@@ -488,6 +507,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
       window.location.href = redirectUrl;
     } catch (error) {
       setClientError(getErrorMessage(error, "Something went wrong. Please try again."));
+      setIsSubmitting(false);
     }
   }
 
@@ -525,11 +545,14 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     const first = nameParts[0] ?? "";
     const last = nameParts.slice(1).join(" ") || lastName.trim() || undefined;
 
+    setIsSubmitting(true);
+
     try {
       if (signUp.id && signUp.status !== "complete") {
         const { error: resetError } = await signUp.reset();
         if (resetError) {
           setClientError(getErrorMessage(resetError, "We could not restart signup."));
+          setIsSubmitting(false);
           return;
         }
       }
@@ -565,6 +588,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
         }
 
         setClientError(getErrorMessage(error, "We could not create your account."));
+        setIsSubmitting(false);
         return;
       }
 
@@ -581,21 +605,26 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
           await signUp.verifications.sendEmailCode();
         if (verificationError) {
           setClientError(getErrorMessage(verificationError, "We could not send the code."));
+          setIsSubmitting(false);
           return;
         }
         switchMode("verify");
+        setIsSubmitting(false);
         return;
       }
 
       setClientError("We could not finish creating your account. Please try again.");
+      setIsSubmitting(false);
     } catch (error) {
       setClientError(getErrorMessage(error, "Something went wrong. Please try again."));
+      setIsSubmitting(false);
     }
   }
 
   async function handleVerify(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setClientError(null);
+    setIsSubmitting(true);
 
     try {
       const { error } = await signUp.verifications.verifyEmailCode({
@@ -603,29 +632,34 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
       });
       if (error) {
         setClientError(getErrorMessage(error, "We could not verify that code."));
+        setIsSubmitting(false);
         return;
       }
 
       await completeSignup();
     } catch (error) {
       setClientError(getErrorMessage(error, "Something went wrong. Please try again."));
+      setIsSubmitting(false);
     }
   }
 
   async function handleSignInMfa(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setClientError(null);
+    setIsSubmitting(true);
 
     try {
       const { error } = await signIn.mfa.verifyEmailCode({ code: verificationCode });
       if (error) {
         setClientError(getErrorMessage(error, "We could not verify that code."));
+        setIsSubmitting(false);
         return;
       }
 
       await completeSignIn();
     } catch (error) {
       setClientError(getErrorMessage(error, "Something went wrong. Please try again."));
+      setIsSubmitting(false);
     }
   }
 

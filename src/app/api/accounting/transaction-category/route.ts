@@ -1,8 +1,14 @@
-import { auth } from "@clerk/nextjs/server";
+import { currentUser } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
+import { isAccessError, requireOrgAccess } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 
-const SOURCES = new Set(["plaid", "rent"]);
+const SOURCES = new Set(["plaid", "rent", "manual"]);
+
+function metadataString(metadata: Record<string, unknown> | null | undefined, key: string) {
+  const value = metadata?.[key];
+  return typeof value === "string" && value.trim() ? value.trim() : null;
+}
 
 function normalizeCategory(value: unknown) {
   if (typeof value !== "string") return "";
@@ -10,13 +16,9 @@ function normalizeCategory(value: unknown) {
 }
 
 export async function PATCH(request: Request) {
-  const { userId, orgId } = await auth();
-  if (!userId) {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
-  }
-
-  if (!orgId) {
-    return NextResponse.json({ error: "Organization is required" }, { status: 400 });
+  const [access, user] = await Promise.all([requireOrgAccess(), currentUser()]);
+  if (isAccessError(access)) {
+    return NextResponse.json({ error: access.error }, { status: access.status });
   }
 
   const body = (await request.json().catch(() => null)) as {
@@ -36,19 +38,69 @@ export async function PATCH(request: Request) {
     );
   }
 
-  const organization = await prisma.organizations.findUnique({
-    where: { clerk_org_id: orgId },
-    select: { id: true },
-  });
+  if (source === "manual") {
+    if (!category) {
+      return NextResponse.json({ error: "A category is required" }, { status: 400 });
+    }
 
-  if (!organization) {
-    return NextResponse.json({ error: "Organization not found" }, { status: 404 });
+    const { count } = await prisma.manual_transactions.updateMany({
+      where: {
+        id: transactionId,
+        organization_id: access.orgDbId,
+        deleted_at: null,
+      },
+      data: {
+        category,
+        updated_by: access.userId,
+        updated_at: new Date(),
+      },
+    });
+
+    if (count === 0) {
+      return NextResponse.json({ error: "Transaction not found" }, { status: 404 });
+    }
+
+    const transaction = await prisma.manual_transactions.findFirst({
+      where: {
+        id: transactionId,
+        organization_id: access.orgDbId,
+        deleted_at: null,
+      },
+      select: {
+        category: true,
+        updated_at: true,
+      },
+    });
+
+    const unsafeMetadata = user?.unsafeMetadata as Record<string, unknown> | null;
+    const publicMetadata = user?.publicMetadata as Record<string, unknown> | null;
+    const firstName =
+      user?.firstName ??
+      metadataString(unsafeMetadata, "firstName") ??
+      metadataString(publicMetadata, "firstName");
+    const lastName =
+      user?.lastName ??
+      metadataString(unsafeMetadata, "lastName") ??
+      metadataString(publicMetadata, "lastName");
+    const fullName = [firstName, lastName].filter(Boolean).join(" ");
+
+    return NextResponse.json({
+      category: transaction?.category ?? category,
+      categoryAudit: {
+        source: "manual",
+        updatedAt: (transaction?.updated_at ?? new Date()).toISOString(),
+        updatedBy:
+          fullName ||
+          user?.primaryEmailAddress?.emailAddress ||
+          access.userId,
+      },
+    });
   }
 
   if (!category) {
     await prisma.accounting_transaction_categories.deleteMany({
       where: {
-        organization_id: organization.id,
+        organization_id: access.orgDbId,
         source,
         transaction_id: transactionId,
       },
@@ -60,26 +112,53 @@ export async function PATCH(request: Request) {
   const override = await prisma.accounting_transaction_categories.upsert({
     where: {
       accounting_transaction_categories_org_source_transaction_key: {
-        organization_id: organization.id,
+        organization_id: access.orgDbId,
         source,
         transaction_id: transactionId,
       },
     },
     create: {
-      organization_id: organization.id,
+      organization_id: access.orgDbId,
       transaction_id: transactionId,
       source,
       category,
-      created_by: userId,
+      category_source: "manual",
+      created_by: access.userId,
+      updated_by: access.userId,
     },
     update: {
       category,
+      category_source: "manual",
+      updated_by: access.userId,
       updated_at: new Date(),
     },
     select: {
       category: true,
+      updated_at: true,
     },
   });
 
-  return NextResponse.json({ category: override.category });
+  const unsafeMetadata = user?.unsafeMetadata as Record<string, unknown> | null;
+  const publicMetadata = user?.publicMetadata as Record<string, unknown> | null;
+  const firstName =
+    user?.firstName ??
+    metadataString(unsafeMetadata, "firstName") ??
+    metadataString(publicMetadata, "firstName");
+  const lastName =
+    user?.lastName ??
+    metadataString(unsafeMetadata, "lastName") ??
+    metadataString(publicMetadata, "lastName");
+  const fullName = [firstName, lastName].filter(Boolean).join(" ");
+
+  return NextResponse.json({
+    category: override.category,
+    categoryAudit: {
+      source: "manual",
+      updatedAt: override.updated_at.toISOString(),
+      updatedBy:
+        fullName ||
+        user?.primaryEmailAddress?.emailAddress ||
+        access.userId,
+    },
+  });
 }

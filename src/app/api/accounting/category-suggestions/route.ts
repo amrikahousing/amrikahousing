@@ -71,7 +71,7 @@ export async function POST(request: Request) {
     );
   }
 
-  const [accountingData, vendorRules] = await Promise.all([
+  const [accountingData, vendorRules, categoryOverrides] = await Promise.all([
     getAccountingData(access.orgId),
     prisma.accounting_vendor_category_rules.findMany({
       where: { organization_id: access.orgDbId },
@@ -86,17 +86,44 @@ export async function POST(request: Request) {
         reason: true,
       },
     }),
+    prisma.accounting_transaction_categories.findMany({
+      where: {
+        organization_id: access.orgDbId,
+        source: "plaid",
+      },
+      select: {
+        transaction_id: true,
+        category_source: true,
+      },
+    }),
   ]);
 
   const selectedIds = new Set(transactionIds);
-  const transactions = accountingData.transactions
+  const selectedTransactions = accountingData.transactions
     .filter((transaction) => selectedIds.has(transaction.id))
-    .filter((transaction) => transaction.source === "plaid" && !transaction.isIncome)
+    .filter((transaction) => transaction.source === "plaid" && !transaction.isIncome);
+  const manuallyCategorizedIds = new Set(
+    categoryOverrides
+      .filter((override) => override.category_source === "manual")
+      .map((override) => override.transaction_id),
+  );
+  const transactionsWithoutManualOverrides = selectedTransactions
+    .filter((transaction) => !manuallyCategorizedIds.has(transaction.id));
+  const transactions = transactionsWithoutManualOverrides
     .filter((transaction) => !findVendorRuleForTransaction(transaction, vendorRules))
     .slice(0, MAX_SUGGESTIONS);
+  const skippedManualCount =
+    selectedTransactions.length - transactionsWithoutManualOverrides.length;
+  const skippedRuleCount =
+    transactionsWithoutManualOverrides.length - transactions.length;
 
   if (transactions.length === 0) {
-    return NextResponse.json({ suggestions: [] });
+    return NextResponse.json({
+      suggestions: [],
+      reviewedCount: 0,
+      skippedManualCount,
+      skippedRuleCount,
+    });
   }
 
   const categories = mergeAccountingCategoryOptions(
@@ -122,10 +149,10 @@ export async function POST(request: Request) {
         "You categorize rental property accounting transactions. Return conservative, reviewable suggestions only. Prefer the provided categories when they fit. Use clean accounting category names. Never invent facts.",
       prompt: JSON.stringify({
         instructions: [
-          "Suggest a better category for each transaction.",
+          "Return one category suggestion for every transaction provided.",
+          "Use the best accounting category even if it matches currentCategory.",
           "Use confidence from 0 to 1.",
           "Keep reasons under 80 characters.",
-          "If the current category already looks right, return it with a concise reason.",
         ],
         availableCategories: categories,
         transactions: safeTransactions,
@@ -136,18 +163,33 @@ export async function POST(request: Request) {
       }),
     });
 
-    const allowedIds = new Set(transactions.map((transaction) => transaction.id));
-    const suggestions = result.output.suggestions
-      .filter((suggestion) => allowedIds.has(suggestion.transactionId))
-      .map((suggestion) => ({
-        transactionId: suggestion.transactionId,
-        category: canonicalAccountingCategory(suggestion.category, categories),
-        confidence: Math.max(0, Math.min(1, suggestion.confidence)),
-        reason: suggestion.reason.trim().replace(/\s+/g, " ").slice(0, 100),
-      }))
-      .filter((suggestion) => suggestion.category.length > 0);
+    const aiSuggestionsById = new Map(
+      result.output.suggestions.map((suggestion) => [
+        suggestion.transactionId,
+        {
+          category: canonicalAccountingCategory(suggestion.category, categories),
+          confidence: Math.max(0, Math.min(1, suggestion.confidence)),
+          reason: suggestion.reason.trim().replace(/\s+/g, " ").slice(0, 100),
+        },
+      ]),
+    );
+    const suggestions = transactions.map((transaction) => {
+      const aiSuggestion = aiSuggestionsById.get(transaction.id);
 
-    return NextResponse.json({ suggestions });
+      return {
+        transactionId: transaction.id,
+        category: aiSuggestion?.category || transaction.category,
+        confidence: aiSuggestion?.confidence ?? null,
+        reason: aiSuggestion?.reason || "",
+      };
+    });
+
+    return NextResponse.json({
+      suggestions,
+      reviewedCount: transactions.length,
+      skippedManualCount,
+      skippedRuleCount,
+    });
   } catch (err) {
     console.error("[category-suggestions]", err);
     return NextResponse.json(
