@@ -291,6 +291,23 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     }
   }
 
+  async function getActiveSessionEmail() {
+    try {
+      const response = await fetch("/api/internal/whoami", {
+        method: "GET",
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+
+      if (!response.ok) return null;
+
+      const data = (await response.json()) as { email?: string | null };
+      return data.email ?? null;
+    } catch {
+      return null;
+    }
+  }
+
   async function completeSignIn() {
     const { error: finalizeError } = await signIn.finalize();
     if (finalizeError) {
@@ -360,8 +377,20 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
       await clerk.signOut({ redirectUrl: `${redirectUrl.pathname}${redirectUrl.search}` });
     };
 
-    if (isSignedIn || clerk.isSignedIn) {
+    const handleExistingSession = async () => {
+      const activeEmail = await getActiveSessionEmail();
+      const trimmedEmail = email.trim().toLowerCase();
+
+      if (activeEmail?.toLowerCase() === trimmedEmail) {
+        window.location.href = await resolvePostSignInDestination();
+        return;
+      }
+
       await redirectToCleanSignIn();
+    };
+
+    if (isSignedIn || clerk.isSignedIn) {
+      await handleExistingSession();
       return;
     }
 
@@ -378,7 +407,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
       const { error } = await signIn.create({ identifier: email.trim(), password });
       if (error) {
         if (hasClerkErrorCode(error, "session_exists")) {
-          await redirectToCleanSignIn();
+          await handleExistingSession();
           return;
         }
 
