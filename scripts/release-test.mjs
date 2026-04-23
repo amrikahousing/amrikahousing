@@ -34,15 +34,14 @@ if (dryRun) {
 }
 
 console.log("Checking the test branch before deploy.");
-run("npm", ["run", "lint"], { cwd: root });
-run("npm", ["run", "build"], { cwd: root });
-assertCleanTree(root);
-
 console.log("Checking Vercel preview env points to Neon preview/neon-preview-test.");
 const previewEnv = pullVercelEnv({ cwd: root, environment: "preview", gitBranch: "neon-preview-test" });
 
 try {
   assertDatabaseUrlHost(previewEnv.values, NEON_PREVIEW_HOST_PREFIX, "Preview");
+  run("npm", ["run", "lint"], { cwd: root });
+  run("npm", ["run", "build"], { cwd: root, env: previewEnv.values, hideLocalEnvFiles: true });
+  assertCleanTree(root);
 
   if (dryRun) {
     console.log(`Dry run complete: neon-preview-test is ready to push and deploy to https://${TEST_DEPLOYMENT_ALIAS}.`);
