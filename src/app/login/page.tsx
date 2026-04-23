@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useId, useMemo, useRef, useState } from "react";
+import { useEffect, useId, useMemo, useState } from "react";
 import { useAuth, useClerk, useSignIn, useSignUp } from "@clerk/nextjs";
 import { isClerkAPIResponseError } from "@clerk/nextjs/errors";
 
@@ -136,7 +136,6 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
   const organizationId = useId();
   const confirmPasswordId = useId();
   const codeId = useId();
-  const signInSubmitButtonRef = useRef<HTMLButtonElement>(null);
 
   const [mode, setMode] = useState<AuthMode>(initialMode);
   const [inviteTicket, setInviteTicket] = useState<string | null>(null);
@@ -406,14 +405,6 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
       setClientError(getErrorMessage(error, "Something went wrong. Please try again."));
       setIsSubmitting(false);
     }
-  }
-
-  function handleSignInKeyDown(e: React.KeyboardEvent<HTMLFormElement>) {
-    if (e.key !== "Enter" || e.nativeEvent.isComposing || isLoading) return;
-    if (!email.trim() || !password) return;
-
-    e.preventDefault();
-    signInSubmitButtonRef.current?.click();
   }
 
   async function handleForgotPassword(e: React.FormEvent<HTMLFormElement>) {
@@ -871,7 +862,6 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                   <form
                     className="space-y-2.5"
                     onSubmit={handleSignIn}
-                    onKeyDown={handleSignInKeyDown}
                     autoComplete="on"
                   >
                     <div className="space-y-2">
@@ -937,7 +927,6 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                     )}
 
                     <button
-                      ref={signInSubmitButtonRef}
                       className="h-12 w-full rounded-md bg-emerald-500 px-4 text-base font-semibold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
                       type="submit"
                       disabled={isLoading}
