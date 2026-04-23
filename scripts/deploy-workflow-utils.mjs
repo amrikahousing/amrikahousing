@@ -331,7 +331,10 @@ export function syncPrismaSchema({ cwd = process.cwd(), env, label }) {
 
   if (existsSync(migrationsDir)) {
     console.log(`Applying Prisma migrations to ${label}.`);
-    const deploy = runResult("npx", ["prisma", "migrate", "deploy"], { cwd, env: prismaEnv });
+    const deploy = runResult(process.execPath, ["scripts/prisma-migrate-deploy.mjs", "--label", label], {
+      cwd,
+      env: prismaEnv,
+    });
 
     if (deploy.stdout) {
       process.stdout.write(deploy.stdout);
