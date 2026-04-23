@@ -1,10 +1,7 @@
 #!/usr/bin/env node
 
 import { spawnSync } from "node:child_process";
-import dotenv from "dotenv";
 import { neon } from "@neondatabase/serverless";
-
-dotenv.config({ path: ".env.local", quiet: true });
 
 const PRISMA_MIGRATION_ADVISORY_LOCK = 72707369;
 const STALE_LOCK_MIN_AGE_SECONDS = 10;

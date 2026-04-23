@@ -7,6 +7,7 @@ import {
   mkdtempSync,
   readFileSync,
   realpathSync,
+  renameSync,
   rmSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -40,12 +41,18 @@ export function assertCanonicalRoot() {
 }
 
 export function run(command, args, options = {}) {
-  const result = spawnSync(command, args, {
-    cwd: options.cwd,
-    env: options.env ? { ...process.env, ...options.env } : process.env,
-    stdio: "inherit",
-    shell: false,
-  });
+  const restoreLocalEnvFiles = options.hideLocalEnvFiles ? hideLocalEnvFiles(options.cwd) : () => {};
+  let result;
+  try {
+    result = spawnSync(command, args, {
+      cwd: options.cwd,
+      env: options.env ? withoutLocalEnvFiles({ ...process.env, ...options.env }) : withoutLocalEnvFiles(process.env),
+      stdio: "inherit",
+      shell: false,
+    });
+  } finally {
+    restoreLocalEnvFiles();
+  }
 
   if (result.error) {
     fail(`${command} ${args.join(" ")} failed: ${result.error.message}`);
@@ -56,11 +63,40 @@ export function run(command, args, options = {}) {
   }
 }
 
+function withoutLocalEnvFiles(env) {
+  return Object.fromEntries(
+    Object.entries(env).filter(([key]) => !key.startsWith("DOTENV_CONFIG_") && key !== "ENV_FILE")
+  );
+}
+
+function hideLocalEnvFiles(cwd = process.cwd()) {
+  const root = cwdRealpath(cwd);
+  const localEnvFiles = readdirSync(root).filter((file) => /^\.env(?:\..*)?\.local$/.test(file));
+  if (localEnvFiles.length === 0) {
+    return () => {};
+  }
+
+  const hiddenFiles = localEnvFiles.map((file) => {
+    const from = join(root, file);
+    const to = join(root, `${file}.deploy-hidden-${process.pid}-${Date.now()}`);
+    renameSync(from, to);
+    return { from, to };
+  });
+
+  return () => {
+    for (const { from, to } of hiddenFiles.reverse()) {
+      if (existsSync(to)) {
+        renameSync(to, from);
+      }
+    }
+  };
+}
+
 export function runResult(command, args, options = {}) {
   return spawnSync(command, args, {
     cwd: options.cwd,
     encoding: "utf8",
-    env: options.env ? { ...process.env, ...options.env } : process.env,
+    env: options.env ? withoutLocalEnvFiles({ ...process.env, ...options.env }) : withoutLocalEnvFiles(process.env),
     shell: false,
     stdio: ["inherit", "pipe", "pipe"],
   });
@@ -162,7 +198,7 @@ export function capture(command, args, options = {}) {
     return execFileSync(command, args, {
       cwd: options.cwd,
       encoding: "utf8",
-      env: options.env ? { ...process.env, ...options.env } : process.env,
+      env: options.env ? withoutLocalEnvFiles({ ...process.env, ...options.env }) : withoutLocalEnvFiles(process.env),
       maxBuffer: 1024 * 1024 * 16,
       stdio: ["ignore", "pipe", "pipe"],
     }).trim();
@@ -326,7 +362,7 @@ export function assertDatabaseUrlHost(env, expectedHostPrefix, label) {
 }
 
 export function syncPrismaSchema({ cwd = process.cwd(), env, label }) {
-  const prismaEnv = { ...env, DATABASE_URL: env.DATABASE_URL };
+  const prismaEnv = withoutLocalEnvFiles({ ...env, DATABASE_URL: env.DATABASE_URL });
   const migrationsDir = join(cwdRealpath(cwd), "prisma", "migrations");
 
   if (existsSync(migrationsDir)) {

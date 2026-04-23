@@ -40,7 +40,7 @@ const previewEnv = pullVercelEnv({ cwd: root, environment: "preview", gitBranch:
 try {
   assertDatabaseUrlHost(previewEnv.values, NEON_PREVIEW_HOST_PREFIX, "Preview");
   run("npm", ["run", "lint"], { cwd: root });
-  run("npm", ["run", "build"], { cwd: root, env: previewEnv.values });
+  run("npm", ["run", "build"], { cwd: root, env: previewEnv.values, hideLocalEnvFiles: true });
   assertCleanTree(root);
 
   if (dryRun) {

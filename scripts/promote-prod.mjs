@@ -48,7 +48,7 @@ const previewEnv = pullVercelEnv({ cwd: root, environment: "preview", gitBranch:
 try {
   assertDatabaseUrlHost(previewEnv.values, NEON_PREVIEW_HOST_PREFIX, "Preview");
   run("npm", ["run", "lint"], { cwd: root });
-  run("npm", ["run", "build"], { cwd: root, env: previewEnv.values });
+  run("npm", ["run", "build"], { cwd: root, env: previewEnv.values, hideLocalEnvFiles: true });
   assertCleanTree(root);
 } finally {
   previewEnv.cleanup();
@@ -98,7 +98,7 @@ console.log("Checking Vercel production env points to Neon production.");
 const mainProductionEnv = pullVercelEnv({ cwd: mainWorktree, environment: "production" });
 try {
   assertDatabaseUrlHost(mainProductionEnv.values, NEON_PRODUCTION_HOST_PREFIX, "Production");
-  run("npm", ["run", "build"], { cwd: mainWorktree, env: mainProductionEnv.values });
+  run("npm", ["run", "build"], { cwd: mainWorktree, env: mainProductionEnv.values, hideLocalEnvFiles: true });
   assertCleanTree(mainWorktree);
   syncPrismaSchema({ cwd: mainWorktree, env: mainProductionEnv.values, label: "Neon production" });
 } finally {
