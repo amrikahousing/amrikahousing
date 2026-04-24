@@ -196,6 +196,9 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     url.searchParams.delete("invite");
     window.history.replaceState(null, "", `${url.pathname}${url.search}${url.hash}`);
 
+    const isRenterInvite = url.searchParams.get("renter") === "1";
+    url.searchParams.delete("renter");
+
     let cancelled = false;
     window.queueMicrotask(() => {
       if (cancelled) return;
@@ -205,6 +208,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
       if (shouldShowSignup) setMode("signup");
       if (emailParam) setEmail(emailParam);
       if (notice) setClientNotice(notice);
+      if (isRenterInvite) setRole("renter");
     });
 
     return () => {
@@ -284,8 +288,10 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
 
       if (!response.ok) return "/dashboard";
 
-      const data = (await response.json()) as { internalAdmin?: boolean };
-      return data.internalAdmin ? "/internal/provision" : "/dashboard";
+      const data = (await response.json()) as { internalAdmin?: boolean; role?: string };
+      if (data.internalAdmin) return "/internal/provision";
+      if (data.role === "renter") return "/renter";
+      return "/dashboard";
     } catch {
       return "/dashboard";
     }
@@ -354,7 +360,12 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     if (sessionId) {
       await clerk.setActive({ session: sessionId, navigate: async () => {} });
       await createOrganizationIfNeeded();
-      const dest = inviteTicket || role === "property_manager" ? "/onboarding" : "/dashboard";
+      const dest =
+        role === "renter"
+          ? "/renter"
+          : inviteTicket || role === "property_manager"
+            ? "/onboarding"
+            : "/dashboard";
       window.location.href = dest;
       return;
     }
@@ -593,7 +604,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
             password,
             firstName: first || undefined,
             lastName: last,
-            unsafeMetadata: { role: "property_manager" },
+            unsafeMetadata: { role },
           }
         : {
             emailAddress: email,
@@ -834,47 +845,9 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                 </div>
 
                 {mode === "signin" ? (
-                  <>
-                    <p className="text-sm text-slate-300">
-                      Signing in as{" "}
-                      <span className="font-medium text-slate-100">
-                        {roleLabel}
-                      </span>
-                    </p>
-
-                    <fieldset>
-                      <legend className="sr-only">Select role</legend>
-                      <div className="grid grid-cols-2 gap-2 rounded-xl border border-slate-600 bg-slate-900/80 p-1">
-                        <label className="cursor-pointer">
-                          <input
-                            className="peer sr-only"
-                            type="radio"
-                            name="role"
-                            value="property_manager"
-                            checked={role === "property_manager"}
-                            onChange={() => setRole("property_manager")}
-                          />
-                          <span className="block select-none rounded-md px-3 py-2 text-center text-sm font-semibold text-slate-300 transition-colors peer-checked:bg-white/15 peer-checked:text-white">
-                            Manager
-                          </span>
-                        </label>
-
-                        <label className="cursor-pointer">
-                          <input
-                            className="peer sr-only"
-                            type="radio"
-                            name="role"
-                            value="renter"
-                            checked={role === "renter"}
-                            onChange={() => setRole("renter")}
-                          />
-                          <span className="block select-none rounded-md px-3 py-2 text-center text-sm font-semibold text-slate-300 transition-colors peer-checked:bg-white/15 peer-checked:text-white">
-                            Renter
-                          </span>
-                        </label>
-                      </div>
-                    </fieldset>
-                  </>
+                  <p className="text-xs text-slate-400">
+                    Renters: use the invite link sent to your email to set up your account.
+                  </p>
                 ) : null}
 
                 {inviteTicket && mode === "signup" ? (

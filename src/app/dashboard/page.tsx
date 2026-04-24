@@ -2,6 +2,7 @@ import { auth, currentUser } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { AppShell, type AppShellUser } from "@/components/AppShell";
 import { prisma } from "@/lib/db";
+import { getPortalAccessState } from "@/lib/portal-access";
 
 function metadataString(metadata: Record<string, unknown>, key: string) {
   const value = metadata[key];
@@ -109,13 +110,20 @@ export default async function DashboardPage() {
     user?.firstName ?? metadataString(unsafeMetadata, "firstName") ?? null;
   const role = metadataString(unsafeMetadata, "role") ?? "property_manager";
   const isOrgAdmin = orgRole === "org:admin";
+  const portalAccess = await getPortalAccessState({
+    userId,
+    orgId,
+    email: user?.primaryEmailAddress?.emailAddress ?? null,
+  });
   const shellUser: AppShellUser = {
     email: user?.primaryEmailAddress?.emailAddress ?? null,
     firstName,
     imageUrl: user?.imageUrl ?? null,
-    role: isOrgAdmin ? "admin" : role,
+    portal: "property_manager",
+    role: isOrgAdmin ? "admin" : role === "renter" || role === "tenant" ? "property_manager" : role,
     organizationName,
     isOrgAdmin,
+    ...portalAccess,
   };
 
   const months = Array.from({ length: 6 }, (_, index) => {

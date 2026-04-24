@@ -1,14 +1,19 @@
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { syncLocalUser } from "@/lib/auth";
+import { getPortalAccessState } from "@/lib/portal-access";
 import { AppSidebar } from "./AppSidebar";
 
 export type AppShellUser = {
   email: string | null;
   firstName: string | null;
   imageUrl: string | null;
+  portal: "property_manager";
   role: string;
   organizationName: string | null;
   isOrgAdmin: boolean;
+  canAccessPropertyManager: boolean;
+  canAccessRenter: boolean;
+  hasBothPortals: boolean;
 };
 
 function metadataString(
@@ -42,14 +47,23 @@ export async function getAppShellUser(): Promise<AppShellUser> {
     user?.firstName ??
     metadataString(unsafeMetadata, "firstName") ??
     metadataString(publicMetadata, "firstName");
+  const portalAccess = await getPortalAccessState({
+    userId,
+    orgId,
+    email: user?.primaryEmailAddress?.emailAddress ?? null,
+  });
+  const normalizedRole =
+    role === "renter" || role === "tenant" ? "property_manager" : role;
 
   return {
     email: user?.primaryEmailAddress?.emailAddress ?? null,
     firstName,
     imageUrl: user?.imageUrl ?? null,
-    role: isOrgAdmin ? "admin" : role,
+    portal: "property_manager",
+    role: isOrgAdmin ? "admin" : normalizedRole,
     organizationName,
     isOrgAdmin,
+    ...portalAccess,
   };
 }
 
