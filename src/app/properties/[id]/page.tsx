@@ -12,7 +12,7 @@ export default async function PropertyDetailsPage({
 }: {
   params: Promise<{ id: string }>;
 }) {
-  const { userId, orgId } = await auth();
+  const { userId, orgId, orgRole } = await auth();
   if (!userId) redirect("/login");
   if (!orgId) notFound();
 
@@ -27,6 +27,26 @@ export default async function PropertyDetailsPage({
       units: {
         where: { deleted_at: null },
         orderBy: { unit_number: "asc" },
+        include: {
+          leases: {
+            where: { status: "active", deleted_at: null },
+            include: {
+              lease_tenants: {
+                include: {
+                  tenants: {
+                    select: {
+                      id: true,
+                      first_name: true,
+                      last_name: true,
+                      email: true,
+                      phone: true,
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
       },
     },
   });
@@ -61,15 +81,27 @@ export default async function PropertyDetailsPage({
     state: property.state,
     zip: property.zip,
     description: property.description ?? "",
-    units: property.units.map((unit) => ({
-      id: unit.id,
-      unitNumber: unit.unit_number,
-      bedrooms: unit.bedrooms,
-      bathrooms: Number(unit.bathrooms),
-      squareFeet: unit.square_feet,
-      rentAmount: unit.rent_amount === null ? null : Number(unit.rent_amount),
-      status: unit.status,
-    })),
+    units: property.units.map((unit) => {
+      const primaryTenant = unit.leases?.lease_tenants?.tenants ?? null;
+      return {
+        id: unit.id,
+        unitNumber: unit.unit_number,
+        bedrooms: unit.bedrooms,
+        bathrooms: Number(unit.bathrooms),
+        squareFeet: unit.square_feet,
+        rentAmount: unit.rent_amount === null ? null : Number(unit.rent_amount),
+        status: unit.status,
+        tenant: primaryTenant
+          ? {
+              id: primaryTenant.id,
+              firstName: primaryTenant.first_name,
+              lastName: primaryTenant.last_name,
+              email: primaryTenant.email,
+              phone: primaryTenant.phone ?? null,
+            }
+          : null,
+      };
+    }),
   };
 
   return (
@@ -85,7 +117,7 @@ export default async function PropertyDetailsPage({
           Back to Properties
         </Link>
 
-        <PropertyDetailsClient initialProperty={propertyDetails} />
+        <PropertyDetailsClient initialProperty={propertyDetails} canInviteRenters={orgRole === "org:admin"} />
       </div>
     </AppShell>
   );

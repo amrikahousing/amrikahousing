@@ -6,6 +6,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
+  schemas  = ["public", "renter"]
 }
 
 model lease_tenants {
@@ -17,6 +18,7 @@ model lease_tenants {
   tenants    tenants @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@unique([lease_id, tenant_id])
+  @@schema("renter")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -38,6 +40,7 @@ model leases {
   @@index([deleted_at], map: "idx_leases_deleted_at", where: raw("(deleted_at IS NULL)"))
   @@index([status], map: "idx_leases_status")
   @@index([unit_id], map: "idx_leases_unit")
+  @@schema("renter")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -65,6 +68,7 @@ model maintenance_requests {
   @@index([priority], map: "idx_maintenance_requests_priority")
   @@index([status], map: "idx_maintenance_requests_status")
   @@index([unit_id], map: "idx_maintenance_requests_unit")
+  @@schema("public")
 }
 
 model organizations {
@@ -91,9 +95,13 @@ model organizations {
   plaid_data_deletion_requests      plaid_data_deletion_requests[]
   plaid_transactions                plaid_transactions[]
   manual_transactions               manual_transactions[]
+  payment_attempts                  payment_attempts[]
+  renter_payment_methods            renter_payment_methods[]
+  renter_payment_settings           renter_payment_settings[]
   tenants                           tenants[]
   users                             users[]
   vendors                           vendors[]
+  @@schema("public")
 }
 
 model accounting_transaction_categories {
@@ -112,6 +120,7 @@ model accounting_transaction_categories {
   @@unique([organization_id, source, transaction_id], name: "accounting_transaction_categories_org_source_transaction_key", map: "accounting_transaction_categories_org_source_transaction_key")
   @@index([category], map: "idx_accounting_transaction_categories_category")
   @@index([organization_id], map: "idx_accounting_transaction_categories_org")
+  @@schema("public")
 }
 
 model accounting_vendor_category_rules {
@@ -134,6 +143,7 @@ model accounting_vendor_category_rules {
   @@index([organization_id], map: "idx_accounting_vendor_rules_org")
   @@index([vendor_key], map: "idx_accounting_vendor_rules_vendor")
   @@index([category], map: "idx_accounting_vendor_rules_category")
+  @@schema("public")
 }
 
 model manual_transactions {
@@ -157,6 +167,7 @@ model manual_transactions {
   @@index([organization_id], map: "idx_manual_transactions_org")
   @@index([date], map: "idx_manual_transactions_date")
   @@index([deleted_at], map: "idx_manual_transactions_deleted_at")
+  @@schema("public")
 }
 
 model plaid_items {
@@ -181,6 +192,7 @@ model plaid_items {
 
   @@index([organization_id], map: "idx_plaid_items_org")
   @@index([institution_id], map: "idx_plaid_items_institution")
+  @@schema("public")
 }
 
 model plaid_institutions {
@@ -192,6 +204,7 @@ model plaid_institutions {
   created_at      DateTime      @default(now()) @db.Timestamptz(6)
   updated_at      DateTime      @default(now()) @db.Timestamptz(6)
   plaid_items     plaid_items[]
+  @@schema("public")
 }
 
 model plaid_transactions {
@@ -224,6 +237,7 @@ model plaid_transactions {
   @@index([plaid_item_id], map: "idx_plaid_transactions_item")
   @@index([date], map: "idx_plaid_transactions_date")
   @@index([connection_id], map: "idx_plaid_transactions_connection_id")
+  @@schema("public")
 }
 
 model plaid_item_audit_logs {
@@ -239,6 +253,7 @@ model plaid_item_audit_logs {
   @@index([organization_id], map: "idx_plaid_item_audit_logs_org")
   @@index([plaid_item_id], map: "idx_plaid_item_audit_logs_item")
   @@index([action], map: "idx_plaid_item_audit_logs_action")
+  @@schema("public")
 }
 
 model plaid_data_deletion_requests {
@@ -255,6 +270,7 @@ model plaid_data_deletion_requests {
   @@index([organization_id], map: "idx_plaid_deletion_requests_org")
   @@index([plaid_item_id], map: "idx_plaid_deletion_requests_item")
   @@index([status], map: "idx_plaid_deletion_requests_status")
+  @@schema("public")
 }
 
 model owners {
@@ -269,30 +285,33 @@ model owners {
   updated_at          DateTime              @default(now()) @db.Timestamptz(6)
   organizations       organizations         @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   property_ownerships property_ownerships[]
+  @@schema("public")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
 model payments {
-  id             String    @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
-  lease_id       String    @db.Uuid
-  tenant_id      String?   @db.Uuid
-  amount         Decimal   @db.Decimal(10, 2)
-  currency       String    @default("USD") @db.Char(3)
-  type           String    @default("rent")
-  status         String    @default("pending")
-  due_date       DateTime? @db.Date
-  paid_at        DateTime? @db.Timestamptz(6)
-  payment_method String?
-  reference      String?
-  notes          String?
-  created_at     DateTime  @default(now()) @db.Timestamptz(6)
-  updated_at     DateTime  @default(now()) @db.Timestamptz(6)
-  leases         leases    @relation(fields: [lease_id], references: [id], onUpdate: NoAction)
-  tenants        tenants?  @relation(fields: [tenant_id], references: [id], onUpdate: NoAction)
+  id               String             @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  lease_id         String             @db.Uuid
+  tenant_id        String?            @db.Uuid
+  amount           Decimal            @db.Decimal(10, 2)
+  currency         String             @default("USD") @db.Char(3)
+  type             String             @default("rent")
+  status           String             @default("pending")
+  due_date         DateTime?          @db.Date
+  paid_at          DateTime?          @db.Timestamptz(6)
+  payment_method   String?
+  reference        String?
+  notes            String?
+  created_at       DateTime           @default(now()) @db.Timestamptz(6)
+  updated_at       DateTime           @default(now()) @db.Timestamptz(6)
+  leases           leases             @relation(fields: [lease_id], references: [id], onUpdate: NoAction)
+  payment_attempts payment_attempts[]
+  tenants          tenants?           @relation(fields: [tenant_id], references: [id], onUpdate: NoAction)
 
   @@index([due_date], map: "idx_payments_due_date")
   @@index([lease_id], map: "idx_payments_lease")
   @@index([status], map: "idx_payments_status")
+  @@schema("renter")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -318,6 +337,7 @@ model properties {
 
   @@index([deleted_at], map: "idx_properties_deleted_at", where: raw("(deleted_at IS NULL)"))
   @@index([organization_id], map: "idx_properties_org")
+  @@schema("public")
 }
 
 model property_assignments {
@@ -331,6 +351,7 @@ model property_assignments {
   @@unique([user_id, property_id])
   @@index([property_id], map: "idx_property_assignments_property")
   @@index([user_id], map: "idx_property_assignments_user")
+  @@schema("public")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -345,6 +366,7 @@ model property_ownerships {
   properties           properties @relation(fields: [property_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@unique([owner_id, property_id])
+  @@schema("public")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -370,6 +392,7 @@ model rental_applications {
 
   @@index([status], map: "idx_rental_applications_status")
   @@index([unit_id], map: "idx_rental_applications_unit")
+  @@schema("public")
 }
 
 model tenants {
@@ -385,13 +408,17 @@ model tenants {
   deleted_at           DateTime?              @db.Timestamptz(6)
   lease_tenants        lease_tenants[]
   maintenance_requests maintenance_requests[]
+  payment_attempts     payment_attempts[]
   payments             payments[]
+  renter_payment_methods renter_payment_methods[]
+  renter_payment_settings renter_payment_settings?
   organizations        organizations          @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@unique([organization_id, email], map: "tenants_email_org_unique")
   @@index([clerk_user_id], map: "idx_tenants_clerk")
   @@index([deleted_at], map: "idx_tenants_deleted_at", where: raw("(deleted_at IS NULL)"))
   @@index([organization_id], map: "idx_tenants_org")
+  @@schema("renter")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -415,6 +442,7 @@ model units {
   @@unique([property_id, unit_number])
   @@index([deleted_at], map: "idx_units_deleted_at", where: raw("(deleted_at IS NULL)"))
   @@index([property_id], map: "idx_units_property")
+  @@schema("public")
 }
 
 /// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
@@ -431,13 +459,102 @@ model users {
   updated_at           DateTime               @default(now()) @db.Timestamptz(6)
   deleted_at           DateTime?              @db.Timestamptz(6)
   maintenance_requests maintenance_requests[]
+  payment_attempts     payment_attempts[]
   property_assignments property_assignments[]
   rental_applications  rental_applications[]
+  renter_payment_methods renter_payment_methods[]
+  renter_payment_settings renter_payment_settings[]
   organizations        organizations?         @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([clerk_user_id], map: "idx_users_clerk")
   @@index([deleted_at], map: "idx_users_deleted_at", where: raw("(deleted_at IS NULL)"))
   @@index([organization_id], map: "idx_users_org")
+  @@schema("public")
+}
+
+model renter_payment_methods {
+  id                        String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id                 String                   @db.Uuid
+  user_id                   String?                  @db.Uuid
+  organization_id           String                   @db.Uuid
+  stripe_customer_id        String
+  stripe_payment_method_id  String                   @unique
+  payment_type              String                   @default("card")
+  brand                     String?
+  bank_name                 String?
+  bank_account_type         String?
+  last4                     String                   @db.Char(4)
+  exp_month                 Int?
+  exp_year                  Int?
+  billing_name              String?
+  is_default                Boolean                  @default(false)
+  is_active                 Boolean                  @default(true)
+  created_at                DateTime                 @default(now()) @db.Timestamptz(6)
+  updated_at                DateTime                 @default(now()) @db.Timestamptz(6)
+  deleted_at                DateTime?                @db.Timestamptz(6)
+  payment_attempts          payment_attempts[]
+  renter_payment_settings   renter_payment_settings[] @relation("payment_settings_default_method")
+  organizations             organizations            @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants                   tenants                  @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users                     users?                   @relation(fields: [user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([deleted_at], map: "idx_renter_payment_methods_deleted_at", where: raw("(deleted_at IS NULL)"))
+  @@index([organization_id], map: "idx_renter_payment_methods_org")
+  @@index([tenant_id], map: "idx_renter_payment_methods_tenant")
+  @@index([user_id], map: "idx_renter_payment_methods_user")
+  @@schema("renter")
+}
+
+model renter_payment_settings {
+  id                        String                 @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  tenant_id                 String                 @unique @db.Uuid
+  user_id                   String?                @db.Uuid
+  organization_id           String                 @db.Uuid
+  stripe_customer_id        String?                @unique
+  default_payment_method_id String?                @db.Uuid
+  autopay_enabled           Boolean                @default(false)
+  created_at                DateTime               @default(now()) @db.Timestamptz(6)
+  updated_at                DateTime               @default(now()) @db.Timestamptz(6)
+  default_payment_method    renter_payment_methods? @relation("payment_settings_default_method", fields: [default_payment_method_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  organizations             organizations          @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  tenants                   tenants                @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users                     users?                 @relation(fields: [user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([organization_id], map: "idx_renter_payment_settings_org")
+  @@index([user_id], map: "idx_renter_payment_settings_user")
+  @@schema("renter")
+}
+
+model payment_attempts {
+  id                       String                  @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  payment_id               String                  @db.Uuid
+  tenant_id                String                  @db.Uuid
+  user_id                  String?                 @db.Uuid
+  organization_id          String                  @db.Uuid
+  renter_payment_method_id String?                 @db.Uuid
+  stripe_payment_intent_id String                  @unique
+  idempotency_key          String                  @unique
+  amount                   Decimal                 @db.Decimal(10, 2)
+  currency                 String                  @default("USD") @db.Char(3)
+  status                   String                  @default("requires_payment_method")
+  failure_code             String?
+  failure_message          String?
+  paid_at                  DateTime?               @db.Timestamptz(6)
+  created_at               DateTime                @default(now()) @db.Timestamptz(6)
+  updated_at               DateTime                @default(now()) @db.Timestamptz(6)
+  organizations            organizations           @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  payments                 payments                @relation(fields: [payment_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  renter_payment_methods   renter_payment_methods? @relation(fields: [renter_payment_method_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+  tenants                  tenants                 @relation(fields: [tenant_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  users                    users?                  @relation(fields: [user_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@index([organization_id], map: "idx_payment_attempts_org")
+  @@index([payment_id], map: "idx_payment_attempts_payment")
+  @@index([renter_payment_method_id], map: "idx_payment_attempts_method")
+  @@index([status], map: "idx_payment_attempts_status")
+  @@index([tenant_id], map: "idx_payment_attempts_tenant")
+  @@index([user_id], map: "idx_payment_attempts_user")
+  @@schema("renter")
 }
 
 model vendors {
@@ -455,4 +572,5 @@ model vendors {
   organizations        organizations          @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([organization_id], map: "idx_vendors_org")
+  @@schema("public")
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useClerk, UserButton } from "@clerk/nextjs";
+import { useClerk } from "@clerk/nextjs";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useState } from "react";
@@ -10,9 +10,13 @@ type AppSidebarProps = {
     email: string | null;
     firstName: string | null;
     imageUrl: string | null;
+    portal: "property_manager";
     role: string;
     organizationName: string | null;
     isOrgAdmin: boolean;
+    canAccessPropertyManager: boolean;
+    canAccessRenter: boolean;
+    hasBothPortals: boolean;
   };
 };
 
@@ -201,8 +205,17 @@ export function AppSidebar({ user }: AppSidebarProps) {
             <p className="truncate text-sm font-medium">{displayName}</p>
             <p className="truncate text-xs text-slate-500">{roleLabel}</p>
           </div>
-          <UserButton />
         </Link>
+
+        {user.hasBothPortals ? (
+          <Link
+            href="/renter"
+            className="mb-4 flex w-full items-center justify-center rounded-lg border border-sky-700/60 bg-sky-500/10 px-3 py-2 text-sm font-medium text-sky-200 transition-colors hover:bg-sky-500/20 hover:text-white"
+            onClick={() => setIsOpen(false)}
+          >
+            Switch to Renter Portal
+          </Link>
+        ) : null}
 
         <button
           onClick={() => signOut(() => router.push("/login"))}

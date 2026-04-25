@@ -1,4 +1,4 @@
-import { auth, currentUser } from "@clerk/nextjs/server";
+import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { MaintenanceClient } from "@/components/MaintenanceClient";
@@ -10,46 +10,19 @@ import type {
 } from "@/components/MaintenanceClient";
 import { prisma } from "@/lib/db";
 
-function metadataString(
-  metadata: Record<string, unknown> | null | undefined,
-  key: string,
-) {
-  const value = metadata?.[key];
-  return typeof value === "string" && value.trim() ? value : null;
-}
-
 export default async function MaintenancePage() {
-  const [{ userId, orgId }, user] = await Promise.all([auth(), currentUser()]);
+  const { userId, orgId } = await auth();
   if (!userId) redirect("/login");
-
-  const unsafeMetadata = user?.unsafeMetadata as Record<string, unknown> | null;
-  const publicMetadata = user?.publicMetadata as Record<string, unknown> | null;
-  const rawRole =
-    metadataString(unsafeMetadata, "role") ??
-    metadataString(publicMetadata, "role") ??
-    "property_manager";
-  const role = rawRole === "tenant" || rawRole === "renter" ? "tenant" : "manager";
-
-  const tenant = role === "tenant"
-    ? await prisma.tenants.findUnique({
-        where: { clerk_user_id: userId },
-        select: { id: true, organization_id: true },
-      })
-    : null;
+  const role = "manager";
 
   const maintenanceRequests = await prisma.maintenance_requests.findMany({
-    where:
-      role === "tenant"
-        ? {
-            submitted_by_tenant: tenant?.id ?? "__missing_tenant__",
-          }
-        : orgId
-          ? {
-              organizations: { clerk_org_id: orgId },
-            }
-          : {
-              organization_id: "__missing_org__",
-            },
+    where: orgId
+      ? {
+          organizations: { clerk_org_id: orgId },
+        }
+      : {
+          organization_id: "__missing_org__",
+        },
     include: {
       units: {
         include: {
@@ -70,25 +43,15 @@ export default async function MaintenancePage() {
     orderBy: [{ created_at: "desc" }],
   });
 
-  const properties = role === "tenant"
-    ? tenant
-      ? await prisma.properties.findMany({
-          where: {
-            organization_id: tenant.organization_id,
-            deleted_at: null,
-          },
-          orderBy: { created_at: "desc" },
-        })
-      : []
-    : orgId
-      ? await prisma.properties.findMany({
-          where: {
-            organizations: { clerk_org_id: orgId },
-            deleted_at: null,
-          },
-          orderBy: { created_at: "desc" },
-        })
-      : [];
+  const properties = orgId
+    ? await prisma.properties.findMany({
+        where: {
+          organizations: { clerk_org_id: orgId },
+          deleted_at: null,
+        },
+        orderBy: { created_at: "desc" },
+      })
+    : [];
 
   const initialProperties: Property[] = properties.map((property) => ({
     id: property.id,
