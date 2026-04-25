@@ -47,7 +47,7 @@ export function PlaidSyncButton() {
         type="button"
         onClick={handleSync}
         disabled={status === "syncing"}
-        className="inline-flex h-9 items-center gap-2 rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+        className="inline-flex h-9 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold leading-none text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
       >
         <svg
           className={`h-4 w-4 shrink-0 ${status === "syncing" ? "animate-spin" : ""}`}

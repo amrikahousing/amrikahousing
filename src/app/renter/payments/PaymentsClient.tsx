@@ -1125,139 +1125,116 @@ export function PaymentsClient({
                   ) : null}
 
                   {achEntryMode === "manual" ? (
-                    <div>
-                      <p className="text-sm font-semibold text-slate-900">Account Type</p>
-                      <div className="mt-3 grid gap-3 md:grid-cols-2">
-                        {(["checking", "savings"] as const).map((option) => {
-                          const active = bankAccountChoice === option;
-                          return (
-                            <button
-                              key={option}
-                              type="button"
-                              onClick={() => setBankAccountChoice(option)}
-                              className={[
-                                "rounded-2xl border px-6 py-4 text-left text-lg font-semibold transition",
-                                active
-                                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
-                                  : "border-slate-200 bg-slate-50 text-slate-900 hover:bg-slate-100",
-                              ].join(" ")}
-                            >
-                              {option === "checking" ? "Checking" : "Savings"}
-                            </button>
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ) : null}
-
-                  {achEntryMode === "manual" ? (
-                    <div className="grid gap-5 md:grid-cols-2">
-                      <label className="space-y-1.5 md:col-span-2">
-                        <span className="block text-sm font-semibold text-slate-900">Routing Number</span>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <label className="space-y-1">
+                        <span className="block text-xs font-semibold text-slate-600">Routing Number</span>
                         <input
                           type="text"
                           value={manualRoutingNumber}
                           onChange={(event) => setManualRoutingNumber(event.target.value)}
                           placeholder="110000000"
-                          className="h-16 w-full rounded-2xl border border-slate-200 bg-white px-5 text-lg text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                          className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
                         />
                       </label>
-                      <label className="space-y-1.5 md:col-span-2">
-                        <span className="block text-sm font-semibold text-slate-900">Account Number</span>
+                      <label className="space-y-1">
+                        <span className="block text-xs font-semibold text-slate-600">Account Number</span>
                         <input
                           type="text"
                           value={manualAccountNumber}
                           onChange={(event) => setManualAccountNumber(event.target.value)}
                           placeholder="000123456789"
-                          className="h-16 w-full rounded-2xl border border-slate-200 bg-white px-5 text-lg text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                          className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
                         />
                       </label>
+                      <div className="space-y-1 md:col-span-2">
+                        <span className="block text-xs font-semibold text-slate-600">Account Type</span>
+                        <div className="flex gap-2">
+                          {(["checking", "savings"] as const).map((option) => (
+                            <button
+                              key={option}
+                              type="button"
+                              onClick={() => setBankAccountChoice(option)}
+                              className={[
+                                "flex-1 rounded-xl border py-2.5 text-sm font-semibold transition",
+                                bankAccountChoice === option
+                                  ? "border-emerald-300 bg-emerald-50 text-emerald-700"
+                                  : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50",
+                              ].join(" ")}
+                            >
+                              {option === "checking" ? "Checking" : "Savings"}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <label className="space-y-1 md:col-span-2">
+                        <span className="block text-xs font-semibold text-slate-600">Account Holder Name</span>
+                        <input
+                          type="text"
+                          value={billingName}
+                          onChange={(event) => setBillingName(event.target.value)}
+                          placeholder="John Doe"
+                          className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                        />
+                      </label>
+                      <label className="space-y-1 md:col-span-2">
+                        <span className="block text-xs font-semibold text-slate-600">Email</span>
+                        <input
+                          type="email"
+                          value={bankEmail}
+                          onChange={(event) => setBankEmail(event.target.value)}
+                          placeholder="you@example.com"
+                          className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                        />
+                      </label>
+                      <label className="space-y-1 md:col-span-2">
+                        <span className="block text-xs font-semibold text-slate-600">Street Address</span>
+                        <input
+                          type="text"
+                          value={bankAddressLine1}
+                          onChange={(event) => setBankAddressLine1(event.target.value)}
+                          placeholder="123 Main St"
+                          className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                        />
+                      </label>
+                      <label className="space-y-1">
+                        <span className="block text-xs font-semibold text-slate-600">City</span>
+                        <input
+                          type="text"
+                          value={bankCity}
+                          onChange={(event) => setBankCity(event.target.value)}
+                          placeholder="New York"
+                          className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                        />
+                      </label>
+                      <div className="flex gap-2">
+                        <label className="w-20 shrink-0 space-y-1">
+                          <span className="block text-xs font-semibold text-slate-600">State</span>
+                          <input
+                            type="text"
+                            value={bankState}
+                            onChange={(event) => setBankState(event.target.value)}
+                            placeholder="NY"
+                            maxLength={2}
+                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm uppercase text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                          />
+                        </label>
+                        <label className="min-w-0 flex-1 space-y-1">
+                          <span className="block text-xs font-semibold text-slate-600">ZIP</span>
+                          <input
+                            type="text"
+                            value={bankPostalCode}
+                            onChange={(event) => setBankPostalCode(event.target.value)}
+                            placeholder="10001"
+                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                          />
+                        </label>
+                      </div>
                     </div>
                   ) : (
                     <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-4 text-sm text-emerald-700">
                       Stripe will open a secure bank-linking flow so you can choose your bank directly. No extra details are needed here first.
                     </div>
                   )}
-
-                  {achEntryMode === "manual" ? (
-                    <>
-                      <div className="grid gap-5 md:grid-cols-2">
-                        <label className="space-y-1.5 md:col-span-2">
-                          <span className="block text-sm font-semibold text-slate-900">Account Holder Name</span>
-                          <input
-                            type="text"
-                            value={billingName}
-                            onChange={(event) => setBillingName(event.target.value)}
-                            placeholder="John Doe"
-                            className="h-16 w-full rounded-2xl border border-slate-200 bg-white px-5 text-lg text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
-                          />
-                        </label>
-                        <label className="space-y-1.5 md:col-span-2">
-                          <span className="block text-sm font-semibold text-slate-900">Bank Name</span>
-                          <input
-                            type="text"
-                            value={manualBankName}
-                            onChange={(event) => setManualBankName(event.target.value)}
-                            placeholder="Chase Bank"
-                            className="h-16 w-full rounded-2xl border border-slate-200 bg-white px-5 text-lg text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
-                          />
-                        </label>
-                      </div>
-
-                      <div className="grid gap-5 md:grid-cols-2">
-                        <label className="space-y-1.5 md:col-span-2">
-                          <span className="block text-sm font-semibold text-slate-900">Email</span>
-                          <input
-                            type="email"
-                            value={bankEmail}
-                            onChange={(event) => setBankEmail(event.target.value)}
-                            placeholder="you@example.com"
-                            className="h-16 w-full rounded-2xl border border-slate-200 bg-white px-5 text-lg text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
-                          />
-                        </label>
-                        <label className="space-y-1.5 md:col-span-2">
-                          <span className="block text-sm font-semibold text-slate-900">Billing Address</span>
-                          <input
-                            type="text"
-                            value={bankAddressLine1}
-                            onChange={(event) => setBankAddressLine1(event.target.value)}
-                            placeholder="123 Main St"
-                            className="h-16 w-full rounded-2xl border border-slate-200 bg-white px-5 text-lg text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
-                          />
-                        </label>
-                        <label className="space-y-1.5">
-                          <span className="block text-sm font-semibold text-slate-900">City</span>
-                          <input
-                            type="text"
-                            value={bankCity}
-                            onChange={(event) => setBankCity(event.target.value)}
-                            placeholder="New York"
-                            className="h-16 w-full rounded-2xl border border-slate-200 bg-white px-5 text-lg text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
-                          />
-                        </label>
-                        <label className="space-y-1.5">
-                          <span className="block text-sm font-semibold text-slate-900">State</span>
-                          <input
-                            type="text"
-                            value={bankState}
-                            onChange={(event) => setBankState(event.target.value)}
-                            placeholder="NY"
-                            className="h-16 w-full rounded-2xl border border-slate-200 bg-white px-5 text-lg uppercase text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
-                          />
-                        </label>
-                        <label className="space-y-1.5 md:col-span-2">
-                          <span className="block text-sm font-semibold text-slate-900">ZIP Code</span>
-                          <input
-                            type="text"
-                            value={bankPostalCode}
-                            onChange={(event) => setBankPostalCode(event.target.value)}
-                            placeholder="10001"
-                            className="h-16 w-full rounded-2xl border border-slate-200 bg-white px-5 text-lg text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
-                          />
-                        </label>
-                      </div>
-                    </>
-                  ) : null}
                 </div>
 
                 <div className="mt-6 flex flex-wrap gap-3">

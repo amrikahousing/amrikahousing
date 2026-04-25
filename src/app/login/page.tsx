@@ -415,19 +415,29 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
         }
       }
 
-      const { error } = await signIn.create({ identifier: email.trim(), password });
-      if (error) {
-        if (hasClerkErrorCode(error, "session_exists")) {
+      const { error: createError } = await signIn.create({ identifier: email.trim() });
+      if (createError) {
+        if (hasClerkErrorCode(createError, "session_exists")) {
           await handleExistingSession();
           return;
         }
-
-        setClientError(getErrorMessage(error, "We could not sign you in."));
+        setClientError(getErrorMessage(createError, "We could not sign you in."));
         setIsSubmitting(false);
         return;
       }
 
-      if (signIn.status === "needs_second_factor") {
+      const { error: pwError } = await signIn.password({ password });
+      if (pwError) {
+        if (hasClerkErrorCode(pwError, "session_exists")) {
+          await handleExistingSession();
+          return;
+        }
+        setClientError(getErrorMessage(pwError, "We could not sign you in."));
+        setIsSubmitting(false);
+        return;
+      }
+
+      if (!signIn.createdSessionId) {
         const { error: sendError } = await signIn.mfa.sendEmailCode();
         if (sendError) {
           setClientError(getErrorMessage(sendError, "We could not send a verification code."));

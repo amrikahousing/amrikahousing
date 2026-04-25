@@ -44,28 +44,6 @@ export function PlaidRemoveButton({ plaidItemId }: { plaidItemId: string }) {
     }
   }
 
-  async function handleCreateDeletionRequest() {
-    setStatus("submitting");
-    setError(null);
-    setMessage(null);
-    try {
-      const response = await fetch(`/api/plaid/items/${plaidItemId}/deletion-request`, {
-        method: "POST",
-      });
-      const result = (await response.json()) as { error?: string };
-      if (!response.ok) {
-        throw new Error(result.error ?? "Failed to create deletion request.");
-      }
-      setStatus("success");
-      setMessage("Deletion request submitted");
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Failed to create deletion request.",
-      );
-      setStatus("error");
-    }
-  }
-
   if (status === "confirming") {
     return (
       <div className="relative flex flex-col items-end gap-1">
@@ -108,14 +86,7 @@ export function PlaidRemoveButton({ plaidItemId }: { plaidItemId: string }) {
               Disconnect + delete all data (irreversible)
             </button>
           </div>
-          <div className="mt-2 flex items-center justify-between">
-            <button
-              type="button"
-              onClick={handleCreateDeletionRequest}
-              className="text-xs font-medium text-slate-600 underline decoration-slate-300 underline-offset-2 hover:text-slate-800"
-            >
-              Request data deletion
-            </button>
+          <div className="mt-2 flex items-center justify-end">
             <button
               type="button"
               onClick={() => setStatus("idle")}

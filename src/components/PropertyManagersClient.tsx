@@ -164,15 +164,6 @@ export function PropertyManagersClient({ canInvite }: { canInvite: boolean }) {
         ))}
       </div>
 
-      <button
-        type="button"
-        onClick={addEmail}
-        className="mt-3 inline-flex items-center gap-1.5 text-sm font-medium text-slate-600 transition hover:text-emerald-700"
-      >
-        <PlusIcon className="h-4 w-4" />
-        Add another
-      </button>
-
       {error ? (
         <p
           role="alert"
@@ -188,13 +179,24 @@ export function PropertyManagersClient({ canInvite }: { canInvite: boolean }) {
         </p>
       ) : null}
 
-      <button
-        type="submit"
-        disabled={submitting}
-        className="mt-5 h-10 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        {submitting ? "Sending invites..." : "Send invites"}
-      </button>
+      <div className="mt-5 flex flex-wrap items-center gap-3">
+        <button
+          type="button"
+          onClick={addEmail}
+          className="inline-flex h-10 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-slate-300 bg-white px-4 text-sm font-semibold leading-none text-slate-700 transition hover:border-emerald-300 hover:text-emerald-700"
+        >
+          <PlusIcon className="h-4 w-4" />
+          Add another
+        </button>
+
+        <button
+          type="submit"
+          disabled={submitting}
+          className="inline-flex h-10 items-center justify-center whitespace-nowrap rounded-lg bg-emerald-600 px-4 text-sm font-semibold leading-none text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {submitting ? "Sending invites..." : "Send invites"}
+        </button>
+      </div>
     </form>
   );
 }

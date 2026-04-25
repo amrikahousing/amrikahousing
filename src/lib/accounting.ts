@@ -1,7 +1,16 @@
+import { anthropic } from "@ai-sdk/anthropic";
 import { clerkClient } from "@clerk/nextjs/server";
+import { generateText, Output } from "ai";
+import { z } from "zod";
+import {
+  canonicalAccountingCategory,
+  mergeAccountingCategoryOptions,
+} from "@/lib/accounting-categories";
 import { prisma } from "@/lib/db";
 import {
+  cleanVendorName,
   findVendorRuleForTransaction,
+  normalizeVendorKey,
   type AccountingVendorRule,
 } from "@/lib/accounting-vendor-rules";
 import { manualMerchantMetadata } from "@/lib/manual-merchant-logos";
@@ -104,6 +113,21 @@ export type PlaidSyncResult = {
   removed: number;
 };
 
+const MAX_AI_VENDOR_RULES_PER_SYNC = 40;
+
+const aiVendorRuleOutputSchema = z.object({
+  suggestions: z.array(
+    z.object({
+      vendorKey: z.string(),
+      bank: z.string(),
+      account: z.string(),
+      category: z.string(),
+      confidence: z.number(),
+      reason: z.string(),
+    }),
+  ),
+});
+
 function parsePlaidDate(value: unknown) {
   if (typeof value !== "string") return null;
   const date = new Date(`${value}T00:00:00`);
@@ -123,6 +147,14 @@ function normalizeCategory(value: unknown) {
   }
 
   return "uncategorized";
+}
+
+function amountBucket(amount: number) {
+  if (amount < 25) return "under $25";
+  if (amount < 100) return "$25-$99";
+  if (amount < 500) return "$100-$499";
+  if (amount < 1000) return "$500-$999";
+  return "$1,000+";
 }
 
 function isPaidStatus(status: string) {
@@ -244,6 +276,7 @@ type PlaidItemRecord = {
   transactions_cursor: string | null;
   last_synced_at: Date | null;
   access_token: string;
+  created_by: string | null;
 };
 
 type PlaidTxRow = {
@@ -267,10 +300,199 @@ type PlaidTxRow = {
   category: string;
 };
 
+type SyncRuleCandidate = {
+  description: string;
+  vendorKey: string;
+  bank: string;
+  account: string;
+  sampleCategory: string;
+  amountBucket: string;
+};
+
+function applyVendorRuleCategoryToPlaidRow(
+  row: PlaidTxRow,
+  item: Pick<PlaidItemRecord, "institution_name">,
+  rules: AccountingVendorRule[],
+) {
+  const vendorRule = findVendorRuleForTransaction(
+    {
+      description: row.description,
+      bank: item.institution_name ?? "Plaid",
+      account: row.account_name ?? item.institution_name ?? "Plaid account",
+      source: "plaid",
+    },
+    rules,
+  );
+
+  if (!vendorRule) return row;
+
+  return {
+    ...row,
+    category: vendorRule.category,
+  };
+}
+
+function buildSyncRuleCandidates(
+  rows: PlaidTxRow[],
+  item: Pick<PlaidItemRecord, "institution_name">,
+  rules: AccountingVendorRule[],
+) {
+  const candidates = new Map<string, SyncRuleCandidate>();
+
+  for (const row of rows) {
+    if (row.is_income) continue;
+    const bank = item.institution_name ?? "Plaid";
+    const account = row.account_name ?? item.institution_name ?? "Plaid account";
+    const existingRule = findVendorRuleForTransaction(
+      {
+        description: row.description,
+        bank,
+        account,
+        source: "plaid",
+      },
+      rules,
+    );
+    if (existingRule) continue;
+
+    const vendorKey = normalizeVendorKey(row.description);
+    if (!vendorKey) continue;
+
+    const candidateKey = `${vendorKey}::${bank}::${account}`;
+    if (candidates.has(candidateKey)) continue;
+
+    candidates.set(candidateKey, {
+      description: row.description,
+      vendorKey,
+      bank,
+      account,
+      sampleCategory: row.category,
+      amountBucket: amountBucket(row.amount),
+    });
+  }
+
+  return Array.from(candidates.values()).slice(0, MAX_AI_VENDOR_RULES_PER_SYNC);
+}
+
+async function createAiVendorRulesForSync({
+  orgDbId,
+  userId,
+  candidates,
+  categoryOptions,
+}: {
+  orgDbId: string;
+  userId: string | null;
+  candidates: SyncRuleCandidate[];
+  categoryOptions: string[];
+}) {
+  if (!process.env.ANTHROPIC_API_KEY || candidates.length === 0) return [];
+
+  try {
+    const result = await generateText({
+      model: anthropic(process.env.ANTHROPIC_MODEL ?? "claude-haiku-4-5-20251001"),
+      system:
+        "You categorize rental property accounting vendors. Return one reusable vendor-to-category mapping for each vendor context. Prefer the provided categories when they fit. Use clean accounting category names. Never invent facts.",
+      prompt: JSON.stringify({
+        instructions: [
+          "Return one category suggestion for every vendor context provided.",
+          "Choose a stable accounting category suitable for future matching.",
+          "Use confidence from 0 to 1.",
+          "Keep reasons under 80 characters.",
+        ],
+        availableCategories: categoryOptions,
+        vendorContexts: candidates.map((candidate) => ({
+          vendor: cleanVendorName(candidate.description),
+          vendorKey: candidate.vendorKey,
+          bank: candidate.bank,
+          account: candidate.account,
+          sampleCategory: candidate.sampleCategory,
+          amountBucket: candidate.amountBucket,
+        })),
+      }),
+      output: Output.object({
+        schema: aiVendorRuleOutputSchema,
+        name: "vendor_category_rule_suggestions",
+      }),
+    });
+
+    const candidateKeys = new Set(
+      candidates.map((candidate) => `${candidate.vendorKey}::${candidate.bank}::${candidate.account}`),
+    );
+
+    const savedRules: AccountingVendorRule[] = [];
+    for (const suggestion of result.output.suggestions) {
+      const vendorKey = normalizeVendorKey(suggestion.vendorKey);
+      const bank = suggestion.bank.trim().replace(/\s+/g, " ").slice(0, 120);
+      const account = suggestion.account.trim().replace(/\s+/g, " ").slice(0, 160);
+      const candidateKey = `${vendorKey}::${bank}::${account}`;
+      if (!candidateKeys.has(candidateKey) || !vendorKey) continue;
+
+      const candidate = candidates.find(
+        (item) => item.vendorKey === vendorKey && item.bank === bank && item.account === account,
+      );
+      if (!candidate) continue;
+
+      const category = canonicalAccountingCategory(suggestion.category, categoryOptions);
+      if (!category) continue;
+
+      const confidence = Math.max(0, Math.min(1, suggestion.confidence));
+      const reason = suggestion.reason.trim().replace(/\s+/g, " ").slice(0, 160) || null;
+
+      const rule = await prisma.accounting_vendor_category_rules.upsert({
+        where: {
+          accounting_vendor_rules_org_vendor_context_key: {
+            organization_id: orgDbId,
+            vendor_key: vendorKey,
+            bank,
+            account,
+          },
+        },
+        create: {
+          organization_id: orgDbId,
+          vendor_key: vendorKey,
+          vendor_name: cleanVendorName(candidate.description),
+          category,
+          bank,
+          account,
+          confidence,
+          reason,
+          created_by: userId,
+        },
+        update: {
+          vendor_name: cleanVendorName(candidate.description),
+          category,
+          confidence,
+          reason,
+          updated_at: new Date(),
+        },
+        select: {
+          id: true,
+          vendor_key: true,
+          vendor_name: true,
+          category: true,
+          bank: true,
+          account: true,
+          confidence: true,
+          reason: true,
+          created_by: true,
+          updated_at: true,
+        },
+      });
+
+      savedRules.push(rule);
+    }
+
+    return savedRules;
+  } catch (error) {
+    console.error("[syncPlaidItemsToDb.aiVendorRules]", error);
+    return [];
+  }
+}
+
 function mapPlaidTxToRow(
   transaction: PlaidTransaction,
   item: PlaidItemRecord,
   accountsById: Map<string, string>,
+  rules: AccountingVendorRule[],
 ): PlaidTxRow | null {
   if (typeof transaction.transaction_id !== "string") return null;
   const amount = typeof transaction.amount === "number" ? transaction.amount : 0;
@@ -294,26 +516,30 @@ function mapPlaidTxToRow(
   );
   const accountKey = typeof transaction.account_id === "string" ? transaction.account_id : "";
 
-  return {
-    plaid_item_id: item.id,
-    organization_id: item.organization_id,
-    plaid_transaction_id: transaction.transaction_id,
-    source: "plaid",
-    connection_id: item.item_id,
-    account_id: accountKey,
-    account_name: accountsById.get(accountKey) ?? item.institution_name ?? null,
-    date: parsePlaidDate(transaction.date),
-    description: merchant,
-    merchant_name: merchantName ?? merchant,
-    merchant_entity_id: merchantEntityId,
-    merchant_logo_url: merchantLogoUrl,
-    merchant_website: merchantWebsite,
-    category_icon_url: categoryIconUrl,
-    counterparty_type: counterpartyType,
-    amount: Math.abs(amount),
-    is_income: amount < 0,
-    category,
-  };
+  return applyVendorRuleCategoryToPlaidRow(
+    {
+      plaid_item_id: item.id,
+      organization_id: item.organization_id,
+      plaid_transaction_id: transaction.transaction_id,
+      source: "plaid",
+      connection_id: item.item_id,
+      account_id: accountKey,
+      account_name: accountsById.get(accountKey) ?? item.institution_name ?? null,
+      date: parsePlaidDate(transaction.date),
+      description: merchant,
+      merchant_name: merchantName ?? merchant,
+      merchant_entity_id: merchantEntityId,
+      merchant_logo_url: merchantLogoUrl,
+      merchant_website: merchantWebsite,
+      category_icon_url: categoryIconUrl,
+      counterparty_type: counterpartyType,
+      amount: Math.abs(amount),
+      is_income: amount < 0,
+      category,
+    },
+    item,
+    rules,
+  );
 }
 
 function buildAccountsById(
@@ -350,20 +576,43 @@ function buildAccountsById(
 }
 
 export async function syncPlaidItemsToDb(orgId: string): Promise<PlaidSyncResult> {
-  const plaidItems = await prisma.plaid_items.findMany({
-    where: {
-      organizations: { clerk_org_id: orgId },
-      status: "connected",
-      sync_enabled: true,
-      hidden_at: null,
-    },
-    orderBy: { created_at: "desc" },
-  });
+  const [plaidItems, vendorRules] = await Promise.all([
+    prisma.plaid_items.findMany({
+      where: {
+        organizations: { clerk_org_id: orgId },
+        status: "connected",
+        sync_enabled: true,
+        hidden_at: null,
+      },
+      orderBy: { created_at: "desc" },
+    }),
+    prisma.accounting_vendor_category_rules.findMany({
+      where: {
+        organizations: { clerk_org_id: orgId },
+      },
+      orderBy: [{ updated_at: "desc" }, { created_at: "desc" }],
+      select: {
+        id: true,
+        vendor_key: true,
+        vendor_name: true,
+        category: true,
+        bank: true,
+        account: true,
+        confidence: true,
+        reason: true,
+        created_by: true,
+        updated_at: true,
+      },
+    }),
+  ]);
 
   let totalAdded = 0;
   let totalModified = 0;
   let totalRemoved = 0;
   let synced = 0;
+  const categoryOptions = mergeAccountingCategoryOptions(
+    vendorRules.map((rule) => rule.category),
+  );
 
   for (const item of plaidItems.slice(0, 5)) {
     try {
@@ -387,9 +636,27 @@ export async function syncPlaidItemsToDb(orgId: string): Promise<PlaidSyncResult
       if ("error" in syncResult) continue;
 
       const accountsById = buildAccountsById(syncResult.accounts, item.institution_name);
+      const rawAddedRows = (syncResult.added as PlaidTransaction[])
+        .map((t) => mapPlaidTxToRow(t, item, accountsById, []))
+        .filter((r): r is PlaidTxRow => r !== null);
+      const rawModifiedRows = (syncResult.modified as PlaidTransaction[])
+        .map((t) => mapPlaidTxToRow(t, item, accountsById, []))
+        .filter((r): r is PlaidTxRow => r !== null);
+      const aiRuleCandidates = buildSyncRuleCandidates(
+        [...rawAddedRows, ...rawModifiedRows],
+        item,
+        vendorRules,
+      );
+      const aiRules = await createAiVendorRulesForSync({
+        orgDbId: item.organization_id,
+        userId: item.created_by,
+        candidates: aiRuleCandidates,
+        categoryOptions,
+      });
+      const syncRules = aiRules.length > 0 ? [...aiRules, ...vendorRules] : vendorRules;
 
       const addedRows = (syncResult.added as PlaidTransaction[])
-        .map((t) => mapPlaidTxToRow(t, item, accountsById))
+        .map((t) => mapPlaidTxToRow(t, item, accountsById, syncRules))
         .filter((r): r is PlaidTxRow => r !== null);
 
       if (addedRows.length > 0) {
@@ -413,6 +680,7 @@ export async function syncPlaidItemsToDb(orgId: string): Promise<PlaidSyncResult
               merchant_website: row.merchant_website,
               category_icon_url: row.category_icon_url,
               counterparty_type: row.counterparty_type,
+              category: row.category,
               updated_at: new Date(),
             },
           });
@@ -422,7 +690,7 @@ export async function syncPlaidItemsToDb(orgId: string): Promise<PlaidSyncResult
 
       for (const t of syncResult.modified as PlaidTransaction[]) {
         if (typeof t.transaction_id !== "string") continue;
-        const row = mapPlaidTxToRow(t, item, accountsById);
+        const row = mapPlaidTxToRow(t, item, accountsById, syncRules);
         if (!row) continue;
         await prisma.plaid_transactions.updateMany({
           where: { plaid_item_id: item.id, plaid_transaction_id: t.transaction_id },
