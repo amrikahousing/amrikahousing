@@ -363,6 +363,7 @@ export function readSensitiveVercelEnvValues({
   gitBranch,
   names,
 }) {
+  const restoreLocalEnvFiles = hideLocalEnvFiles(cwd);
   const normalizedNames = Array.from(
     new Set(
       names
@@ -373,38 +374,41 @@ export function readSensitiveVercelEnvValues({
   );
 
   if (normalizedNames.length === 0) {
+    restoreLocalEnvFiles();
     return {};
   }
 
-  const script = `process.stdout.write(JSON.stringify(Object.fromEntries(${JSON.stringify(
-    normalizedNames,
-  )}.map((name)=>[name, process.env[name] ?? ""]))))`;
-  const args = ["vercel", "env", "run", "-e", environment];
-  if (gitBranch) {
-    args.push("--git-branch", gitBranch);
-  }
-  args.push("--", process.execPath, "-e", script);
-
-  const result = runResult("npx", args, { cwd });
-  const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`.trim();
-
-  if (result.error) {
-    fail(`npx ${args.join(" ")} failed: ${result.error.message}`);
-  }
-
-  if (result.status !== 0) {
-    fail(`npx ${args.join(" ")} exited with status ${result.status}.${output ? ` ${output}` : ""}`);
-  }
-
-  const json = extractFirstJsonObject(output);
-  if (!json) {
-    fail(`could not parse Vercel env run output for ${normalizedNames.join(", ")}.`);
-  }
-
   try {
+    const script = `process.stdout.write(JSON.stringify(Object.fromEntries(${JSON.stringify(
+      normalizedNames,
+    )}.map((name)=>[name, process.env[name] ?? ""]))))`;
+    const args = ["vercel", "env", "run", "-e", environment];
+    if (gitBranch) {
+      args.push("--git-branch", gitBranch);
+    }
+    args.push("--", process.execPath, "-e", script);
+
+    const result = runResult("npx", args, { cwd });
+    const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`.trim();
+
+    if (result.error) {
+      fail(`npx ${args.join(" ")} failed: ${result.error.message}`);
+    }
+
+    if (result.status !== 0) {
+      fail(`npx ${args.join(" ")} exited with status ${result.status}.${output ? ` ${output}` : ""}`);
+    }
+
+    const json = extractFirstJsonObject(output);
+    if (!json) {
+      fail(`could not parse Vercel env run output for ${normalizedNames.join(", ")}.`);
+    }
+
     return JSON.parse(json);
   } catch {
     fail(`Vercel env run output for ${normalizedNames.join(", ")} was not valid JSON.`);
+  } finally {
+    restoreLocalEnvFiles();
   }
 }
 
