@@ -114,6 +114,7 @@ export type PlaidSyncResult = {
 };
 
 const MAX_AI_VENDOR_RULES_PER_SYNC = 40;
+const INITIAL_PLAID_FULL_RESYNC_WINDOW_MS = 1000 * 60 * 60 * 6;
 
 const aiVendorRuleOutputSchema = z.object({
   suggestions: z.array(
@@ -275,6 +276,7 @@ type PlaidItemRecord = {
   sync_enabled: boolean;
   transactions_cursor: string | null;
   last_synced_at: Date | null;
+  created_at: Date;
   access_token: string;
   created_by: string | null;
 };
@@ -575,6 +577,30 @@ function buildAccountsById(
   return map;
 }
 
+function itemNeedsFullPlaidResync(item: Pick<PlaidItemRecord, "created_at" | "last_synced_at">) {
+  const firstSeenAt = item.last_synced_at ?? item.created_at;
+  const ageMs = Date.now() - firstSeenAt.getTime();
+  return ageMs >= 0 && ageMs < INITIAL_PLAID_FULL_RESYNC_WINDOW_MS;
+}
+
+function plaidMerchantMetadataMissingCount(itemId: string) {
+  return prisma.plaid_transactions.count({
+    where: {
+      plaid_item_id: itemId,
+      OR: [
+        { category_icon_url: null },
+        {
+          AND: [
+            { merchant_logo_url: null },
+            { merchant_entity_id: null },
+            { counterparty_type: null },
+          ],
+        },
+      ],
+    },
+  });
+}
+
 export async function syncPlaidItemsToDb(orgId: string): Promise<PlaidSyncResult> {
   const [plaidItems, vendorRules] = await Promise.all([
     prisma.plaid_items.findMany({
@@ -619,11 +645,9 @@ export async function syncPlaidItemsToDb(orgId: string): Promise<PlaidSyncResult
       const storedCount = await prisma.plaid_transactions.count({
         where: { plaid_item_id: item.id },
       });
-      const missingMetadataCount = await prisma.plaid_transactions.count({
-        where: { plaid_item_id: item.id, category_icon_url: null },
-      });
+      const missingMetadataCount = await plaidMerchantMetadataMissingCount(item.id);
       const cursor =
-        storedCount === 0 || missingMetadataCount > 0
+        storedCount === 0 || missingMetadataCount > 0 || itemNeedsFullPlaidResync(item)
           ? null
           : item.transactions_cursor;
 
@@ -781,6 +805,7 @@ async function plaidItemsQuery(orgId: string) {
       institution_name: true,
       status: true,
       sync_enabled: true,
+      created_at: true,
       last_synced_at: true,
       plaid_institutions: {
         select: {
@@ -875,9 +900,16 @@ export async function getAccountingData(orgId: string): Promise<AccountingData> 
       (item) => !itemIdsWithTx.has(item.id),
     );
     const anyTxMissingDetails = initialPlaidTxRows.some(
-      (row) => row.category_icon_url === null,
+      (row) =>
+        row.category_icon_url === null ||
+        (row.merchant_logo_url === null &&
+          row.merchant_entity_id === null &&
+          row.counterparty_type === null),
     );
-    if (anyItemMissingTx || anyTxMissingDetails) {
+    const anyRecentlyLinkedItem = syncablePlaidItems.some((item) =>
+      itemNeedsFullPlaidResync(item),
+    );
+    if (anyItemMissingTx || anyTxMissingDetails || anyRecentlyLinkedItem) {
       await syncPlaidItemsToDb(orgId);
       plaidTxRows = await plaidTransactionsQuery(orgId);
     }
