@@ -167,6 +167,16 @@ function validateBankBillingFields(args: {
   return null;
 }
 
+function isDismissedBankLinkError(message: string) {
+  const normalized = message.toLowerCase();
+
+  return (
+    normalized.includes("payment method of type us_bank_account was expected to be present") ||
+    normalized.includes("does not have a payment method") ||
+    normalized.includes("none was provided")
+  );
+}
+
 function FeedbackMessage({
   message,
   tone,
@@ -343,7 +353,6 @@ export function PaymentsClient({
   const [bankState, setBankState] = useState("");
   const [bankPostalCode, setBankPostalCode] = useState("");
   const [achEntryMode, setAchEntryMode] = useState<AchEntryMode>("link");
-  const [manualBankName, setManualBankName] = useState("");
   const [manualRoutingNumber, setManualRoutingNumber] = useState("");
   const [manualAccountNumber, setManualAccountNumber] = useState("");
   const [bankAccountChoice, setBankAccountChoice] = useState<BankAccountChoice>("checking");
@@ -478,7 +487,7 @@ export function PaymentsClient({
     router.refresh();
   }
 
-  async function handleAddBankAccount() {
+  async function handleAddBankAccount(entryMode: AchEntryMode = achEntryMode) {
     clearFeedback("methods");
 
     if (!stripeConfigured) {
@@ -493,7 +502,7 @@ export function PaymentsClient({
       bankCity,
       bankState,
       bankPostalCode,
-      achEntryMode,
+      achEntryMode: entryMode,
     });
     if (billingError) {
       setScopedFeedback("methods", "error", billingError);
@@ -522,7 +531,7 @@ export function PaymentsClient({
         throw new Error(payload?.error ?? "Unable to prepare bank account setup.");
       }
 
-      if (achEntryMode === "link") {
+      if (entryMode === "link") {
         const collectResult = await stripe.collectBankAccountForSetup({
           clientSecret: payload.clientSecret,
           params: {
@@ -549,6 +558,10 @@ export function PaymentsClient({
 
         const confirmResult = await stripe.confirmUsBankAccountSetup(payload.clientSecret);
         if (confirmResult.error) {
+          if (isDismissedBankLinkError(confirmResult.error.message ?? "")) {
+            return;
+          }
+
           throw new Error(confirmResult.error.message ?? "Unable to save this bank account.");
         }
 
@@ -1034,9 +1047,14 @@ export function PaymentsClient({
                   type="button"
                   onClick={() => beginAddPaymentMethod("card")}
                   disabled={isLoadingSetupIntent || !stripeConfigured}
-                  className="rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                  className={[
+                    "rounded-lg px-4 py-2.5 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:bg-slate-300 disabled:text-white",
+                    setupMode === "card"
+                      ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                      : "border border-slate-300 bg-white text-slate-700 hover:bg-slate-100",
+                  ].join(" ")}
                 >
-                  {isLoadingSetupIntent && setupMode === "card" ? "Preparing..." : "Add Card"}
+                  {isLoadingSetupIntent && setupMode === "card" ? "Preparing..." : "Add New Credit Card"}
                 </button>
                 <button
                   type="button"
@@ -1046,15 +1064,20 @@ export function PaymentsClient({
                     setSetupMode("bank");
                   }}
                   disabled={!stripeConfigured}
-                  className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:bg-slate-100"
+                  className={[
+                    "rounded-lg px-4 py-2.5 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:bg-slate-100",
+                    setupMode === "bank"
+                      ? "bg-emerald-600 text-white hover:bg-emerald-700"
+                      : "border border-slate-300 bg-white text-slate-700 hover:bg-slate-100",
+                  ].join(" ")}
                 >
-                  Add Bank Account
+                  Add New Bank Account
                 </button>
               </div>
             </div>
             {!setupClientSecret && setupMode !== "bank" ? (
               <p className="mt-4 text-sm text-slate-500">
-                `Add Card` opens the secure Stripe card form below. `Add Bank Account` starts the ACH setup flow.
+                `Add New Credit Card` opens the secure Stripe card form below. `Add New Bank Account` starts the ACH setup flow.
               </p>
             ) : null}
 
@@ -1073,56 +1096,44 @@ export function PaymentsClient({
             {setupMode === "bank" ? (
               <div ref={addMethodPanelRef} className="mt-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
                 <div className="mb-6">
-                  <h3 className="text-2xl font-bold tracking-tight text-slate-900">Add Bank Account</h3>
-                  <p className="mt-1 text-lg text-slate-500">Link instantly with Stripe or enter routing details manually.</p>
+                  <h3 className="text-sm font-semibold text-slate-900">Add Bank Account</h3>
+                  <p className="mt-1 text-sm text-slate-600">Link instantly with Stripe or enter routing details manually.</p>
                 </div>
 
                 <div className="space-y-5">
                   <div>
-                    <p className="text-sm font-semibold text-slate-900">How would you like to add it?</p>
+                    <p className="text-sm font-semibold text-slate-900">Choose how you want to continue.</p>
                     <div className="mt-3 grid gap-3 md:grid-cols-2">
                       <button
                         type="button"
-                        onClick={() => setAchEntryMode("link")}
-                        className={[
-                          "flex items-center gap-3 rounded-2xl border px-6 py-5 text-left transition",
-                          achEntryMode === "link"
-                            ? "border-emerald-200 bg-emerald-500 text-white shadow-[0_0_0_4px_rgba(16,185,129,0.18)]"
-                            : "border-slate-200 bg-slate-50 text-slate-900 hover:bg-slate-100",
-                        ].join(" ")}
+                        onClick={() => {
+                          setAchEntryMode("link");
+                          void handleAddBankAccount("link");
+                        }}
+                        disabled={isSavingBankAccount || !stripeConfigured}
+                        className="flex items-center justify-center gap-3 rounded-2xl bg-emerald-500 px-6 py-5 text-left text-lg font-semibold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:bg-slate-300"
                       >
                         <PaymentTypeIcon type="bank" />
-                        <span className="text-lg font-semibold">Link Bank Account</span>
+                        <span>{isSavingBankAccount && achEntryMode === "link" ? "Opening Stripe..." : "Link Bank Account"}</span>
                       </button>
                       <button
                         type="button"
-                        onClick={() => setAchEntryMode("manual")}
+                        onClick={() => {
+                          clearFeedback("methods");
+                          setAchEntryMode("manual");
+                        }}
                         className={[
-                          "flex items-center gap-3 rounded-2xl border px-6 py-5 text-left transition",
+                          "flex items-center justify-center gap-3 rounded-2xl border px-6 py-5 text-left text-lg font-semibold transition",
                           achEntryMode === "manual"
-                            ? "border-emerald-200 bg-emerald-500 text-white shadow-[0_0_0_4px_rgba(16,185,129,0.18)]"
+                            ? "border-emerald-300 bg-emerald-50 text-emerald-700"
                             : "border-slate-200 bg-slate-50 text-slate-900 hover:bg-slate-100",
                         ].join(" ")}
                       >
                         <PaymentTypeIcon type="bank" />
-                        <span className="text-lg font-semibold">Enter Manually</span>
+                        <span>Add Manually</span>
                       </button>
                     </div>
-                    <p className="mt-2 text-sm text-slate-500">
-                      {achEntryMode === "link"
-                        ? "Use Stripe to connect your bank instantly."
-                        : "Enter your routing and account number manually."}
-                    </p>
                   </div>
-
-                  {achEntryMode === "link" ? (
-                    <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-5 py-5">
-                      <p className="text-base font-semibold text-emerald-900">Fastest option</p>
-                      <p className="mt-2 text-sm text-emerald-700">
-                        Stripe will open a secure bank-linking flow so you can choose your bank directly. No extra details are needed here first.
-                      </p>
-                    </div>
-                  ) : null}
 
                   {achEntryMode === "manual" ? (
                     <div className="grid gap-3 md:grid-cols-2">
@@ -1230,28 +1241,20 @@ export function PaymentsClient({
                         </label>
                       </div>
                     </div>
-                  ) : (
-                    <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-4 text-sm text-emerald-700">
-                      Stripe will open a secure bank-linking flow so you can choose your bank directly. No extra details are needed here first.
-                    </div>
-                  )}
+                  ) : null}
                 </div>
 
                 <div className="mt-6 flex flex-wrap gap-3">
-                  <button
-                    type="button"
-                    onClick={handleAddBankAccount}
-                    disabled={isSavingBankAccount || !stripeConfigured}
-                    className="flex-1 rounded-2xl bg-emerald-500 px-6 py-5 text-lg font-semibold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:bg-slate-300"
-                  >
-                    {isSavingBankAccount
-                      ? achEntryMode === "link"
-                        ? "Opening Stripe..."
-                        : "Saving Bank Account..."
-                      : achEntryMode === "link"
-                        ? "Continue with Stripe"
-                        : "Add Bank Account"}
-                  </button>
+                  {achEntryMode === "manual" ? (
+                    <button
+                      type="button"
+                      onClick={() => void handleAddBankAccount("manual")}
+                      disabled={isSavingBankAccount || !stripeConfigured}
+                      className="flex-1 rounded-2xl bg-emerald-500 px-6 py-5 text-lg font-semibold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:bg-slate-300"
+                    >
+                      {isSavingBankAccount ? "Saving Bank Account..." : "Save Bank Account"}
+                    </button>
+                  ) : null}
                   <button
                     type="button"
                     onClick={() => setSetupMode(null)}
