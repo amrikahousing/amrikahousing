@@ -336,13 +336,75 @@ export function pullVercelEnv({ cwd = process.cwd(), environment, gitBranch }) {
 
   try {
     run("npx", args, { cwd });
+    const values = parseDotenv(readFileSync(envFile));
+    const sensitiveValues = readSensitiveVercelEnvValues({
+      cwd,
+      environment,
+      gitBranch,
+      names: ["DATABASE_URL"],
+    });
+
     return {
-      values: parseDotenv(readFileSync(envFile)),
+      values: {
+        ...values,
+        ...sensitiveValues,
+      },
       cleanup: () => rmSync(tempDir, { recursive: true, force: true }),
     };
   } catch (error) {
     rmSync(tempDir, { recursive: true, force: true });
     throw error;
+  }
+}
+
+export function readSensitiveVercelEnvValues({
+  cwd = process.cwd(),
+  environment,
+  gitBranch,
+  names,
+}) {
+  const normalizedNames = Array.from(
+    new Set(
+      names
+        .filter((name) => typeof name === "string")
+        .map((name) => name.trim())
+        .filter(Boolean),
+    ),
+  );
+
+  if (normalizedNames.length === 0) {
+    return {};
+  }
+
+  const script = `process.stdout.write(JSON.stringify(Object.fromEntries(${JSON.stringify(
+    normalizedNames,
+  )}.map((name)=>[name, process.env[name] ?? ""]))))`;
+  const args = ["vercel", "env", "run", "-e", environment];
+  if (gitBranch) {
+    args.push("--git-branch", gitBranch);
+  }
+  args.push("--", process.execPath, "-e", script);
+
+  const result = runResult("npx", args, { cwd });
+  const output = `${result.stdout ?? ""}\n${result.stderr ?? ""}`.trim();
+
+  if (result.error) {
+    fail(`npx ${args.join(" ")} failed: ${result.error.message}`);
+  }
+
+  if (result.status !== 0) {
+    fail(`npx ${args.join(" ")} exited with status ${result.status}.${output ? ` ${output}` : ""}`);
+  }
+
+  const json = extractFirstJsonObject(output);
+  if (!json) {
+    fail(`could not parse Vercel env run output for ${normalizedNames.join(", ")}.`);
+  }
+
+  try {
+    return JSON.parse(json);
+  } catch {
+    fail(`Vercel env run output for ${normalizedNames.join(", ")} was not valid JSON.`);
   }
 }
 
