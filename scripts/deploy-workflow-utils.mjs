@@ -11,7 +11,7 @@ import {
   rmSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 import { parse as parseDotenv } from "dotenv";
 
 export const EXPECTED_PROJECT_NAME = "amrikahousing";
@@ -22,6 +22,69 @@ export const TEST_GIT_BRANCH_ALIAS = "amrikahousing-git-neon-preview-test-amrika
 export const PRODUCTION_DEPLOYMENT_URL = "https://www.amrikahousing.com";
 export const NEON_PREVIEW_HOST_PREFIX = "ep-mute-mode-amov2nuk";
 export const NEON_PRODUCTION_HOST_PREFIX = "ep-spring-boat-amf4cngn";
+
+const HOMEBREW_NODE22 = "/opt/homebrew/opt/node@22/bin/node";
+const HOMEBREW_NPM_CLI = "/opt/homebrew/opt/node@22/lib/node_modules/npm/bin/npm-cli.js";
+const HOMEBREW_NPX_CLI = "/opt/homebrew/opt/node@22/lib/node_modules/npm/bin/npx-cli.js";
+
+function bundledNpmCliFor(nodePath, cliName) {
+  const nodeBinDir = dirname(nodePath);
+  const bundledCli = resolve(nodeBinDir, "..", "lib", "node_modules", "npm", "bin", cliName);
+  return existsSync(bundledCli) ? bundledCli : null;
+}
+
+function resolveCommand(command, args) {
+  if (command === "npm") {
+    const bundledCli = bundledNpmCliFor(process.execPath, "npm-cli.js");
+    if (bundledCli) {
+      return { command: process.execPath, args: [bundledCli, ...args] };
+    }
+
+    if (existsSync(HOMEBREW_NODE22) && existsSync(HOMEBREW_NPM_CLI)) {
+      return { command: HOMEBREW_NODE22, args: [HOMEBREW_NPM_CLI, ...args] };
+    }
+  }
+
+  if (command === "npx") {
+    const bundledCli = bundledNpmCliFor(process.execPath, "npx-cli.js");
+    if (bundledCli) {
+      return { command: process.execPath, args: [bundledCli, ...args] };
+    }
+
+    if (existsSync(HOMEBREW_NODE22) && existsSync(HOMEBREW_NPX_CLI)) {
+      return { command: HOMEBREW_NODE22, args: [HOMEBREW_NPX_CLI, ...args] };
+    }
+  }
+
+  return { command, args };
+}
+
+function commandEnv(resolved, optionsEnv) {
+  const baseEnv = withoutLocalEnvFiles(
+    optionsEnv ? { ...process.env, ...optionsEnv } : process.env,
+  );
+
+  const nodeBinDir =
+    resolved.command === process.execPath || resolved.command === HOMEBREW_NODE22
+      ? dirname(resolved.command)
+      : existsSync(HOMEBREW_NODE22)
+        ? dirname(HOMEBREW_NODE22)
+        : null;
+
+  if (!nodeBinDir) return baseEnv;
+
+  const currentPath = baseEnv.PATH ?? "";
+  return {
+    ...baseEnv,
+    PATH: currentPath ? `${nodeBinDir}:${currentPath}` : nodeBinDir,
+    npm_config_node: resolved.command === process.execPath || resolved.command === HOMEBREW_NODE22
+      ? resolved.command
+      : HOMEBREW_NODE22,
+    NODE: resolved.command === process.execPath || resolved.command === HOMEBREW_NODE22
+      ? resolved.command
+      : HOMEBREW_NODE22,
+  };
+}
 
 export function fail(message) {
   console.error(`\nWorkflow blocked: ${message}\n`);
@@ -42,11 +105,12 @@ export function assertCanonicalRoot() {
 
 export function run(command, args, options = {}) {
   const restoreLocalEnvFiles = options.hideLocalEnvFiles ? hideLocalEnvFiles(options.cwd) : () => {};
+  const resolved = resolveCommand(command, args);
   let result;
   try {
-    result = spawnSync(command, args, {
+    result = spawnSync(resolved.command, resolved.args, {
       cwd: options.cwd,
-      env: options.env ? withoutLocalEnvFiles({ ...process.env, ...options.env }) : withoutLocalEnvFiles(process.env),
+      env: commandEnv(resolved, options.env),
       stdio: "inherit",
       shell: false,
     });
@@ -55,11 +119,11 @@ export function run(command, args, options = {}) {
   }
 
   if (result.error) {
-    fail(`${command} ${args.join(" ")} failed: ${result.error.message}`);
+    fail(`${resolved.command} ${resolved.args.join(" ")} failed: ${result.error.message}`);
   }
 
   if (result.status !== 0) {
-    fail(`${command} ${args.join(" ")} exited with status ${result.status}.`);
+    fail(`${resolved.command} ${resolved.args.join(" ")} exited with status ${result.status}.`);
   }
 }
 
@@ -93,20 +157,22 @@ function hideLocalEnvFiles(cwd = process.cwd()) {
 }
 
 export function runResult(command, args, options = {}) {
-  return spawnSync(command, args, {
+  const resolved = resolveCommand(command, args);
+  return spawnSync(resolved.command, resolved.args, {
     cwd: options.cwd,
     encoding: "utf8",
-    env: options.env ? withoutLocalEnvFiles({ ...process.env, ...options.env }) : withoutLocalEnvFiles(process.env),
+    env: commandEnv(resolved, options.env),
     shell: false,
     stdio: ["inherit", "pipe", "pipe"],
   });
 }
 
 export function runAndCapture(command, args, options = {}) {
-  const result = spawnSync(command, args, {
+  const resolved = resolveCommand(command, args);
+  const result = spawnSync(resolved.command, resolved.args, {
     cwd: options.cwd,
     encoding: "utf8",
-    env: options.env ? { ...process.env, ...options.env } : process.env,
+    env: commandEnv(resolved, options.env),
     shell: false,
     stdio: ["inherit", "pipe", "pipe"],
   });
@@ -120,11 +186,11 @@ export function runAndCapture(command, args, options = {}) {
   }
 
   if (result.error) {
-    fail(`${command} ${args.join(" ")} failed: ${result.error.message}`);
+    fail(`${resolved.command} ${resolved.args.join(" ")} failed: ${result.error.message}`);
   }
 
   if (result.status !== 0) {
-    fail(`${command} ${args.join(" ")} exited with status ${result.status}.`);
+    fail(`${resolved.command} ${resolved.args.join(" ")} exited with status ${result.status}.`);
   }
 
   return `${result.stdout ?? ""}\n${result.stderr ?? ""}`.trim();
@@ -194,11 +260,12 @@ export function hostnameFromUrl(url) {
 }
 
 export function capture(command, args, options = {}) {
+  const resolved = resolveCommand(command, args);
   try {
-    return execFileSync(command, args, {
+    return execFileSync(resolved.command, resolved.args, {
       cwd: options.cwd,
       encoding: "utf8",
-      env: options.env ? withoutLocalEnvFiles({ ...process.env, ...options.env }) : withoutLocalEnvFiles(process.env),
+      env: commandEnv(resolved, options.env),
       maxBuffer: 1024 * 1024 * 16,
       stdio: ["ignore", "pipe", "pipe"],
     }).trim();
@@ -210,7 +277,7 @@ export function capture(command, args, options = {}) {
       Buffer.isBuffer(error.stderr)
         ? error.stderr.toString().trim()
         : "";
-    fail(`${command} ${args.join(" ")} failed.${detail ? ` ${detail}` : ""}`);
+    fail(`${resolved.command} ${resolved.args.join(" ")} failed.${detail ? ` ${detail}` : ""}`);
   }
 }
 
