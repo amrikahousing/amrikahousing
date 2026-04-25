@@ -7,13 +7,13 @@ import { getRenterSupportContact } from "@/lib/renter-portal";
 import { resolveSharedUserIdentity } from "@/lib/renter-auth";
 import { LeaseActions } from "./LeaseActions";
 
-function formatCurrency(value: number | string | null | undefined) {
+function formatCurrency(value: number | string | { toString(): string } | null | undefined) {
   if (value === null || value === undefined) return "—";
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
     maximumFractionDigits: 0,
-  }).format(Number(value));
+  }).format(Number(typeof value === "object" ? value.toString() : value));
 }
 
 function formatDate(date: Date | string | null | undefined) {

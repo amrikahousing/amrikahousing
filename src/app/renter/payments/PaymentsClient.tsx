@@ -1,6 +1,9 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { Elements, PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js";
+import { loadStripe } from "@stripe/stripe-js";
+import { useRouter } from "next/navigation";
+import { type FormEvent, useEffect, useMemo, useRef, useState } from "react";
 
 type PaymentRow = {
   id: string;
@@ -13,23 +16,45 @@ type PaymentRow = {
   notes: string | null;
 };
 
-type Props = {
-  currentBalance: number;
-  totalPaid: number;
-  paymentMethod: string | null;
-  nextDueDate: string | null;
-  rentAmount: number | null;
-  payments: PaymentRow[];
-};
-
-type PaymentTab = "overview" | "pay" | "autopay";
 type SavedPaymentMethod = {
   id: string;
-  brand: string;
+  stripePaymentMethodId: string;
+  paymentType: "card" | "us_bank_account";
+  brand: string | null;
+  bankName: string | null;
+  bankAccountType: string | null;
   last4: string;
-  expiry: string;
-  cardholder: string;
+  expMonth: number | null;
+  expYear: number | null;
+  billingName: string | null;
+  isDefault: boolean;
+  isActive: boolean;
 };
+
+type Props = {
+  autopayEnabled: boolean;
+  customerEmail: string | null;
+  currentBalance: number;
+  defaultPaymentMethodId: string | null;
+  defaultBillingName: string;
+  nextDueDate: string | null;
+  paymentMethod: string | null;
+  payments: PaymentRow[];
+  savedPaymentMethods: SavedPaymentMethod[];
+  stripeConfigured: boolean;
+  totalPaid: number;
+};
+
+type PaymentTab = "overview" | "pay" | "methods";
+type FeedbackTone = "error" | "success";
+type FeedbackScope = "pay" | "methods";
+type SetupMode = "card" | "bank" | null;
+type BankAccountChoice = "checking" | "savings";
+type AchEntryMode = "link" | "manual";
+
+const stripePromise = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
+  ? loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY)
+  : null;
 
 const paymentTypeLabels: Record<string, string> = {
   rent: "Rent",
@@ -52,7 +77,7 @@ function formatCurrency(value: number | null | undefined) {
   return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
-    maximumFractionDigits: 0,
+    maximumFractionDigits: 2,
   }).format(value);
 }
 
@@ -65,44 +90,281 @@ function formatDate(value: string | null | undefined) {
   }).format(new Date(value));
 }
 
-export function PaymentsClient({
-  currentBalance,
-  totalPaid,
-  paymentMethod,
-  nextDueDate,
-  rentAmount,
-  payments,
-}: Props) {
-  const [tab, setTab] = useState<PaymentTab>("overview");
-  const [amount, setAmount] = useState(currentBalance || rentAmount || 0);
-  const [autopayEnabled, setAutopayEnabled] = useState(false);
-  const [cardNumber, setCardNumber] = useState("");
-  const [expiryDate, setExpiryDate] = useState("");
-  const [cvc, setCvc] = useState("");
-  const [cardholderName, setCardholderName] = useState("");
-  const [savedMethods, setSavedMethods] = useState<SavedPaymentMethod[]>(
-    paymentMethod
-      ? [
-          {
-            id: "existing-method",
-            brand: paymentMethod.split(" ").at(0) ?? "Card",
-            last4: /\d{4}$/.exec(paymentMethod)?.[0] ?? "4242",
-            expiry: "12/27",
-            cardholder: "Primary Cardholder",
+function formatCardBrand(brand: string) {
+  return brand ? brand.charAt(0).toUpperCase() + brand.slice(1) : "Card";
+}
+
+function formatExpiry(month: number | null, year: number | null) {
+  if (!month || !year) return null;
+  return `${String(month).padStart(2, "0")}/${String(year).slice(-2)}`;
+}
+
+function formatMethodLabel(method: SavedPaymentMethod) {
+  if (method.paymentType === "us_bank_account") {
+    return `${method.bankName ?? "Bank account"} ending in ${method.last4}`;
+  }
+
+  return `${formatCardBrand(method.brand ?? "Card")} ending in ${method.last4}`;
+}
+
+function formatMethodMeta(method: SavedPaymentMethod) {
+  if (method.paymentType === "us_bank_account") {
+    return [
+      method.bankAccountType ? method.bankAccountType.replace(/_/g, " ") : null,
+      method.billingName,
+    ]
+      .filter(Boolean)
+      .join(" · ");
+  }
+
+  return [
+    formatExpiry(method.expMonth, method.expYear)
+      ? `Expires ${formatExpiry(method.expMonth, method.expYear)}`
+      : null,
+    method.billingName,
+  ]
+    .filter(Boolean)
+    .join(" · ");
+}
+
+function PaymentTypeIcon({ type }: { type: "card" | "bank" }) {
+  if (type === "bank") {
+    return (
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5" aria-hidden>
+        <rect x="4" y="3" width="10" height="18" rx="2" />
+        <path d="M8 7h2M8 11h2M8 15h2M16 7h4M16 11h4M16 15h4M16 19h4" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5" aria-hidden>
+      <rect x="3" y="5" width="18" height="14" rx="2" />
+      <path d="M3 10h18" />
+    </svg>
+  );
+}
+
+function validateBankBillingFields(args: {
+  billingName: string;
+  bankEmail: string;
+  bankAddressLine1: string;
+  bankCity: string;
+  bankState: string;
+  bankPostalCode: string;
+  achEntryMode: AchEntryMode;
+}) {
+  if (args.achEntryMode === "link") {
+    return null;
+  }
+
+  if (!args.billingName.trim()) return "Account holder name is required.";
+  if (!args.bankEmail.trim()) return "Email is required to save a bank account.";
+  if (!args.bankAddressLine1.trim() || !args.bankCity.trim() || !args.bankState.trim() || !args.bankPostalCode.trim()) {
+    return "Address, city, state, and ZIP code are required for bank verification.";
+  }
+
+  return null;
+}
+
+function FeedbackMessage({
+  message,
+  tone,
+}: {
+  message: string;
+  tone: FeedbackTone;
+}) {
+  return (
+    <div
+      className={[
+        "rounded-lg border px-4 py-3 text-sm",
+        tone === "error"
+          ? "border-rose-200 bg-rose-50 text-rose-700"
+          : "border-emerald-200 bg-emerald-50 text-emerald-700",
+      ].join(" ")}
+    >
+      {message}
+    </div>
+  );
+}
+
+function SetupPaymentMethodForm({
+  billingName,
+  onCancel,
+  onError,
+  onSaved,
+  setBillingName,
+}: {
+  billingName: string;
+  onCancel: () => void;
+  onError: (message: string) => void;
+  onSaved: (message: string) => void;
+  setBillingName: (value: string) => void;
+}) {
+  const stripe = useStripe();
+  const elements = useElements();
+  const [isSaving, setIsSaving] = useState(false);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!stripe || !elements) {
+      onError("Stripe has not loaded yet.");
+      return;
+    }
+
+    setIsSaving(true);
+    onError("");
+
+    const result = await stripe.confirmSetup({
+      elements,
+      confirmParams: {
+        payment_method_data: {
+          billing_details: {
+            name: billingName.trim() || undefined,
           },
-        ]
-      : [],
+        },
+        return_url: window.location.href,
+      },
+      redirect: "if_required",
+    });
+
+    if (result.error) {
+      onError(result.error.message ?? "Unable to save this payment method.");
+      setIsSaving(false);
+      return;
+    }
+
+    if (!result.setupIntent?.id) {
+      onError("Stripe did not return a completed setup intent.");
+      setIsSaving(false);
+      return;
+    }
+
+    const response = await fetch("/api/renter/payments/setup-intent/complete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ setupIntentId: result.setupIntent.id }),
+    });
+
+    const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+    if (!response.ok) {
+      onError(payload?.error ?? "Unable to save this payment method.");
+      setIsSaving(false);
+      return;
+    }
+
+    onSaved("Payment method saved successfully.");
+    setIsSaving(false);
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-5">
+      <label className="space-y-1.5">
+        <span className="block text-sm font-medium text-slate-700">Billing Name</span>
+        <input
+          type="text"
+          value={billingName}
+          onChange={(event) => setBillingName(event.target.value)}
+          placeholder="John Doe"
+          className="h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+        />
+      </label>
+
+      <div className="rounded-xl border border-slate-200 bg-white p-4">
+        <PaymentElement
+          id="renter-payment-method"
+          options={{
+            layout: {
+              type: "accordion",
+              defaultCollapsed: false,
+              radios: "always",
+              visibleAccordionItemsCount: 5,
+            },
+            paymentMethodOrder: ["card", "us_bank_account"],
+            wallets: {
+              link: "never",
+            },
+            defaultValues: {
+              billingDetails: {
+                name: billingName,
+              },
+            },
+          }}
+        />
+      </div>
+
+      <div className="flex flex-wrap gap-3">
+        <button
+          type="submit"
+          disabled={!stripe || !elements || isSaving}
+          className="rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+        >
+          {isSaving ? "Saving..." : "Save Payment Method"}
+        </button>
+        <button
+          type="button"
+          onClick={onCancel}
+          className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-100"
+        >
+          Cancel
+        </button>
+      </div>
+    </form>
   );
+}
+
+export function PaymentsClient({
+  autopayEnabled: initialAutopayEnabled,
+  customerEmail,
+  currentBalance,
+  defaultPaymentMethodId,
+  defaultBillingName,
+  nextDueDate,
+  paymentMethod,
+  payments,
+  savedPaymentMethods,
+  stripeConfigured,
+  totalPaid,
+}: Props) {
+  const router = useRouter();
+  const [tab, setTab] = useState<PaymentTab>("overview");
+  const [autopayEnabled, setAutopayEnabled] = useState(initialAutopayEnabled);
   const [selectedMethodId, setSelectedMethodId] = useState<string | null>(
-    paymentMethod ? "existing-method" : null,
+    defaultPaymentMethodId ?? savedPaymentMethods[0]?.id ?? null,
   );
-  const activePaymentMethod =
-    savedMethods.find((method) => method.id === selectedMethodId) ?? savedMethods[0] ?? null;
+  const [selectedChargeId, setSelectedChargeId] = useState<string | null>(null);
+  const [setupClientSecret, setSetupClientSecret] = useState<string | null>(null);
+  const [setupMode, setSetupMode] = useState<SetupMode>(null);
+  const [billingName, setBillingName] = useState(defaultBillingName);
+  const [bankEmail, setBankEmail] = useState(customerEmail ?? "");
+  const [bankAddressLine1, setBankAddressLine1] = useState("");
+  const [bankCity, setBankCity] = useState("");
+  const [bankState, setBankState] = useState("");
+  const [bankPostalCode, setBankPostalCode] = useState("");
+  const [achEntryMode, setAchEntryMode] = useState<AchEntryMode>("link");
+  const [manualBankName, setManualBankName] = useState("");
+  const [manualRoutingNumber, setManualRoutingNumber] = useState("");
+  const [manualAccountNumber, setManualAccountNumber] = useState("");
+  const [bankAccountChoice, setBankAccountChoice] = useState<BankAccountChoice>("checking");
+  const [isLoadingSetupIntent, setIsLoadingSetupIntent] = useState(false);
+  const [isSavingBankAccount, setIsSavingBankAccount] = useState(false);
+  const [isPaying, setIsPaying] = useState(false);
+  const [isSavingDefault, setIsSavingDefault] = useState<string | null>(null);
+  const [isRemovingMethod, setIsRemovingMethod] = useState<string | null>(null);
+  const [isUpdatingAutopay, setIsUpdatingAutopay] = useState(false);
+  const [feedback, setFeedback] = useState<{
+    message: string;
+    scope: FeedbackScope;
+    tone: FeedbackTone;
+  } | null>(null);
+  const addMethodPanelRef = useRef<HTMLDivElement | null>(null);
 
   const pendingPayments = useMemo(
     () => payments.filter((payment) => payment.status === "pending"),
     [payments],
   );
+
   const overdueCount = useMemo(
     () =>
       payments.filter(
@@ -112,47 +374,404 @@ export function PaymentsClient({
     [payments],
   );
 
-  function formatCardNumber(value: string) {
-    return value
-      .replace(/\D/g, "")
-      .slice(0, 16)
-      .replace(/(.{4})/g, "$1 ")
-      .trim();
+  const selectedMethod =
+    savedPaymentMethods.find((method) => method.id === selectedMethodId) ??
+    savedPaymentMethods.find((method) => method.isDefault) ??
+    savedPaymentMethods[0] ??
+    null;
+
+  const selectedCharge =
+    pendingPayments.find((payment) => payment.id === selectedChargeId) ?? pendingPayments[0] ?? null;
+
+  useEffect(() => {
+    setAutopayEnabled(initialAutopayEnabled);
+  }, [initialAutopayEnabled]);
+
+  useEffect(() => {
+    setBillingName(defaultBillingName);
+  }, [defaultBillingName]);
+
+  useEffect(() => {
+    setBankEmail(customerEmail ?? "");
+  }, [customerEmail]);
+
+  useEffect(() => {
+    setSelectedMethodId(defaultPaymentMethodId ?? savedPaymentMethods[0]?.id ?? null);
+  }, [defaultPaymentMethodId, savedPaymentMethods]);
+
+  useEffect(() => {
+    setSelectedChargeId((current) => {
+      if (current && pendingPayments.some((payment) => payment.id === current)) {
+        return current;
+      }
+      return pendingPayments[0]?.id ?? null;
+    });
+  }, [pendingPayments]);
+
+  useEffect(() => {
+    if (!setupClientSecret) return;
+
+    requestAnimationFrame(() => {
+      addMethodPanelRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    });
+  }, [setupClientSecret]);
+
+  function clearFeedback(scope?: FeedbackScope) {
+    setFeedback((current) => {
+      if (!current) return null;
+      if (!scope || current.scope === scope) return null;
+      return current;
+    });
   }
 
-  function formatExpiry(value: string) {
-    const digits = value.replace(/\D/g, "").slice(0, 4);
-    if (digits.length <= 2) return digits;
-    return `${digits.slice(0, 2)}/${digits.slice(2)}`;
+  function setScopedFeedback(scope: FeedbackScope, tone: FeedbackTone, message: string) {
+    setFeedback({ scope, tone, message });
   }
 
-  function addPaymentMethod() {
-    const digits = cardNumber.replace(/\D/g, "");
-    if (digits.length < 12 || expiryDate.length < 4 || cvc.length < 3 || !cardholderName.trim()) {
+  async function beginAddPaymentMethod(mode: Exclude<SetupMode, null>) {
+    clearFeedback("methods");
+
+    if (!stripeConfigured) {
+      setScopedFeedback("methods", "error", "Stripe is not configured yet for this environment.");
       return;
     }
 
-    const nextMethod: SavedPaymentMethod = {
-      id: `method-${Date.now()}`,
-      brand: digits.startsWith("4") ? "Visa" : digits.startsWith("5") ? "Mastercard" : "Card",
-      last4: digits.slice(-4),
-      expiry: expiryDate,
-      cardholder: cardholderName.trim(),
-    };
+    setSetupMode(mode);
+    setSetupClientSecret(null);
+    setIsLoadingSetupIntent(true);
 
-    setSavedMethods((current) => [nextMethod, ...current.filter((method) => method.last4 !== nextMethod.last4)]);
-    setSelectedMethodId(nextMethod.id);
-    setCardNumber("");
-    setExpiryDate("");
-    setCvc("");
-    setCardholderName("");
+    const response = await fetch("/api/renter/payments/setup-intent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ paymentMethodType: mode === "bank" ? "us_bank_account" : "card" }),
+    });
+    const payload = (await response.json().catch(() => null)) as
+      | { clientSecret?: string; error?: string }
+      | null;
+
+    setIsLoadingSetupIntent(false);
+
+    if (!response.ok || !payload?.clientSecret) {
+      setScopedFeedback("methods", "error", payload?.error ?? "Unable to prepare a payment method form.");
+      return;
+    }
+
+    setSetupClientSecret(payload.clientSecret);
+  }
+
+  async function completeBankSetup(setupIntentId: string, successMessage: string) {
+    const completeResponse = await fetch("/api/renter/payments/setup-intent/complete", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ setupIntentId }),
+    });
+    const completePayload = (await completeResponse.json().catch(() => null)) as { error?: string } | null;
+
+    if (!completeResponse.ok) {
+      throw new Error(completePayload?.error ?? "Unable to save this bank account.");
+    }
+
+    setScopedFeedback("methods", "success", successMessage);
+    router.refresh();
+  }
+
+  async function handleAddBankAccount() {
+    clearFeedback("methods");
+
+    if (!stripeConfigured) {
+      setScopedFeedback("methods", "error", "Stripe is not configured yet for this environment.");
+      return;
+    }
+
+    const billingError = validateBankBillingFields({
+      billingName,
+      bankEmail,
+      bankAddressLine1,
+      bankCity,
+      bankState,
+      bankPostalCode,
+      achEntryMode,
+    });
+    if (billingError) {
+      setScopedFeedback("methods", "error", billingError);
+      return;
+    }
+
+    const stripe = await stripePromise;
+    if (!stripe) {
+      setScopedFeedback("methods", "error", "Stripe could not be loaded in the browser.");
+      return;
+    }
+
+    setIsSavingBankAccount(true);
+
+    try {
+      const response = await fetch("/api/renter/payments/setup-intent", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paymentMethodType: "us_bank_account" }),
+      });
+      const payload = (await response.json().catch(() => null)) as
+        | { clientSecret?: string; error?: string }
+        | null;
+
+      if (!response.ok || !payload?.clientSecret) {
+        throw new Error(payload?.error ?? "Unable to prepare bank account setup.");
+      }
+
+      if (achEntryMode === "link") {
+        const collectResult = await stripe.collectBankAccountForSetup({
+          clientSecret: payload.clientSecret,
+          params: {
+            payment_method_type: "us_bank_account",
+            payment_method_data: {
+              billing_details: {
+                name: billingName.trim(),
+                email: bankEmail.trim(),
+                address: {
+                  line1: bankAddressLine1.trim(),
+                  city: bankCity.trim(),
+                  state: bankState.trim(),
+                  postal_code: bankPostalCode.trim(),
+                  country: "US",
+                },
+              },
+            },
+          },
+        });
+
+        if (collectResult.error) {
+          throw new Error(collectResult.error.message ?? "Unable to collect bank account details.");
+        }
+
+        const confirmResult = await stripe.confirmUsBankAccountSetup(payload.clientSecret);
+        if (confirmResult.error) {
+          throw new Error(confirmResult.error.message ?? "Unable to save this bank account.");
+        }
+
+        if (!confirmResult.setupIntent?.id) {
+          throw new Error("Stripe did not return a completed bank account setup.");
+        }
+
+        await completeBankSetup(confirmResult.setupIntent.id, "Bank account linked successfully.");
+      } else {
+        if (!manualRoutingNumber.trim() || !manualAccountNumber.trim()) {
+          throw new Error("Routing number and account number are required for manual bank entry.");
+        }
+
+        const confirmResult = await stripe.confirmUsBankAccountSetup(payload.clientSecret, {
+          payment_method: {
+            billing_details: {
+              name: billingName.trim(),
+              email: bankEmail.trim(),
+              address: {
+                line1: bankAddressLine1.trim(),
+                city: bankCity.trim(),
+                state: bankState.trim(),
+                postal_code: bankPostalCode.trim(),
+                country: "US",
+              },
+            },
+            us_bank_account: {
+              routing_number: manualRoutingNumber.trim(),
+              account_number: manualAccountNumber.trim(),
+              account_holder_type: "individual",
+              account_type: bankAccountChoice,
+            },
+          },
+        });
+
+        if (confirmResult.error) {
+          throw new Error(confirmResult.error.message ?? "Unable to save this bank account.");
+        }
+
+        if (!confirmResult.setupIntent?.id) {
+          throw new Error("Stripe did not return a completed manual bank setup.");
+        }
+
+        await completeBankSetup(confirmResult.setupIntent.id, "Bank account added successfully.");
+      }
+    } catch (error) {
+      setScopedFeedback(
+        "methods",
+        "error",
+        error instanceof Error ? error.message : "Unable to save this bank account.",
+      );
+    } finally {
+      setIsSavingBankAccount(false);
+    }
+  }
+
+  async function handlePayNow() {
+    clearFeedback("pay");
+
+    if (!stripeConfigured) {
+      setScopedFeedback("pay", "error", "Stripe is not configured yet for this environment.");
+      return;
+    }
+
+    if (!selectedCharge) {
+      setScopedFeedback("pay", "error", "Choose an outstanding charge before paying.");
+      return;
+    }
+
+    if (!selectedMethod) {
+      setScopedFeedback("pay", "error", "Add a saved payment method before paying online.");
+      return;
+    }
+
+    const stripe = await stripePromise;
+    if (!stripe) {
+      setScopedFeedback("pay", "error", "Stripe could not be loaded in the browser.");
+      return;
+    }
+
+    setIsPaying(true);
+
+    const response = await fetch("/api/renter/payments/intent", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        paymentId: selectedCharge.id,
+        paymentMethodId: selectedMethod.id,
+        amount: selectedCharge.amount.toFixed(2),
+      }),
+    });
+    const payload = (await response.json().catch(() => null)) as
+      | { clientSecret?: string; error?: string; status?: string }
+      | null;
+
+    if (!response.ok || !payload?.clientSecret) {
+      setScopedFeedback("pay", "error", payload?.error ?? "Unable to prepare the payment.");
+      setIsPaying(false);
+      return;
+    }
+
+    if (payload.status === "succeeded" || payload.status === "processing") {
+      setScopedFeedback(
+        "pay",
+        "success",
+        payload.status === "succeeded"
+          ? "Payment already succeeded. Refreshing your ledger now."
+          : "Payment is processing. Refreshing your ledger now.",
+      );
+      setIsPaying(false);
+      router.refresh();
+      return;
+    }
+
+    if (selectedMethod.paymentType === "us_bank_account") {
+      const bankResult = await stripe.confirmUsBankAccountPayment(payload.clientSecret);
+
+      if (bankResult.error) {
+        setScopedFeedback("pay", "error", bankResult.error.message ?? "Payment confirmation failed.");
+        setIsPaying(false);
+        return;
+      }
+
+      setScopedFeedback(
+        "pay",
+        "success",
+        "Payment submitted successfully. The ledger will update after Stripe confirms it.",
+      );
+      setIsPaying(false);
+      router.refresh();
+      return;
+    }
+
+    const result = await stripe.confirmCardPayment(payload.clientSecret, {
+      payment_method: selectedMethod.stripePaymentMethodId,
+    });
+
+    if (result.error) {
+      setScopedFeedback("pay", "error", result.error.message ?? "Payment confirmation failed.");
+      setIsPaying(false);
+      return;
+    }
+
+    setScopedFeedback(
+      "pay",
+      "success",
+      "Payment submitted successfully. The ledger will update after Stripe confirms it.",
+    );
+    setIsPaying(false);
+    router.refresh();
+  }
+
+  async function handleMakeDefault(methodId: string) {
+    clearFeedback("methods");
+    setIsSavingDefault(methodId);
+
+    const response = await fetch("/api/renter/payments/default-method", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ paymentMethodId: methodId }),
+    });
+    const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+
+    setIsSavingDefault(null);
+
+    if (!response.ok) {
+      setScopedFeedback("methods", "error", payload?.error ?? "Unable to update the default payment method.");
+      return;
+    }
+
+    setSelectedMethodId(methodId);
+    setScopedFeedback("methods", "success", "Default payment method updated.");
+    router.refresh();
+  }
+
+  async function handleRemoveMethod(methodId: string) {
+    clearFeedback("methods");
+    setIsRemovingMethod(methodId);
+
+    const response = await fetch(`/api/renter/payments/methods/${methodId}`, {
+      method: "DELETE",
+    });
+    const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+
+    setIsRemovingMethod(null);
+
+    if (!response.ok) {
+      setScopedFeedback("methods", "error", payload?.error ?? "Unable to remove this payment method.");
+      return;
+    }
+
+    setScopedFeedback("methods", "success", "Payment method removed.");
+    router.refresh();
+  }
+
+  async function handleAutopayChange(nextValue: boolean) {
+    clearFeedback("methods");
+    setIsUpdatingAutopay(true);
+
+    const response = await fetch("/api/renter/payments/autopay", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled: nextValue }),
+    });
+    const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+
+    setIsUpdatingAutopay(false);
+
+    if (!response.ok) {
+      setScopedFeedback("methods", "error", payload?.error ?? "Unable to update auto-pay.");
+      return;
+    }
+
+    setAutopayEnabled(nextValue);
+    setScopedFeedback("methods", "success", nextValue ? "Auto-pay enabled." : "Auto-pay turned off.");
+    router.refresh();
   }
 
   return (
     <div className="space-y-8">
       <header>
         <h1 className="text-3xl font-bold tracking-tight text-slate-900">Payments</h1>
-        <p className="mt-1 text-slate-500">Manage your rent payments and payment settings.</p>
+        <p className="mt-1 text-slate-500">Manage your rent payments and saved payment methods.</p>
       </header>
 
       <section className="grid gap-4 md:grid-cols-3">
@@ -168,15 +787,15 @@ export function PaymentsClient({
           <p className="text-sm font-medium text-slate-500">Auto-Pay Status</p>
           <p className="mt-3 text-3xl font-bold text-slate-900">{autopayEnabled ? "Active" : "Inactive"}</p>
           <p className="mt-1 text-sm text-slate-500">
-            {autopayEnabled ? "Next payment is scheduled automatically." : "Manual payments are currently enabled."}
+            {autopayEnabled ? "Future rent can be charged automatically." : "Manual payments are currently enabled."}
           </p>
         </article>
 
         <article className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm font-medium text-slate-500">Payment Method</p>
+          <p className="text-sm font-medium text-slate-500">Default Method</p>
           <p className="mt-3 text-3xl font-bold text-slate-900">{paymentMethod ?? "No method"}</p>
           <p className="mt-1 text-sm text-slate-500">
-            {paymentMethod ? "Default method on file." : "Add a payment method with management."}
+            {savedPaymentMethods.length > 0 ? "Saved securely through Stripe." : "Add a payment method to pay online."}
           </p>
         </article>
       </section>
@@ -185,7 +804,7 @@ export function PaymentsClient({
         {[
           ["overview", "Overview"],
           ["pay", "Make Payment"],
-          ["autopay", "Setup Auto-Pay"],
+          ["methods", "Payment Methods"],
         ].map(([value, label]) => (
           <button
             key={value}
@@ -299,149 +918,475 @@ export function PaymentsClient({
       ) : null}
 
       {tab === "pay" ? (
-        <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="font-semibold text-slate-900">Make a Payment</h2>
-          <p className="mt-1 text-sm text-slate-500">Use the amount on file to prepare your payment.</p>
-          <div className="mt-5 grid gap-4 md:grid-cols-2">
-            <label className="space-y-1.5">
-              <span className="block text-sm font-medium text-slate-700">Amount</span>
-              <input
-                type="number"
-                value={amount}
-                min={0}
-                onChange={(event) => setAmount(Number(event.target.value))}
-                className="h-11 w-full rounded-lg border border-slate-300 px-3 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
-              />
-            </label>
-            <div className="space-y-1.5">
-              <span className="block text-sm font-medium text-slate-700">Payment Method</span>
-              <div className="rounded-lg border border-slate-300 px-3 py-3 text-sm text-slate-700">
-                {activePaymentMethod
-                  ? `${activePaymentMethod.brand} ending in ${activePaymentMethod.last4}`
-                  : "No payment method saved"}
-              </div>
+        <section className="space-y-6">
+          <article className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+            <h2 className="font-semibold text-slate-900">Outstanding Charges</h2>
+            <p className="mt-1 text-sm text-slate-500">Choose the charge you want to pay.</p>
+            <div className="mt-5 space-y-3">
+              {pendingPayments.length === 0 ? (
+                <p className="text-sm text-slate-500">You have no pending charges right now.</p>
+              ) : (
+                pendingPayments.map((payment) => {
+                  const isSelected = selectedCharge?.id === payment.id;
+                  return (
+                    <button
+                      key={payment.id}
+                      type="button"
+                      onClick={() => setSelectedChargeId(payment.id)}
+                      className={[
+                        "flex w-full items-center justify-between rounded-xl border px-4 py-4 text-left transition-colors",
+                        isSelected ? "border-sky-300 bg-sky-50" : "border-slate-200 hover:bg-slate-50",
+                      ].join(" ")}
+                    >
+                      <div>
+                        <p className="font-medium text-slate-900">{paymentTypeLabels[payment.type] ?? payment.type}</p>
+                        <p className="text-sm text-slate-500">Due {formatDate(payment.dueDate)}</p>
+                      </div>
+                      <p className="font-semibold text-slate-900">{formatCurrency(payment.amount)}</p>
+                    </button>
+                  );
+                })
+              )}
             </div>
-          </div>
-          <button
-            type="button"
-            className="mt-5 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-700"
-          >
-            Pay {formatCurrency(amount)}
-          </button>
-        </section>
-      ) : null}
+          </article>
 
-      {tab === "autopay" ? (
-        <div className="space-y-6">
-          <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h2 className="font-semibold text-slate-900">Payment Methods</h2>
-            <p className="mt-1 text-sm text-slate-500">Add or manage your payment methods.</p>
-
-            <div className="mt-6 space-y-4">
-              <label className="space-y-1.5">
-                <span className="block text-sm font-medium text-slate-700">Card Number</span>
-                <input
-                  type="text"
-                  value={cardNumber}
-                  onChange={(event) => setCardNumber(formatCardNumber(event.target.value))}
-                  placeholder="4242 4242 4242 4242"
-                  className="h-12 w-full rounded-lg border border-slate-300 px-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
-                />
-              </label>
-
-              <div className="grid gap-4 md:grid-cols-2">
-                <label className="space-y-1.5">
-                  <span className="block text-sm font-medium text-slate-700">Expiry Date</span>
-                  <input
-                    type="text"
-                    value={expiryDate}
-                    onChange={(event) => setExpiryDate(formatExpiry(event.target.value))}
-                    placeholder="MM/YY"
-                    className="h-12 w-full rounded-lg border border-slate-300 px-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
-                  />
-                </label>
-
-                <label className="space-y-1.5">
-                  <span className="block text-sm font-medium text-slate-700">CVC</span>
-                  <input
-                    type="text"
-                    value={cvc}
-                    onChange={(event) => setCvc(event.target.value.replace(/\D/g, "").slice(0, 4))}
-                    placeholder="123"
-                    className="h-12 w-full rounded-lg border border-slate-300 px-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
-                  />
-                </label>
-              </div>
-
-              <label className="space-y-1.5">
-                <span className="block text-sm font-medium text-slate-700">Cardholder Name</span>
-                <input
-                  type="text"
-                  value={cardholderName}
-                  onChange={(event) => setCardholderName(event.target.value)}
-                  placeholder="John Doe"
-                  className="h-12 w-full rounded-lg border border-slate-300 px-4 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
-                />
-              </label>
-
-              <button
-                type="button"
-                onClick={addPaymentMethod}
-                className="w-full rounded-lg bg-emerald-500 px-4 py-3 text-sm font-semibold text-white transition-colors hover:bg-emerald-600"
-              >
-                Add Payment Method
-              </button>
-            </div>
-
-            {savedMethods.length > 0 ? (
-              <div className="mt-6 space-y-3">
-                <h3 className="text-sm font-semibold text-slate-900">Saved Methods</h3>
-                {savedMethods.map((method) => {
-                  const isActive = activePaymentMethod?.id === method.id;
+          <article className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+            <h2 className="font-semibold text-slate-900">Saved Payment Method</h2>
+            <p className="mt-1 text-sm text-slate-500">Use one of your securely stored payment methods.</p>
+            <div className="mt-5 space-y-3">
+              {savedPaymentMethods.length === 0 ? (
+                <p className="text-sm text-slate-500">
+                  Add a saved payment method in the Payment Methods tab before paying online.
+                </p>
+              ) : (
+                savedPaymentMethods.map((method) => {
+                  const isSelected = selectedMethod?.id === method.id;
                   return (
                     <button
                       key={method.id}
                       type="button"
                       onClick={() => setSelectedMethodId(method.id)}
                       className={[
-                        "flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left transition-colors",
-                        isActive
-                          ? "border-emerald-300 bg-emerald-50"
-                          : "border-slate-200 bg-white hover:bg-slate-50",
+                        "flex w-full items-center justify-between rounded-xl border px-4 py-4 text-left transition-colors",
+                        isSelected ? "border-emerald-300 bg-emerald-50" : "border-slate-200 hover:bg-slate-50",
                       ].join(" ")}
                     >
                       <div>
                         <p className="font-medium text-slate-900">
-                          {method.brand} ending in {method.last4}
+                          {formatMethodLabel(method)}
                         </p>
-                        <p className="text-sm text-slate-500">
-                          Expires {method.expiry} · {method.cardholder}
-                        </p>
+                        <p className="text-sm text-slate-500">{formatMethodMeta(method)}</p>
                       </div>
-                      {isActive ? (
+                      {method.isDefault ? (
                         <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-medium text-emerald-700">
                           Default
                         </span>
                       ) : null}
                     </button>
                   );
-                })}
+                })
+              )}
+            </div>
+
+            <div className="mt-6 rounded-xl bg-slate-50 p-4">
+              <p className="text-sm text-slate-500">Selected charge</p>
+              <p className="mt-1 text-lg font-semibold text-slate-900">
+                {selectedCharge ? formatCurrency(selectedCharge.amount) : "No charge selected"}
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={handlePayNow}
+              disabled={isPaying || !selectedCharge || !selectedMethod || !stripeConfigured}
+              className="mt-5 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+            >
+              {isPaying
+                ? "Processing..."
+                : selectedCharge
+                  ? `Pay ${formatCurrency(selectedCharge.amount)}`
+                  : "Choose a charge"}
+            </button>
+            {feedback?.scope === "pay" ? (
+              <div className="mt-3 max-w-xl">
+                <FeedbackMessage message={feedback.message} tone={feedback.tone} />
               </div>
             ) : null}
+          </article>
+        </section>
+      ) : null}
+
+      {tab === "methods" ? (
+        <div className="space-y-6">
+          <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="flex flex-wrap items-start justify-between gap-4">
+              <div>
+                <h2 className="font-semibold text-slate-900">Payment Methods</h2>
+                <p className="mt-1 text-sm text-slate-500">
+                  Cards and bank accounts are collected and tokenized by Stripe. Raw payment details never touch this app.
+                </p>
+                <p className="mt-3 text-sm text-slate-500">
+                  Add a new card or connect a bank account with the fewest possible steps.
+                </p>
+              </div>
+              <div className="flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={() => beginAddPaymentMethod("card")}
+                  disabled={isLoadingSetupIntent || !stripeConfigured}
+                  className="rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                >
+                  {isLoadingSetupIntent && setupMode === "card" ? "Preparing..." : "Add Card"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    clearFeedback("methods");
+                    setSetupClientSecret(null);
+                    setSetupMode("bank");
+                  }}
+                  disabled={!stripeConfigured}
+                  className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:bg-slate-100"
+                >
+                  Add Bank Account
+                </button>
+              </div>
+            </div>
+            {!setupClientSecret && setupMode !== "bank" ? (
+              <p className="mt-4 text-sm text-slate-500">
+                `Add Card` opens the secure Stripe card form below. `Add Bank Account` starts the ACH setup flow.
+              </p>
+            ) : null}
+
+            {!stripeConfigured ? (
+              <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                Add `STRIPE_SECRET_KEY`, `STRIPE_WEBHOOK_SECRET`, and `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY` to enable online payments.
+              </div>
+            ) : null}
+
+            {feedback?.scope === "methods" ? (
+              <div className="mt-5">
+                <FeedbackMessage message={feedback.message} tone={feedback.tone} />
+              </div>
+            ) : null}
+
+            {setupMode === "bank" ? (
+              <div ref={addMethodPanelRef} className="mt-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
+                <div className="mb-6">
+                  <h3 className="text-2xl font-bold tracking-tight text-slate-900">Add Bank Account</h3>
+                  <p className="mt-1 text-lg text-slate-500">Link instantly with Stripe or enter routing details manually.</p>
+                </div>
+
+                <div className="space-y-5">
+                  <div>
+                    <p className="text-sm font-semibold text-slate-900">How would you like to add it?</p>
+                    <div className="mt-3 grid gap-3 md:grid-cols-2">
+                      <button
+                        type="button"
+                        onClick={() => setAchEntryMode("link")}
+                        className={[
+                          "flex items-center gap-3 rounded-2xl border px-6 py-5 text-left transition",
+                          achEntryMode === "link"
+                            ? "border-emerald-200 bg-emerald-500 text-white shadow-[0_0_0_4px_rgba(16,185,129,0.18)]"
+                            : "border-slate-200 bg-slate-50 text-slate-900 hover:bg-slate-100",
+                        ].join(" ")}
+                      >
+                        <PaymentTypeIcon type="bank" />
+                        <span className="text-lg font-semibold">Link Bank Account</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setAchEntryMode("manual")}
+                        className={[
+                          "flex items-center gap-3 rounded-2xl border px-6 py-5 text-left transition",
+                          achEntryMode === "manual"
+                            ? "border-emerald-200 bg-emerald-500 text-white shadow-[0_0_0_4px_rgba(16,185,129,0.18)]"
+                            : "border-slate-200 bg-slate-50 text-slate-900 hover:bg-slate-100",
+                        ].join(" ")}
+                      >
+                        <PaymentTypeIcon type="bank" />
+                        <span className="text-lg font-semibold">Enter Manually</span>
+                      </button>
+                    </div>
+                    <p className="mt-2 text-sm text-slate-500">
+                      {achEntryMode === "link"
+                        ? "Use Stripe to connect your bank instantly."
+                        : "Enter your routing and account number manually."}
+                    </p>
+                  </div>
+
+                  {achEntryMode === "link" ? (
+                    <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-5 py-5">
+                      <p className="text-base font-semibold text-emerald-900">Fastest option</p>
+                      <p className="mt-2 text-sm text-emerald-700">
+                        Stripe will open a secure bank-linking flow so you can choose your bank directly. No extra details are needed here first.
+                      </p>
+                    </div>
+                  ) : null}
+
+                  {achEntryMode === "manual" ? (
+                    <div>
+                      <p className="text-sm font-semibold text-slate-900">Account Type</p>
+                      <div className="mt-3 grid gap-3 md:grid-cols-2">
+                        {(["checking", "savings"] as const).map((option) => {
+                          const active = bankAccountChoice === option;
+                          return (
+                            <button
+                              key={option}
+                              type="button"
+                              onClick={() => setBankAccountChoice(option)}
+                              className={[
+                                "rounded-2xl border px-6 py-4 text-left text-lg font-semibold transition",
+                                active
+                                  ? "border-emerald-200 bg-emerald-50 text-emerald-700"
+                                  : "border-slate-200 bg-slate-50 text-slate-900 hover:bg-slate-100",
+                              ].join(" ")}
+                            >
+                              {option === "checking" ? "Checking" : "Savings"}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ) : null}
+
+                  {achEntryMode === "manual" ? (
+                    <div className="grid gap-5 md:grid-cols-2">
+                      <label className="space-y-1.5 md:col-span-2">
+                        <span className="block text-sm font-semibold text-slate-900">Routing Number</span>
+                        <input
+                          type="text"
+                          value={manualRoutingNumber}
+                          onChange={(event) => setManualRoutingNumber(event.target.value)}
+                          placeholder="110000000"
+                          className="h-16 w-full rounded-2xl border border-slate-200 bg-white px-5 text-lg text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                        />
+                      </label>
+                      <label className="space-y-1.5 md:col-span-2">
+                        <span className="block text-sm font-semibold text-slate-900">Account Number</span>
+                        <input
+                          type="text"
+                          value={manualAccountNumber}
+                          onChange={(event) => setManualAccountNumber(event.target.value)}
+                          placeholder="000123456789"
+                          className="h-16 w-full rounded-2xl border border-slate-200 bg-white px-5 text-lg text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                        />
+                      </label>
+                    </div>
+                  ) : (
+                    <div className="rounded-2xl border border-emerald-100 bg-emerald-50 px-4 py-4 text-sm text-emerald-700">
+                      Stripe will open a secure bank-linking flow so you can choose your bank directly. No extra details are needed here first.
+                    </div>
+                  )}
+
+                  {achEntryMode === "manual" ? (
+                    <>
+                      <div className="grid gap-5 md:grid-cols-2">
+                        <label className="space-y-1.5 md:col-span-2">
+                          <span className="block text-sm font-semibold text-slate-900">Account Holder Name</span>
+                          <input
+                            type="text"
+                            value={billingName}
+                            onChange={(event) => setBillingName(event.target.value)}
+                            placeholder="John Doe"
+                            className="h-16 w-full rounded-2xl border border-slate-200 bg-white px-5 text-lg text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                          />
+                        </label>
+                        <label className="space-y-1.5 md:col-span-2">
+                          <span className="block text-sm font-semibold text-slate-900">Bank Name</span>
+                          <input
+                            type="text"
+                            value={manualBankName}
+                            onChange={(event) => setManualBankName(event.target.value)}
+                            placeholder="Chase Bank"
+                            className="h-16 w-full rounded-2xl border border-slate-200 bg-white px-5 text-lg text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                          />
+                        </label>
+                      </div>
+
+                      <div className="grid gap-5 md:grid-cols-2">
+                        <label className="space-y-1.5 md:col-span-2">
+                          <span className="block text-sm font-semibold text-slate-900">Email</span>
+                          <input
+                            type="email"
+                            value={bankEmail}
+                            onChange={(event) => setBankEmail(event.target.value)}
+                            placeholder="you@example.com"
+                            className="h-16 w-full rounded-2xl border border-slate-200 bg-white px-5 text-lg text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                          />
+                        </label>
+                        <label className="space-y-1.5 md:col-span-2">
+                          <span className="block text-sm font-semibold text-slate-900">Billing Address</span>
+                          <input
+                            type="text"
+                            value={bankAddressLine1}
+                            onChange={(event) => setBankAddressLine1(event.target.value)}
+                            placeholder="123 Main St"
+                            className="h-16 w-full rounded-2xl border border-slate-200 bg-white px-5 text-lg text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                          />
+                        </label>
+                        <label className="space-y-1.5">
+                          <span className="block text-sm font-semibold text-slate-900">City</span>
+                          <input
+                            type="text"
+                            value={bankCity}
+                            onChange={(event) => setBankCity(event.target.value)}
+                            placeholder="New York"
+                            className="h-16 w-full rounded-2xl border border-slate-200 bg-white px-5 text-lg text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                          />
+                        </label>
+                        <label className="space-y-1.5">
+                          <span className="block text-sm font-semibold text-slate-900">State</span>
+                          <input
+                            type="text"
+                            value={bankState}
+                            onChange={(event) => setBankState(event.target.value)}
+                            placeholder="NY"
+                            className="h-16 w-full rounded-2xl border border-slate-200 bg-white px-5 text-lg uppercase text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                          />
+                        </label>
+                        <label className="space-y-1.5 md:col-span-2">
+                          <span className="block text-sm font-semibold text-slate-900">ZIP Code</span>
+                          <input
+                            type="text"
+                            value={bankPostalCode}
+                            onChange={(event) => setBankPostalCode(event.target.value)}
+                            placeholder="10001"
+                            className="h-16 w-full rounded-2xl border border-slate-200 bg-white px-5 text-lg text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                          />
+                        </label>
+                      </div>
+                    </>
+                  ) : null}
+                </div>
+
+                <div className="mt-6 flex flex-wrap gap-3">
+                  <button
+                    type="button"
+                    onClick={handleAddBankAccount}
+                    disabled={isSavingBankAccount || !stripeConfigured}
+                    className="flex-1 rounded-2xl bg-emerald-500 px-6 py-5 text-lg font-semibold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:bg-slate-300"
+                  >
+                    {isSavingBankAccount
+                      ? achEntryMode === "link"
+                        ? "Opening Stripe..."
+                        : "Saving Bank Account..."
+                      : achEntryMode === "link"
+                        ? "Continue with Stripe"
+                        : "Add Bank Account"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setSetupMode(null)}
+                    className="rounded-2xl border border-slate-300 px-6 py-5 text-lg font-medium text-slate-700 transition hover:bg-slate-100"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
+            {setupMode === "card" && setupClientSecret && stripePromise ? (
+              <div ref={addMethodPanelRef} className="mt-6 rounded-2xl border border-emerald-200 bg-emerald-50/40 p-4">
+                <div className="mb-4">
+                  <h3 className="text-sm font-semibold text-slate-900">Add a card</h3>
+                  <p className="mt-1 text-sm text-slate-600">
+                    Use Stripe&apos;s secure card form below, then save it for future rent payments.
+                  </p>
+                </div>
+                <Elements
+                  stripe={stripePromise}
+                  options={{
+                    clientSecret: setupClientSecret,
+                    appearance: { theme: "stripe" },
+                  }}
+                >
+                  <SetupPaymentMethodForm
+                    billingName={billingName}
+                    onCancel={() => {
+                      setSetupClientSecret(null);
+                      setSetupMode(null);
+                      setBillingName(defaultBillingName);
+                    }}
+                    onError={(message) => {
+                      if (message) {
+                        setScopedFeedback("methods", "error", message);
+                      } else {
+                        clearFeedback("methods");
+                      }
+                    }}
+                    onSaved={(message) => {
+                      setSetupClientSecret(null);
+                      setSetupMode(null);
+                      setBillingName(defaultBillingName);
+                      setScopedFeedback("methods", "success", message);
+                      router.refresh();
+                    }}
+                    setBillingName={setBillingName}
+                  />
+                </Elements>
+              </div>
+            ) : null}
+
+            <div className="mt-6 space-y-3">
+              {savedPaymentMethods.length === 0 ? (
+                <p className="text-sm text-slate-500">No saved payment methods yet.</p>
+              ) : (
+                savedPaymentMethods.map((method) => (
+                  <div
+                    key={method.id}
+                    className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white px-4 py-4"
+                  >
+                    <div>
+                      <p className="font-medium text-slate-900">
+                        {formatMethodLabel(method)}
+                      </p>
+                      <p className="text-sm text-slate-500">{formatMethodMeta(method)}</p>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2">
+                      {method.isDefault ? (
+                        <span className="inline-flex items-center rounded-full bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-700">
+                          Default
+                        </span>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => handleMakeDefault(method.id)}
+                          disabled={isSavingDefault === method.id}
+                          className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:bg-slate-100"
+                        >
+                          {isSavingDefault === method.id ? "Saving..." : "Make Default"}
+                        </button>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveMethod(method.id)}
+                        disabled={isRemovingMethod === method.id}
+                        className="rounded-lg border border-rose-200 px-3 py-2 text-sm font-medium text-rose-700 transition-colors hover:bg-rose-50 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
+                      >
+                        {isRemovingMethod === method.id ? "Removing..." : "Remove"}
+                      </button>
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
           </section>
 
           <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h2 className="font-semibold text-slate-900">Auto-Pay Settings</h2>
-                <p className="mt-1 text-sm text-slate-500">Automatically pay rent each month.</p>
+                <p className="mt-1 text-sm text-slate-500">Automatically pay rent each month using your default payment method.</p>
               </div>
               <button
                 type="button"
-                onClick={() => setAutopayEnabled((value) => !value)}
+                onClick={() => handleAutopayChange(!autopayEnabled)}
+                disabled={isUpdatingAutopay}
                 className={[
                   "relative mt-1 inline-flex h-8 w-14 items-center rounded-full transition-colors",
                   autopayEnabled ? "bg-emerald-500" : "bg-slate-300",
+                  isUpdatingAutopay ? "cursor-not-allowed opacity-70" : "",
                 ].join(" ")}
                 aria-pressed={autopayEnabled}
               >
@@ -454,21 +1399,17 @@ export function PaymentsClient({
               </button>
             </div>
 
-            <div className="mt-5 flex items-start justify-between gap-4 rounded-xl bg-slate-50 p-4">
-              <div>
+              <div className="mt-5 rounded-xl bg-slate-50 p-4">
                 <p className="font-medium text-slate-900">Enable Auto-Pay</p>
                 <p className="mt-1 text-sm text-slate-500">
-                  Automatically charge on the 1st of each month using{" "}
-                  {activePaymentMethod
-                    ? `${activePaymentMethod.brand} ending in ${activePaymentMethod.last4}`
-                    : "your default payment method"}.
+                  {selectedMethod
+                    ? `Future charges can use ${formatMethodLabel(selectedMethod)}.`
+                    : "Select a default saved payment method before enabling auto-pay."}
                 </p>
               </div>
-            </div>
           </section>
         </div>
       ) : null}
-
     </div>
   );
 }

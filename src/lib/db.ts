@@ -43,8 +43,23 @@ function hasCurrentAccountingDelegates(client: ReturnType<typeof createPrismaCli
   );
 }
 
+function hasCurrentRenterPaymentDelegates(client: ReturnType<typeof createPrismaClient>) {
+  return (
+    typeof client.renter_payment_methods?.findMany === "function" &&
+    typeof client.renter_payment_settings?.findMany === "function" &&
+    typeof client.payment_attempts?.findMany === "function" &&
+    prismaModelHasField(client, "renter_payment_methods", "payment_type") &&
+    prismaModelHasField(client, "renter_payment_methods", "bank_name") &&
+    prismaModelHasField(client, "renter_payment_methods", "bank_account_type") &&
+    prismaModelHasField(client, "renter_payment_methods", "exp_month") &&
+    prismaModelHasField(client, "renter_payment_methods", "exp_year")
+  );
+}
+
 export const prisma =
-  globalForPrisma.prisma && hasCurrentAccountingDelegates(globalForPrisma.prisma)
+  globalForPrisma.prisma &&
+  hasCurrentAccountingDelegates(globalForPrisma.prisma) &&
+  hasCurrentRenterPaymentDelegates(globalForPrisma.prisma)
     ? globalForPrisma.prisma
     : createPrismaClient();
 

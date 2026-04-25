@@ -4,7 +4,42 @@ import { prisma } from "@/lib/db";
 import { RenterShell } from "@/components/RenterShell";
 import { getPortalAccessState } from "@/lib/portal-access";
 import { resolveSharedUserIdentity } from "@/lib/renter-auth";
+import { getTenantPaymentProfile } from "@/lib/renter-payments";
+import { isStripeConfigured } from "@/lib/stripe";
 import { PaymentsClient } from "./PaymentsClient";
+
+type SavedPaymentMethodView = {
+  id: string;
+  stripePaymentMethodId: string;
+  paymentType: "card" | "us_bank_account";
+  brand: string | null;
+  bankName: string | null;
+  bankAccountType: string | null;
+  last4: string;
+  expMonth: number | null;
+  expYear: number | null;
+  billingName: string | null;
+  isDefault: boolean;
+  isActive: boolean;
+};
+
+function buildDefaultBillingName(parts: Array<string | null | undefined>) {
+  return parts.filter(Boolean).join(" ").trim();
+}
+
+function formatSavedMethodLabel(method: {
+  paymentType: string;
+  brand: string | null;
+  bankName: string | null;
+  last4: string;
+}) {
+  if (method.paymentType === "us_bank_account") {
+    return `${method.bankName ?? "Bank account"} ending in ${method.last4}`;
+  }
+
+  const brand = method.brand ? method.brand.charAt(0).toUpperCase() + method.brand.slice(1) : "Card";
+  return `${brand} ending in ${method.last4}`;
+}
 
 export default async function RenterPaymentsPage() {
   const { userId, orgId } = await auth();
@@ -23,6 +58,7 @@ export default async function RenterPaymentsPage() {
       select: {
         id: true,
         first_name: true,
+        organization_id: true,
         lease_tenants: {
           select: {
             leases: {
@@ -62,6 +98,20 @@ export default async function RenterPaymentsPage() {
     })),
   };
 
+  const paymentProfile = tenant
+    ? await getTenantPaymentProfile({
+        userId,
+        tenantId: tenant.id,
+        organizationId: tenant.organization_id,
+        sharedUserId: identity.sharedUser?.id ?? null,
+      })
+    : null;
+  const savedPaymentMethods: SavedPaymentMethodView[] =
+    paymentProfile?.paymentMethods.map((method) => ({
+      ...method,
+      paymentType: method.paymentType === "us_bank_account" ? "us_bank_account" : "card",
+    })) ?? [];
+
   const allPayments =
     tenant?.lease_tenants.flatMap((lt) => lt.leases.payments) ?? [];
 
@@ -71,21 +121,27 @@ export default async function RenterPaymentsPage() {
   const pendingPayments = allPayments.filter((p) => p.status === "pending");
   const totalPaid = paidPayments.reduce((sum, p) => sum + Number(p.amount), 0);
   const totalPending = pendingPayments.reduce((sum, p) => sum + Number(p.amount), 0);
-  const latestMethod =
-    allPayments.find((payment) => payment.payment_method)?.payment_method ?? null;
+  const defaultMethod = savedPaymentMethods.find((method) => method.isDefault) ?? null;
+  const latestMethod = defaultMethod
+    ? formatSavedMethodLabel(defaultMethod)
+    : allPayments.find((payment) => payment.payment_method)?.payment_method ?? null;
   const nextPending = pendingPayments.find((payment) => payment.due_date) ?? pendingPayments[0] ?? null;
-  const rentAmount = tenant?.lease_tenants[0]?.leases.rent_amount
-    ? Number(tenant.lease_tenants[0].leases.rent_amount)
-    : null;
+  const defaultBillingName = buildDefaultBillingName([
+    identity.sharedUser?.first_name ?? identity.clerkUser?.firstName ?? tenant?.first_name,
+    identity.sharedUser?.last_name ?? identity.clerkUser?.lastName,
+  ]);
 
   return (
     <RenterShell user={shellUser}>
       <PaymentsClient
+        customerEmail={shellUser.email}
         currentBalance={totalPending}
+        defaultBillingName={defaultBillingName}
         totalPaid={totalPaid}
+        autopayEnabled={paymentProfile?.renter_payment_settings?.autopay_enabled ?? false}
+        defaultPaymentMethodId={paymentProfile?.renter_payment_settings?.default_payment_method_id ?? null}
         paymentMethod={latestMethod}
         nextDueDate={nextPending?.due_date?.toISOString() ?? null}
-        rentAmount={rentAmount}
         payments={allPayments.map((payment) => ({
           id: payment.id,
           amount: Number(payment.amount),
@@ -96,6 +152,8 @@ export default async function RenterPaymentsPage() {
           paymentMethod: payment.payment_method ?? null,
           notes: payment.notes ?? null,
         }))}
+        savedPaymentMethods={savedPaymentMethods}
+        stripeConfigured={isStripeConfigured()}
       />
     </RenterShell>
   );

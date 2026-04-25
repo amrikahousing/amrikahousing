@@ -1,4 +1,4 @@
-import { auth, currentUser } from "@clerk/nextjs/server";
+import { auth, clerkClient, currentUser } from "@clerk/nextjs/server";
 import { prisma } from "./db";
 
 export type TenantContext = {
@@ -25,7 +25,11 @@ function metadataString(metadata: Record<string, unknown> | null | undefined, ke
 }
 
 export async function resolveSharedUserIdentity(userId: string) {
-  const clerkUser = await currentUser().catch(() => null);
+  const clerkUser =
+    (await currentUser().catch(() => null)) ??
+    (await clerkClient()
+      .then((client) => client.users.getUser(userId))
+      .catch(() => null));
   const email = clerkUser?.primaryEmailAddress?.emailAddress?.toLowerCase() ?? null;
   const firstName =
     clerkUser?.firstName ??

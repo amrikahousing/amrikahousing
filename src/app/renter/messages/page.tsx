@@ -101,7 +101,11 @@ export default async function RenterMessagesPage() {
           sentAt: paymentReminderSentAt,
         }
       : null,
-  ].filter(Boolean);
+  ].filter(
+    (
+      message,
+    ): message is { id: string; sender: "manager"; body: string; sentAt: string } => Boolean(message),
+  );
 
   return (
     <RenterShell user={shellUser}>

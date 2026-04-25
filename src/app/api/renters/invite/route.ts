@@ -90,29 +90,34 @@ export async function POST(request: NextRequest) {
     select: { id: true, role: true },
   });
 
-  const sharedUserData = {
-    email: normalizedEmail,
-    organization_id: ctx.orgDbId,
-    first_name: normalizedFirstName,
-    last_name: normalizedLastName,
-    ...(normalizedPhone ? { phone: normalizedPhone } : {}),
-    ...(clerkUserIdToLink ? { clerk_user_id: clerkUserIdToLink } : {}),
-    role:
-      existingSharedUser?.role && existingSharedUser.role !== "renter"
-        ? existingSharedUser.role
-        : "renter",
-    updated_at: new Date(),
-  };
+  if (clerkUserIdToLink || existingSharedUser) {
+    const sharedUserData = {
+      email: normalizedEmail,
+      organization_id: ctx.orgDbId,
+      first_name: normalizedFirstName,
+      last_name: normalizedLastName,
+      ...(normalizedPhone ? { phone: normalizedPhone } : {}),
+      ...(clerkUserIdToLink ? { clerk_user_id: clerkUserIdToLink } : {}),
+      role:
+        existingSharedUser?.role && existingSharedUser.role !== "renter"
+          ? existingSharedUser.role
+          : "renter",
+      updated_at: new Date(),
+    };
 
-  if (existingSharedUser) {
-    await prisma.users.update({
-      where: { id: existingSharedUser.id },
-      data: sharedUserData,
-    });
-  } else {
-    await prisma.users.create({
-      data: sharedUserData,
-    });
+    if (existingSharedUser) {
+      await prisma.users.update({
+        where: { id: existingSharedUser.id },
+        data: sharedUserData,
+      });
+    } else if (clerkUserIdToLink) {
+      await prisma.users.create({
+        data: {
+          ...sharedUserData,
+          clerk_user_id: clerkUserIdToLink,
+        },
+      });
+    }
   }
 
   // If the user already has a Clerk account they don't need an invitation email —
