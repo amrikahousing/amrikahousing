@@ -7,11 +7,17 @@ import { AppShell } from "@/components/AppShell";
 import { ExpenseCategoryPieChart } from "@/components/ExpenseCategoryPieChart";
 import { PlaidLinkButton } from "@/components/PlaidLinkButton";
 import { PlaidRemoveButton } from "@/components/PlaidRemoveButton";
+import { RentCollectionAccountRadio } from "@/components/RentCollectionAccountRadio";
 import { PlaidSyncButton } from "@/components/PlaidSyncButton";
 import {
   getAccountingData,
   sortTransactionsByDate,
 } from "@/lib/accounting";
+import { prisma } from "@/lib/db";
+import {
+  getOrganizationRentCollectionAccount,
+  isEligibleRentCollectionAccount,
+} from "@/lib/organization-payment-destinations";
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("en-US", {
@@ -62,6 +68,28 @@ function formatAxisTick(value: number) {
     notation: value >= 1000 ? "compact" : "standard",
     maximumFractionDigits: value >= 10000 ? 0 : 1,
   }).format(value);
+}
+
+function formatCompactCurrency(value: number) {
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    notation: "compact",
+    maximumFractionDigits: 1,
+  }).format(value);
+}
+
+function initialsForAccount(name: string, provider: string) {
+  const source = name.trim() || provider.trim() || "A";
+  const tokens = source.split(/\s+/).filter(Boolean);
+  if (tokens.length === 1) return tokens[0].slice(0, 1).toUpperCase();
+  return `${tokens[0]?.[0] ?? ""}${tokens[1]?.[0] ?? ""}`.toUpperCase();
+}
+
+function syncStatusLabel(sync: string) {
+  if (sync === "synced") return "Synced just now";
+  if (sync === "sync needed") return "Sync needed";
+  return sync;
 }
 
 function cx(...classes: Array<string | false | null | undefined>) {
@@ -174,15 +202,28 @@ export default async function AccountsPage({
     return date;
   });
 
-  const accountingData = orgId
-    ? await getAccountingData(orgId)
-    : {
-        transactions: [],
-        plaidTransactions: [],
-        rentTransactions: [],
-        manualTransactions: [],
-        accountSummaries: [],
-      };
+  const orgRecord = orgId
+    ? await prisma.organizations.findUnique({
+        where: { clerk_org_id: orgId },
+        select: { id: true },
+      })
+    : null;
+  const [accountingData, rentCollectionAccount] =
+    orgId && orgRecord
+      ? await Promise.all([
+          getAccountingData(orgId),
+          getOrganizationRentCollectionAccount(orgRecord.id),
+        ])
+      : [
+          {
+            transactions: [],
+            plaidTransactions: [],
+            rentTransactions: [],
+            manualTransactions: [],
+            accountSummaries: [],
+          },
+          null,
+        ];
   const transactions = accountingData.transactions;
   const recentTransactions = sortTransactionsByDate(transactions).slice(0, 8);
   const activeTransactions = transactions.filter((transaction) => transaction.date);
@@ -256,6 +297,9 @@ export default async function AccountsPage({
   const xStep = chartWidth / Math.max(1, revenueData.length - 1);
   const chartY = (value: number) =>
     chartPadding + chartInnerHeight - (value / tallestChartValue) * chartInnerHeight;
+  const totalChartRevenue = revenueData.reduce((sum, item) => sum + item.revenue, 0);
+  const totalChartExpenses = revenueData.reduce((sum, item) => sum + item.expenses, 0);
+  const totalChartNet = totalChartRevenue - totalChartExpenses;
   const revenuePoints = revenueData
     .map((item, index) => `${index * xStep},${chartY(item.revenue)}`)
     .join(" ");
@@ -324,6 +368,7 @@ export default async function AccountsPage({
   ];
 
   const connectedAccounts = accountingData.accountSummaries;
+  const activeRentCollectionAccountId = rentCollectionAccount?.selectedConnectedAccountId ?? null;
 
   return (
     <AppShell>
@@ -374,10 +419,23 @@ export default async function AccountsPage({
 
         <section className="grid grid-cols-1 gap-5 xl:grid-cols-2">
           <article className="rounded-lg border border-slate-200 bg-white shadow-sm">
-            <div className="p-5">
-              <h2 className="text-lg font-semibold text-slate-950">
-                Revenue vs Expenses
-              </h2>
+            <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h2 className="text-xl font-semibold tracking-tight text-slate-950 sm:text-2xl">
+                  Revenue vs Expenses
+                </h2>
+                <p className="mt-1 text-xs text-slate-500 sm:text-sm">
+                  Trailing 12 months . all properties
+                </p>
+              </div>
+              <div className="inline-flex h-12 items-center rounded-2xl border border-stone-200 bg-stone-50 p-1 text-xs font-medium text-slate-500 shadow-sm sm:text-sm">
+                <span className="inline-flex h-10 items-center rounded-xl px-4 sm:px-5">3M</span>
+                <span className="inline-flex h-10 items-center rounded-xl px-4 sm:px-5">6M</span>
+                <span className="inline-flex h-10 items-center rounded-xl bg-white px-4 text-slate-950 shadow-sm ring-1 ring-stone-200 sm:px-5">
+                  12M
+                </span>
+                <span className="inline-flex h-10 items-center rounded-xl px-4 sm:px-5">YTD</span>
+              </div>
             </div>
             <div className="h-[310px] px-5 pb-5">
               <div className="grid h-full grid-cols-[44px_1fr] grid-rows-[1fr_24px]">
@@ -510,104 +568,207 @@ export default async function AccountsPage({
                   </svg>
                 </div>
                 <div />
-                <div className="grid grid-cols-6 text-center text-sm text-slate-500">
+                <div className="grid grid-cols-6 text-center text-xs text-slate-500 sm:text-sm">
                   {revenueData.map((item) => (
                     <span key={item.month}>{item.month}</span>
                   ))}
                 </div>
                 <div />
-                <div className="mt-1 flex justify-center gap-4 text-sm">
-                  <span className="text-blue-600">- revenue</span>
-                  <span className="text-red-600">- expenses</span>
-                  <span className="text-slate-500">
-                    peak {formatCurrency(largestActualChartValue)}
+                <div className="mt-1 flex justify-center gap-4 text-xs text-slate-500 sm:text-sm">
+                  <span className="inline-flex items-center gap-2 text-blue-600">
+                    <span className="h-2.5 w-2.5 rounded-sm bg-blue-600" />
+                    revenue
+                  </span>
+                  <span className="inline-flex items-center gap-2 text-red-600">
+                    <span className="h-2.5 w-2.5 rounded-sm bg-red-600" />
+                    expenses
+                  </span>
+                  <span>peak {formatCurrency(largestActualChartValue)}</span>
+                </div>
+              </div>
+            </div>
+            <div className="border-t border-slate-200 px-5 py-4">
+              <div className="flex flex-col gap-3 text-xs sm:flex-row sm:items-center sm:justify-between sm:text-sm">
+                <div className="flex flex-wrap items-center gap-5">
+                  <span className="inline-flex items-center gap-2 text-slate-700">
+                    <span className="h-4 w-4 rounded bg-blue-600" />
+                    Revenue
+                    <span className="font-semibold text-slate-950">
+                      {formatCompactCurrency(totalChartRevenue)}
+                    </span>
+                  </span>
+                  <span className="inline-flex items-center gap-2 text-slate-700">
+                    <span className="h-4 w-4 rounded bg-red-600" />
+                    Expenses
+                    <span className="font-semibold text-slate-950">
+                      {formatCompactCurrency(totalChartExpenses)}
+                    </span>
                   </span>
                 </div>
+                <p className="text-sm text-slate-500 sm:text-base">
+                  Net{" "}
+                  <span
+                    className={cx(
+                      "font-semibold",
+                      totalChartNet >= 0 ? "text-emerald-600" : "text-red-600",
+                    )}
+                  >
+                    {totalChartNet >= 0 ? "+" : ""}
+                    {formatCompactCurrency(totalChartNet)}
+                  </span>
+                </p>
               </div>
             </div>
           </article>
 
           <article className="rounded-lg border border-slate-200 bg-white shadow-sm">
-            <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-5">
-              <div>
-                <h2 className="text-lg font-semibold text-slate-950">
-                  Connected Accounts
-                </h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  Manage your linked bank accounts and credit cards
-                </p>
-                <p className="mt-1 text-xs text-slate-400">
-                  We will keep your past transactions unless you choose to delete them.
-                </p>
+            <div className="flex flex-col gap-4 border-b border-slate-200 p-5 sm:flex-row sm:items-start sm:justify-between">
+              <div className="flex items-start gap-5">
+                <div>
+                  <h2 className="text-lg font-semibold tracking-tight text-slate-950 sm:text-xl">
+                    Connected Accounts
+                  </h2>
+                  <p className="mt-1 max-w-sm text-xs leading-5 text-slate-500">
+                    Linked bank accounts and credit cards used for rent and expenses.
+                  </p>
+                </div>
+                <div className="hidden items-center gap-2 pt-2 text-xs text-slate-500 md:flex">
+                  <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                  <span>Live</span>
+                </div>
               </div>
-              <div className="flex items-start gap-2">
-                <PlaidSyncButton />
-                <PlaidLinkButton />
+              <div className="flex items-center gap-3">
+                <div className="flex items-center gap-2 text-xs text-slate-500 md:hidden">
+                  <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                  <span>Live</span>
+                </div>
+                <div>
+                  <PlaidSyncButton />
+                </div>
+                <div>
+                  <PlaidLinkButton />
+                </div>
               </div>
             </div>
             <div className="p-5">
               {connectedAccounts.length === 0 ? (
                 <div className="flex flex-col items-center gap-3 py-10 text-center">
-                  <div className="flex h-12 w-12 items-center justify-center rounded-full bg-slate-100 text-slate-400">
+                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">
                     <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
                       <rect x="2" y="5" width="20" height="14" rx="2" />
                       <path d="M2 10h20" />
                     </svg>
                   </div>
                   <p className="text-sm font-medium text-slate-700">No accounts linked yet</p>
-                  <p className="text-sm text-slate-500">Connect a bank account to track transactions automatically.</p>
+                  <p className="max-w-sm text-sm text-slate-500">Connect a bank account to track transactions automatically.</p>
                   <PlaidLinkButton />
                 </div>
               ) : (
-                <div className="space-y-3">
-                  {connectedAccounts.map((account) => (
-                    <article
-                      key={account.id}
-                      className="flex items-center gap-4 rounded-lg border border-slate-200 p-4"
-                    >
-                      <div className="flex h-11 w-11 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-slate-100 text-slate-600">
-                        {account.institutionLogoUrl ? (
-                          <Image
-                            src={account.institutionLogoUrl}
-                            alt={`${account.provider} logo`}
-                            width={32}
-                            height={32}
-                            className="h-8 w-8 object-contain"
-                            loading="lazy"
-                            unoptimized
-                          />
-                        ) : (
-                          <Icon name={account.icon} className="h-5 w-5" />
-                        )}
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate font-semibold text-slate-950">
-                          {account.name}
-                        </p>
-                        <p className="text-sm text-slate-500">{account.provider}</p>
-                      </div>
-                      <div className="text-right">
-                        <p className="font-bold text-slate-950">
-                          {account.balance < 0 ? "-" : ""}
-                          {formatCurrency(Math.abs(account.balance))}
-                        </p>
-                        <p className="text-xs text-slate-500">
-                          Last sync: {account.sync}
-                        </p>
-                      </div>
-                      <span
+                <div className="space-y-4">
+                  {connectedAccounts.map((account) => {
+                    const isRentCollectionAccount =
+                      activeRentCollectionAccountId === account.id;
+                    const isRentCollectionEligible = isEligibleRentCollectionAccount({
+                      connectedAccountId: account.id,
+                      name: account.name,
+                      provider: account.provider,
+                    });
+                    const isRentCollectionDisabled =
+                      !isRentCollectionEligible || account.status !== "Connected";
+                    const isConnected = account.status === "Connected";
+                    const accountTone = isConnected
+                      ? isRentCollectionAccount
+                        ? "border-emerald-400 bg-emerald-50/40"
+                        : "border-stone-200 bg-white"
+                      : "border-amber-200 bg-amber-50/40";
+
+                    return (
+                      <article
+                        key={account.id}
                         className={cx(
-                          "whitespace-nowrap text-xs font-medium",
-                          account.status === "Connected" ? "text-emerald-600" : "text-red-600",
+                          "overflow-hidden rounded-[28px] border p-4 shadow-sm transition",
+                          accountTone,
                         )}
                       >
-                        {account.status === "Connected" ? "OK" : "!"} {account.status}
-                      </span>
-                      {account.plaidItemId ? (
-                        <PlaidRemoveButton plaidItemId={account.plaidItemId} />
-                      ) : null}
-                    </article>
-                  ))}
+                        <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+                          <div className="flex min-w-0 items-center gap-4">
+                            <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-slate-900 text-base font-semibold text-white shadow-sm">
+                              {account.institutionLogoUrl ? (
+                                <Image
+                                  src={account.institutionLogoUrl}
+                                  alt={`${account.provider} logo`}
+                                  width={40}
+                                  height={40}
+                                  className="h-8 w-8 object-contain"
+                                  loading="lazy"
+                                  unoptimized
+                                />
+                              ) : (
+                                initialsForAccount(account.name, account.provider)
+                              )}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="truncate text-base font-semibold tracking-tight text-slate-950 sm:text-lg">
+                                {account.name}
+                              </p>
+                              <p className="mt-1 truncate text-sm text-slate-500">
+                                {account.provider}
+                                <span className="mx-2 text-slate-300">•</span>
+                                <span>
+                                  {isRentCollectionEligible
+                                    ? "Checking or savings"
+                                    : "Credit or ineligible"}
+                                </span>
+                              </p>
+                              <div className="mt-3 flex flex-wrap items-center gap-2">
+                                <span
+                                  className={cx(
+                                    "inline-flex items-center rounded-full px-3 py-1 text-xs font-medium",
+                                    isConnected
+                                      ? "bg-emerald-100 text-emerald-700"
+                                      : "bg-amber-100 text-amber-700",
+                                  )}
+                                >
+                                  {isConnected
+                                    ? syncStatusLabel(account.sync)
+                                    : "Reconnect required"}
+                                </span>
+                                {isRentCollectionAccount ? (
+                                  <span className="inline-flex items-center rounded-full bg-emerald-600 px-3 py-1 text-xs font-semibold text-white">
+                                    Rent collection
+                                  </span>
+                                ) : null}
+                              </div>
+                            </div>
+                          </div>
+                          <div className="flex min-w-0 flex-col gap-3 md:items-end">
+                            <p
+                              className={cx(
+                                "max-w-full text-right text-lg font-semibold tracking-tight sm:text-xl",
+                                account.balance >= 0 ? "text-slate-950" : "text-red-600",
+                              )}
+                            >
+                              {account.balance < 0 ? "-" : ""}
+                              {formatCurrency(Math.abs(account.balance))}
+                            </p>
+                            <div className="flex w-full flex-wrap items-center gap-3 md:justify-end">
+                              <RentCollectionAccountRadio
+                                connectedAccountId={account.id}
+                                checked={isRentCollectionAccount}
+                                disabled={isRentCollectionDisabled}
+                              />
+                              {account.plaidItemId ? (
+                                <PlaidRemoveButton plaidItemId={account.plaidItemId} />
+                              ) : null}
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 md:justify-end">
+                              <span>{account.status}</span>
+                            </div>
+                          </div>
+                        </div>
+                      </article>
+                    );
+                  })}
                 </div>
               )}
             </div>

@@ -151,11 +151,11 @@ export function PlaidLinkButton() {
         disabled={isConnecting}
         aria-label="Add bank account with Plaid"
         title="Add bank account with Plaid"
-        className="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-slate-300 bg-white text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+        className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-stone-300 bg-white text-slate-700 shadow-sm hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-60 sm:h-14 sm:w-14"
       >
         {isConnecting ? (
           <svg
-            className="h-4 w-4 animate-spin"
+            className="h-4 w-4 animate-spin sm:h-5 sm:w-5"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"
@@ -169,7 +169,7 @@ export function PlaidLinkButton() {
           </svg>
         ) : (
           <svg
-            className="h-4 w-4"
+            className="h-4 w-4 sm:h-5 sm:w-5"
             viewBox="0 0 24 24"
             fill="none"
             stroke="currentColor"

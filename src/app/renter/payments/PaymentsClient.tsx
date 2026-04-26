@@ -18,7 +18,8 @@ type PaymentRow = {
 
 type SavedPaymentMethod = {
   id: string;
-  stripePaymentMethodId: string;
+  paymentProvider: "stripe" | "plaid";
+  stripePaymentMethodId: string | null;
   paymentType: "card" | "us_bank_account";
   brand: string | null;
   bankName: string | null;
@@ -27,6 +28,7 @@ type SavedPaymentMethod = {
   expMonth: number | null;
   expYear: number | null;
   billingName: string | null;
+  plaidLinkSessionId: string | null;
   isDefault: boolean;
   isActive: boolean;
 };
@@ -40,6 +42,7 @@ type Props = {
   nextDueDate: string | null;
   paymentMethod: string | null;
   payments: PaymentRow[];
+  plaidConfigured: boolean;
   savedPaymentMethods: SavedPaymentMethod[];
   stripeConfigured: boolean;
   totalPaid: number;
@@ -49,12 +52,75 @@ type PaymentTab = "overview" | "pay" | "methods";
 type FeedbackTone = "error" | "success";
 type FeedbackScope = "pay" | "methods";
 type SetupMode = "card" | "bank" | null;
-type BankAccountChoice = "checking" | "savings";
-type AchEntryMode = "link" | "manual";
 
 const stripePromise = process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY
   ? loadStripe(process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY)
   : null;
+
+type PlaidInstitution = {
+  institution_id?: string | null;
+  name?: string | null;
+};
+
+type PlaidAccount = {
+  id?: string | null;
+  name?: string | null;
+  mask?: string | null;
+  subtype?: string | null;
+  type?: string | null;
+};
+
+type PlaidSuccessMetadata = {
+  institution?: PlaidInstitution | null;
+  accounts?: PlaidAccount[] | null;
+  link_session_id?: string | null;
+};
+
+type PlaidHandler = {
+  open: () => void;
+  destroy: () => void;
+};
+
+type PlaidFactory = {
+  create: (options: {
+    token: string;
+    onSuccess: (publicToken: string, metadata: PlaidSuccessMetadata) => void;
+    onExit?: (error: unknown) => void;
+  }) => PlaidHandler;
+};
+
+let plaidScriptPromise: Promise<void> | null = null;
+
+function plaidWindow() {
+  return window as Window & { Plaid?: PlaidFactory };
+}
+
+function loadPlaidScript() {
+  if (typeof window === "undefined") return Promise.resolve();
+  if (plaidWindow().Plaid) return Promise.resolve();
+  if (plaidScriptPromise) return plaidScriptPromise;
+
+  plaidScriptPromise = new Promise((resolve, reject) => {
+    const existing = document.querySelector<HTMLScriptElement>(
+      'script[src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"]',
+    );
+
+    if (existing) {
+      existing.addEventListener("load", () => resolve(), { once: true });
+      existing.addEventListener("error", () => reject(new Error("Plaid Link failed to load.")), { once: true });
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = "https://cdn.plaid.com/link/v2/stable/link-initialize.js";
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Plaid Link failed to load."));
+    document.body.appendChild(script);
+  });
+
+  return plaidScriptPromise;
+}
 
 const paymentTypeLabels: Record<string, string> = {
   rent: "Rent",
@@ -142,38 +208,6 @@ function PaymentTypeIcon({ type }: { type: "card" | "bank" }) {
       <rect x="3" y="5" width="18" height="14" rx="2" />
       <path d="M3 10h18" />
     </svg>
-  );
-}
-
-function validateBankBillingFields(args: {
-  billingName: string;
-  bankEmail: string;
-  bankAddressLine1: string;
-  bankCity: string;
-  bankState: string;
-  bankPostalCode: string;
-  achEntryMode: AchEntryMode;
-}) {
-  if (args.achEntryMode === "link") {
-    return null;
-  }
-
-  if (!args.billingName.trim()) return "Account holder name is required.";
-  if (!args.bankEmail.trim()) return "Email is required to save a bank account.";
-  if (!args.bankAddressLine1.trim() || !args.bankCity.trim() || !args.bankState.trim() || !args.bankPostalCode.trim()) {
-    return "Address, city, state, and ZIP code are required for bank verification.";
-  }
-
-  return null;
-}
-
-function isDismissedBankLinkError(message: string) {
-  const normalized = message.toLowerCase();
-
-  return (
-    normalized.includes("payment method of type us_bank_account was expected to be present") ||
-    normalized.includes("does not have a payment method") ||
-    normalized.includes("none was provided")
   );
 }
 
@@ -333,6 +367,7 @@ export function PaymentsClient({
   nextDueDate,
   paymentMethod,
   payments,
+  plaidConfigured,
   savedPaymentMethods,
   stripeConfigured,
   totalPaid,
@@ -345,19 +380,10 @@ export function PaymentsClient({
   );
   const [selectedChargeId, setSelectedChargeId] = useState<string | null>(null);
   const [setupClientSecret, setSetupClientSecret] = useState<string | null>(null);
-  const [setupMode, setSetupMode] = useState<SetupMode>(null);
+  const [setupMode, setSetupMode] = useState<Exclude<SetupMode, "bank"> | null>(null);
   const [billingName, setBillingName] = useState(defaultBillingName);
-  const [bankEmail, setBankEmail] = useState(customerEmail ?? "");
-  const [bankAddressLine1, setBankAddressLine1] = useState("");
-  const [bankCity, setBankCity] = useState("");
-  const [bankState, setBankState] = useState("");
-  const [bankPostalCode, setBankPostalCode] = useState("");
-  const [achEntryMode, setAchEntryMode] = useState<AchEntryMode>("link");
-  const [manualRoutingNumber, setManualRoutingNumber] = useState("");
-  const [manualAccountNumber, setManualAccountNumber] = useState("");
-  const [bankAccountChoice, setBankAccountChoice] = useState<BankAccountChoice>("checking");
   const [isLoadingSetupIntent, setIsLoadingSetupIntent] = useState(false);
-  const [isSavingBankAccount, setIsSavingBankAccount] = useState(false);
+  const [isLinkingPlaidBank, setIsLinkingPlaidBank] = useState(false);
   const [isPaying, setIsPaying] = useState(false);
   const [isSavingDefault, setIsSavingDefault] = useState<string | null>(null);
   const [isRemovingMethod, setIsRemovingMethod] = useState<string | null>(null);
@@ -391,6 +417,12 @@ export function PaymentsClient({
 
   const selectedCharge =
     pendingPayments.find((payment) => payment.id === selectedChargeId) ?? pendingPayments[0] ?? null;
+  const cardMethods = savedPaymentMethods.filter(
+    (method) => method.paymentProvider === "stripe" && method.paymentType === "card",
+  );
+  const achMethods = savedPaymentMethods.filter(
+    (method) => method.paymentType === "us_bank_account",
+  );
 
   useEffect(() => {
     setAutopayEnabled(initialAutopayEnabled);
@@ -401,12 +433,15 @@ export function PaymentsClient({
   }, [defaultBillingName]);
 
   useEffect(() => {
-    setBankEmail(customerEmail ?? "");
-  }, [customerEmail]);
-
-  useEffect(() => {
     setSelectedMethodId(defaultPaymentMethodId ?? savedPaymentMethods[0]?.id ?? null);
   }, [defaultPaymentMethodId, savedPaymentMethods]);
+
+  useEffect(() => {
+    if (!plaidConfigured) return;
+    void loadPlaidScript().catch(() => {
+      setScopedFeedback("methods", "error", "Plaid Link could not be loaded.");
+    });
+  }, [plaidConfigured]);
 
   useEffect(() => {
     setSelectedChargeId((current) => {
@@ -440,7 +475,7 @@ export function PaymentsClient({
     setFeedback({ scope, tone, message });
   }
 
-  async function beginAddPaymentMethod(mode: Exclude<SetupMode, null>) {
+  async function beginAddPaymentMethod(mode: "card") {
     clearFeedback("methods");
 
     if (!stripeConfigured) {
@@ -455,7 +490,7 @@ export function PaymentsClient({
     const response = await fetch("/api/renter/payments/setup-intent", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ paymentMethodType: mode === "bank" ? "us_bank_account" : "card" }),
+      body: JSON.stringify({ paymentMethodType: "card" }),
     });
     const payload = (await response.json().catch(() => null)) as
       | { clientSecret?: string; error?: string }
@@ -471,160 +506,101 @@ export function PaymentsClient({
     setSetupClientSecret(payload.clientSecret);
   }
 
-  async function completeBankSetup(setupIntentId: string, successMessage: string) {
-    const completeResponse = await fetch("/api/renter/payments/setup-intent/complete", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ setupIntentId }),
-    });
-    const completePayload = (await completeResponse.json().catch(() => null)) as { error?: string } | null;
-
-    if (!completeResponse.ok) {
-      throw new Error(completePayload?.error ?? "Unable to save this bank account.");
-    }
-
-    setScopedFeedback("methods", "success", successMessage);
-    router.refresh();
-  }
-
-  async function handleAddBankAccount(entryMode: AchEntryMode = achEntryMode) {
+  async function handleConnectPlaidBankAccount() {
     clearFeedback("methods");
 
-    if (!stripeConfigured) {
-      setScopedFeedback("methods", "error", "Stripe is not configured yet for this environment.");
+    if (!plaidConfigured) {
+      setScopedFeedback("methods", "error", "Plaid is not configured yet for this environment.");
       return;
     }
 
-    const billingError = validateBankBillingFields({
-      billingName,
-      bankEmail,
-      bankAddressLine1,
-      bankCity,
-      bankState,
-      bankPostalCode,
-      achEntryMode: entryMode,
-    });
-    if (billingError) {
-      setScopedFeedback("methods", "error", billingError);
-      return;
-    }
-
-    const stripe = await stripePromise;
-    if (!stripe) {
-      setScopedFeedback("methods", "error", "Stripe could not be loaded in the browser.");
-      return;
-    }
-
-    setIsSavingBankAccount(true);
+    setIsLinkingPlaidBank(true);
 
     try {
-      const response = await fetch("/api/renter/payments/setup-intent", {
+      await loadPlaidScript();
+      if (!plaidWindow().Plaid) {
+        throw new Error("Plaid Link is unavailable.");
+      }
+
+      const tokenResponse = await fetch("/api/renter/payments/plaid/link-token", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ paymentMethodType: "us_bank_account" }),
       });
-      const payload = (await response.json().catch(() => null)) as
-        | { clientSecret?: string; error?: string }
+      const tokenPayload = (await tokenResponse.json().catch(() => null)) as
+        | { linkToken?: string; error?: string }
         | null;
 
-      if (!response.ok || !payload?.clientSecret) {
-        throw new Error(payload?.error ?? "Unable to prepare bank account setup.");
+      if (!tokenResponse.ok || !tokenPayload?.linkToken) {
+        throw new Error(tokenPayload?.error ?? "Unable to prepare Plaid Link.");
       }
+      const linkToken = tokenPayload.linkToken;
 
-      if (entryMode === "link") {
-        const collectResult = await stripe.collectBankAccountForSetup({
-          clientSecret: payload.clientSecret,
-          params: {
-            payment_method_type: "us_bank_account",
-            payment_method_data: {
-              billing_details: {
-                name: billingName.trim(),
-                email: bankEmail.trim(),
-                address: {
-                  line1: bankAddressLine1.trim(),
-                  city: bankCity.trim(),
-                  state: bankState.trim(),
-                  postal_code: bankPostalCode.trim(),
-                  country: "US",
-                },
-              },
+      const linkedMethod = await new Promise<{ bankName?: string | null; last4?: string | null }>(
+        (resolve, reject) => {
+          const handler = plaidWindow().Plaid?.create({
+            token: linkToken,
+            onSuccess: async (publicToken, metadata) => {
+              try {
+                const response = await fetch("/api/renter/payments/plaid/exchange", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ publicToken, metadata }),
+                });
+                const payload = (await response.json().catch(() => null)) as
+                  | {
+                    paymentMethod?: { bankName?: string | null; last4?: string | null };
+                    error?: string;
+                  }
+                  | null;
+
+                if (!response.ok || !payload?.paymentMethod) {
+                  reject(new Error(payload?.error ?? "Unable to save the Plaid bank account."));
+                  return;
+                }
+
+                resolve(payload.paymentMethod);
+              } catch (error) {
+                reject(error);
+              } finally {
+                handler?.destroy();
+              }
             },
-          },
-        });
-
-        if (collectResult.error) {
-          throw new Error(collectResult.error.message ?? "Unable to collect bank account details.");
-        }
-
-        const confirmResult = await stripe.confirmUsBankAccountSetup(payload.clientSecret);
-        if (confirmResult.error) {
-          if (isDismissedBankLinkError(confirmResult.error.message ?? "")) {
-            return;
-          }
-
-          throw new Error(confirmResult.error.message ?? "Unable to save this bank account.");
-        }
-
-        if (!confirmResult.setupIntent?.id) {
-          throw new Error("Stripe did not return a completed bank account setup.");
-        }
-
-        await completeBankSetup(confirmResult.setupIntent.id, "Bank account linked successfully.");
-      } else {
-        if (!manualRoutingNumber.trim() || !manualAccountNumber.trim()) {
-          throw new Error("Routing number and account number are required for manual bank entry.");
-        }
-
-        const confirmResult = await stripe.confirmUsBankAccountSetup(payload.clientSecret, {
-          payment_method: {
-            billing_details: {
-              name: billingName.trim(),
-              email: bankEmail.trim(),
-              address: {
-                line1: bankAddressLine1.trim(),
-                city: bankCity.trim(),
-                state: bankState.trim(),
-                postal_code: bankPostalCode.trim(),
-                country: "US",
-              },
+            onExit: (plaidError) => {
+              handler?.destroy();
+              reject(
+                new Error(
+                  plaidError
+                    ? "Plaid Link was closed before the bank account was connected."
+                    : "Plaid Link was closed before the bank account was connected.",
+                ),
+              );
             },
-            us_bank_account: {
-              routing_number: manualRoutingNumber.trim(),
-              account_number: manualAccountNumber.trim(),
-              account_holder_type: "individual",
-              account_type: bankAccountChoice,
-            },
-          },
-        });
+          });
 
-        if (confirmResult.error) {
-          throw new Error(confirmResult.error.message ?? "Unable to save this bank account.");
-        }
+          handler?.open();
+        },
+      );
 
-        if (!confirmResult.setupIntent?.id) {
-          throw new Error("Stripe did not return a completed manual bank setup.");
-        }
-
-        await completeBankSetup(confirmResult.setupIntent.id, "Bank account added successfully.");
-      }
+      setScopedFeedback(
+        "methods",
+        "success",
+        linkedMethod.bankName
+          ? `${linkedMethod.bankName} ending in ${linkedMethod.last4 ?? "—"} linked for ACH rent payments.`
+          : "Bank account linked for ACH rent payments.",
+      );
+      router.refresh();
     } catch (error) {
       setScopedFeedback(
         "methods",
         "error",
-        error instanceof Error ? error.message : "Unable to save this bank account.",
+        error instanceof Error ? error.message : "Unable to link the Plaid bank account.",
       );
     } finally {
-      setIsSavingBankAccount(false);
+      setIsLinkingPlaidBank(false);
     }
   }
 
   async function handlePayNow() {
     clearFeedback("pay");
-
-    if (!stripeConfigured) {
-      setScopedFeedback("pay", "error", "Stripe is not configured yet for this environment.");
-      return;
-    }
 
     if (!selectedCharge) {
       setScopedFeedback("pay", "error", "Choose an outstanding charge before paying.");
@@ -633,6 +609,78 @@ export function PaymentsClient({
 
     if (!selectedMethod) {
       setScopedFeedback("pay", "error", "Add a saved payment method before paying online.");
+      return;
+    }
+
+    if (selectedMethod.paymentProvider === "plaid") {
+      if (!plaidConfigured) {
+        setScopedFeedback("pay", "error", "Plaid ACH is not configured yet for this environment.");
+        return;
+      }
+
+      setIsPaying(true);
+
+      const authorizeResponse = await fetch("/api/renter/payments/plaid/authorize", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          paymentId: selectedCharge.id,
+          paymentMethodId: selectedMethod.id,
+          amount: selectedCharge.amount.toFixed(2),
+        }),
+      });
+      const authorizePayload = (await authorizeResponse.json().catch(() => null)) as
+        | { status?: string; error?: string; failure_message?: string | null }
+        | null;
+
+      if (!authorizeResponse.ok) {
+        setScopedFeedback("pay", "error", authorizePayload?.error ?? "Unable to authorize the ACH debit.");
+        setIsPaying(false);
+        return;
+      }
+
+      if (authorizePayload?.status === "failed") {
+        setScopedFeedback(
+          "pay",
+          "error",
+          authorizePayload.failure_message ?? "The ACH authorization was declined.",
+        );
+        setIsPaying(false);
+        router.refresh();
+        return;
+      }
+
+      const transferResponse = await fetch("/api/renter/payments/plaid/transfer", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          paymentId: selectedCharge.id,
+          paymentMethodId: selectedMethod.id,
+          amount: selectedCharge.amount.toFixed(2),
+        }),
+      });
+      const transferPayload = (await transferResponse.json().catch(() => null)) as
+        | { status?: string; error?: string }
+        | null;
+
+      if (!transferResponse.ok) {
+        setScopedFeedback("pay", "error", transferPayload?.error ?? "Unable to submit the ACH payment.");
+        setIsPaying(false);
+        return;
+      }
+
+      setScopedFeedback(
+        "pay",
+        "success",
+        "ACH payment submitted. Your rent ledger will update after Plaid confirms the transfer.",
+      );
+      setIsPaying(false);
+      router.refresh();
+      return;
+    }
+
+    if (!stripeConfigured) {
+      setScopedFeedback("pay", "error", "Stripe is not configured yet for this environment.");
       return;
     }
 
@@ -696,7 +744,7 @@ export function PaymentsClient({
     }
 
     const result = await stripe.confirmCardPayment(payload.clientSecret, {
-      payment_method: selectedMethod.stripePaymentMethodId,
+      payment_method: selectedMethod.stripePaymentMethodId ?? undefined,
     });
 
     if (result.error) {
@@ -808,7 +856,7 @@ export function PaymentsClient({
           <p className="text-sm font-medium text-slate-500">Default Method</p>
           <p className="mt-3 text-3xl font-bold text-slate-900">{paymentMethod ?? "No method"}</p>
           <p className="mt-1 text-sm text-slate-500">
-            {savedPaymentMethods.length > 0 ? "Saved securely through Stripe." : "Add a payment method to pay online."}
+            {savedPaymentMethods.length > 0 ? "Use Plaid for ACH or Stripe for cards." : "Add a payment method to pay online."}
           </p>
         </article>
       </section>
@@ -964,41 +1012,97 @@ export function PaymentsClient({
           </article>
 
           <article className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-            <h2 className="font-semibold text-slate-900">Saved Payment Method</h2>
-            <p className="mt-1 text-sm text-slate-500">Use one of your securely stored payment methods.</p>
-            <div className="mt-5 space-y-3">
-              {savedPaymentMethods.length === 0 ? (
-                <p className="text-sm text-slate-500">
-                  Add a saved payment method in the Payment Methods tab before paying online.
-                </p>
-              ) : (
-                savedPaymentMethods.map((method) => {
-                  const isSelected = selectedMethod?.id === method.id;
-                  return (
-                    <button
-                      key={method.id}
-                      type="button"
-                      onClick={() => setSelectedMethodId(method.id)}
-                      className={[
-                        "flex w-full items-center justify-between rounded-xl border px-4 py-4 text-left transition-colors",
-                        isSelected ? "border-emerald-300 bg-emerald-50" : "border-slate-200 hover:bg-slate-50",
-                      ].join(" ")}
-                    >
-                      <div>
-                        <p className="font-medium text-slate-900">
-                          {formatMethodLabel(method)}
-                        </p>
-                        <p className="text-sm text-slate-500">{formatMethodMeta(method)}</p>
-                      </div>
-                      {method.isDefault ? (
-                        <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-medium text-emerald-700">
-                          Default
-                        </span>
-                      ) : null}
-                    </button>
-                  );
-                })
-              )}
+            <h2 className="font-semibold text-slate-900">Choose How To Pay</h2>
+            <p className="mt-1 text-sm text-slate-500">ACH bank payments run through Plaid Transfer. Cards stay on Stripe.</p>
+
+            <div className="mt-5 space-y-6">
+              <div>
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <h3 className="font-medium text-slate-900">Pay by bank (ACH via Plaid Transfer)</h3>
+                    <p className="mt-1 text-sm text-slate-500">Manual one-time ACH debits from your linked bank account.</p>
+                  </div>
+                </div>
+                <div className="mt-3 space-y-3">
+                  {achMethods.length === 0 ? (
+                    <p className="rounded-xl border border-dashed border-slate-200 px-4 py-4 text-sm text-slate-500">
+                      Link a bank account in the Payment Methods tab to pay rent by ACH.
+                    </p>
+                  ) : (
+                    achMethods.map((method) => {
+                      const isSelected = selectedMethod?.id === method.id;
+                      return (
+                        <button
+                          key={method.id}
+                          type="button"
+                          onClick={() => setSelectedMethodId(method.id)}
+                          className={[
+                            "flex w-full items-center justify-between rounded-xl border px-4 py-4 text-left transition-colors",
+                            isSelected ? "border-emerald-300 bg-emerald-50" : "border-slate-200 hover:bg-slate-50",
+                          ].join(" ")}
+                        >
+                          <div>
+                            <p className="font-medium text-slate-900">{formatMethodLabel(method)}</p>
+                            <p className="text-sm text-slate-500">One-time ACH debit via Plaid Transfer</p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {method.isDefault ? (
+                              <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-medium text-emerald-700">
+                                Default
+                              </span>
+                            ) : null}
+                            <span className="rounded-full bg-sky-100 px-2.5 py-0.5 text-xs font-medium text-sky-700">
+                              ACH
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
+
+              <div>
+                <h3 className="font-medium text-slate-900">Pay by card</h3>
+                <p className="mt-1 text-sm text-slate-500">Use a saved card processed through Stripe.</p>
+                <div className="mt-3 space-y-3">
+                  {cardMethods.length === 0 ? (
+                    <p className="rounded-xl border border-dashed border-slate-200 px-4 py-4 text-sm text-slate-500">
+                      Add a card in the Payment Methods tab to pay by card.
+                    </p>
+                  ) : (
+                    cardMethods.map((method) => {
+                      const isSelected = selectedMethod?.id === method.id;
+                      return (
+                        <button
+                          key={method.id}
+                          type="button"
+                          onClick={() => setSelectedMethodId(method.id)}
+                          className={[
+                            "flex w-full items-center justify-between rounded-xl border px-4 py-4 text-left transition-colors",
+                            isSelected ? "border-emerald-300 bg-emerald-50" : "border-slate-200 hover:bg-slate-50",
+                          ].join(" ")}
+                        >
+                          <div>
+                            <p className="font-medium text-slate-900">{formatMethodLabel(method)}</p>
+                            <p className="text-sm text-slate-500">{formatMethodMeta(method)}</p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            {method.isDefault ? (
+                              <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-medium text-emerald-700">
+                                Default
+                              </span>
+                            ) : null}
+                            <span className="rounded-full bg-violet-100 px-2.5 py-0.5 text-xs font-medium text-violet-700">
+                              Card
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    })
+                  )}
+                </div>
+              </div>
             </div>
 
             <div className="mt-6 rounded-xl bg-slate-50 p-4">
@@ -1008,16 +1112,27 @@ export function PaymentsClient({
               </p>
             </div>
 
+            {selectedMethod?.paymentProvider === "plaid" ? (
+              <div className="mt-4 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
+                Submitting this payment authorizes a one-time ACH debit for the selected rent charge.
+              </div>
+            ) : null}
+
             <button
               type="button"
               onClick={handlePayNow}
-              disabled={isPaying || !selectedCharge || !selectedMethod || !stripeConfigured}
+              disabled={
+                isPaying ||
+                !selectedCharge ||
+                !selectedMethod ||
+                (selectedMethod.paymentProvider === "plaid" ? !plaidConfigured : !stripeConfigured)
+              }
               className="mt-5 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
             >
               {isPaying
                 ? "Processing..."
                 : selectedCharge
-                  ? `Pay ${formatCurrency(selectedCharge.amount)}`
+                  ? `Pay ${formatCurrency(selectedCharge.amount)}${selectedMethod?.paymentProvider === "plaid" ? " by ACH" : ""}`
                   : "Choose a charge"}
             </button>
             {feedback?.scope === "pay" ? (
@@ -1036,10 +1151,10 @@ export function PaymentsClient({
               <div>
                 <h2 className="font-semibold text-slate-900">Payment Methods</h2>
                 <p className="mt-1 text-sm text-slate-500">
-                  Cards and bank accounts are collected and tokenized by Stripe. Raw payment details never touch this app.
+                  Cards are saved through Stripe. ACH bank accounts are linked through Plaid Transfer for one-time rent payments.
                 </p>
                 <p className="mt-3 text-sm text-slate-500">
-                  Add a new card or connect a bank account with the fewest possible steps.
+                  Add a card for card payments or link a bank account for ACH.
                 </p>
               </div>
               <div className="flex flex-wrap gap-3">
@@ -1058,26 +1173,20 @@ export function PaymentsClient({
                 </button>
                 <button
                   type="button"
-                  onClick={() => {
-                    clearFeedback("methods");
-                    setSetupClientSecret(null);
-                    setSetupMode("bank");
-                  }}
-                  disabled={!stripeConfigured}
+                  onClick={() => void handleConnectPlaidBankAccount()}
+                  disabled={isLinkingPlaidBank || !plaidConfigured}
                   className={[
                     "rounded-lg px-4 py-2.5 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:bg-slate-100",
-                    setupMode === "bank"
-                      ? "bg-emerald-600 text-white hover:bg-emerald-700"
-                      : "border border-slate-300 bg-white text-slate-700 hover:bg-slate-100",
+                    "border border-slate-300 bg-white text-slate-700 hover:bg-slate-100",
                   ].join(" ")}
                 >
-                  Add New Bank Account
+                  {isLinkingPlaidBank ? "Opening Plaid..." : "Link Bank Account"}
                 </button>
               </div>
             </div>
-            {!setupClientSecret && setupMode !== "bank" ? (
+            {!setupClientSecret ? (
               <p className="mt-4 text-sm text-slate-500">
-                `Add New Credit Card` opens the secure Stripe card form below. `Add New Bank Account` starts the ACH setup flow.
+                `Add New Credit Card` opens the secure Stripe card form below. `Link Bank Account` starts the Plaid ACH flow.
               </p>
             ) : null}
 
@@ -1087,182 +1196,15 @@ export function PaymentsClient({
               </div>
             ) : null}
 
-            {feedback?.scope === "methods" ? (
-              <div className="mt-5">
-                <FeedbackMessage message={feedback.message} tone={feedback.tone} />
+            {!plaidConfigured ? (
+              <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                Add `PLAID_CLIENT_ID`, `PLAID_SECRET`, and `PLAID_ENV` to enable ACH rent payments.
               </div>
             ) : null}
 
-            {setupMode === "bank" ? (
-              <div ref={addMethodPanelRef} className="mt-6 rounded-3xl border border-slate-200 bg-white p-6 shadow-sm">
-                <div className="mb-6">
-                  <h3 className="text-sm font-semibold text-slate-900">Add Bank Account</h3>
-                  <p className="mt-1 text-sm text-slate-600">Link instantly with Stripe or enter routing details manually.</p>
-                </div>
-
-                <div className="space-y-5">
-                  <div>
-                    <p className="text-sm font-semibold text-slate-900">Choose how you want to continue.</p>
-                    <div className="mt-3 grid gap-3 md:grid-cols-2">
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setAchEntryMode("link");
-                          void handleAddBankAccount("link");
-                        }}
-                        disabled={isSavingBankAccount || !stripeConfigured}
-                        className="flex items-center justify-center gap-3 rounded-2xl bg-emerald-500 px-6 py-5 text-left text-lg font-semibold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:bg-slate-300"
-                      >
-                        <PaymentTypeIcon type="bank" />
-                        <span>{isSavingBankAccount && achEntryMode === "link" ? "Opening Stripe..." : "Link Bank Account"}</span>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          clearFeedback("methods");
-                          setAchEntryMode("manual");
-                        }}
-                        className={[
-                          "flex items-center justify-center gap-3 rounded-2xl border px-6 py-5 text-left text-lg font-semibold transition",
-                          achEntryMode === "manual"
-                            ? "border-emerald-300 bg-emerald-50 text-emerald-700"
-                            : "border-slate-200 bg-slate-50 text-slate-900 hover:bg-slate-100",
-                        ].join(" ")}
-                      >
-                        <PaymentTypeIcon type="bank" />
-                        <span>Add Manually</span>
-                      </button>
-                    </div>
-                  </div>
-
-                  {achEntryMode === "manual" ? (
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <label className="space-y-1">
-                        <span className="block text-xs font-semibold text-slate-600">Routing Number</span>
-                        <input
-                          type="text"
-                          value={manualRoutingNumber}
-                          onChange={(event) => setManualRoutingNumber(event.target.value)}
-                          placeholder="110000000"
-                          className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
-                        />
-                      </label>
-                      <label className="space-y-1">
-                        <span className="block text-xs font-semibold text-slate-600">Account Number</span>
-                        <input
-                          type="text"
-                          value={manualAccountNumber}
-                          onChange={(event) => setManualAccountNumber(event.target.value)}
-                          placeholder="000123456789"
-                          className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
-                        />
-                      </label>
-                      <div className="space-y-1 md:col-span-2">
-                        <span className="block text-xs font-semibold text-slate-600">Account Type</span>
-                        <div className="flex gap-2">
-                          {(["checking", "savings"] as const).map((option) => (
-                            <button
-                              key={option}
-                              type="button"
-                              onClick={() => setBankAccountChoice(option)}
-                              className={[
-                                "flex-1 rounded-xl border py-2.5 text-sm font-semibold transition",
-                                bankAccountChoice === option
-                                  ? "border-emerald-300 bg-emerald-50 text-emerald-700"
-                                  : "border-slate-200 bg-white text-slate-600 hover:bg-slate-50",
-                              ].join(" ")}
-                            >
-                              {option === "checking" ? "Checking" : "Savings"}
-                            </button>
-                          ))}
-                        </div>
-                      </div>
-                      <label className="space-y-1 md:col-span-2">
-                        <span className="block text-xs font-semibold text-slate-600">Account Holder Name</span>
-                        <input
-                          type="text"
-                          value={billingName}
-                          onChange={(event) => setBillingName(event.target.value)}
-                          placeholder="John Doe"
-                          className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
-                        />
-                      </label>
-                      <label className="space-y-1 md:col-span-2">
-                        <span className="block text-xs font-semibold text-slate-600">Email</span>
-                        <input
-                          type="email"
-                          value={bankEmail}
-                          onChange={(event) => setBankEmail(event.target.value)}
-                          placeholder="you@example.com"
-                          className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
-                        />
-                      </label>
-                      <label className="space-y-1 md:col-span-2">
-                        <span className="block text-xs font-semibold text-slate-600">Street Address</span>
-                        <input
-                          type="text"
-                          value={bankAddressLine1}
-                          onChange={(event) => setBankAddressLine1(event.target.value)}
-                          placeholder="123 Main St"
-                          className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
-                        />
-                      </label>
-                      <label className="space-y-1">
-                        <span className="block text-xs font-semibold text-slate-600">City</span>
-                        <input
-                          type="text"
-                          value={bankCity}
-                          onChange={(event) => setBankCity(event.target.value)}
-                          placeholder="New York"
-                          className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
-                        />
-                      </label>
-                      <div className="flex gap-2">
-                        <label className="w-20 shrink-0 space-y-1">
-                          <span className="block text-xs font-semibold text-slate-600">State</span>
-                          <input
-                            type="text"
-                            value={bankState}
-                            onChange={(event) => setBankState(event.target.value)}
-                            placeholder="NY"
-                            maxLength={2}
-                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm uppercase text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
-                          />
-                        </label>
-                        <label className="min-w-0 flex-1 space-y-1">
-                          <span className="block text-xs font-semibold text-slate-600">ZIP</span>
-                          <input
-                            type="text"
-                            value={bankPostalCode}
-                            onChange={(event) => setBankPostalCode(event.target.value)}
-                            placeholder="10001"
-                            className="h-11 w-full rounded-xl border border-slate-200 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
-                          />
-                        </label>
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-
-                <div className="mt-6 flex flex-wrap gap-3">
-                  {achEntryMode === "manual" ? (
-                    <button
-                      type="button"
-                      onClick={() => void handleAddBankAccount("manual")}
-                      disabled={isSavingBankAccount || !stripeConfigured}
-                      className="flex-1 rounded-2xl bg-emerald-500 px-6 py-5 text-lg font-semibold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:bg-slate-300"
-                    >
-                      {isSavingBankAccount ? "Saving Bank Account..." : "Save Bank Account"}
-                    </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    onClick={() => setSetupMode(null)}
-                    className="rounded-2xl border border-slate-300 px-6 py-5 text-lg font-medium text-slate-700 transition hover:bg-slate-100"
-                  >
-                    Cancel
-                  </button>
-                </div>
+            {feedback?.scope === "methods" ? (
+              <div className="mt-5">
+                <FeedbackMessage message={feedback.message} tone={feedback.tone} />
               </div>
             ) : null}
 
@@ -1321,9 +1263,23 @@ export function PaymentsClient({
                       <p className="font-medium text-slate-900">
                         {formatMethodLabel(method)}
                       </p>
-                      <p className="text-sm text-slate-500">{formatMethodMeta(method)}</p>
+                      <p className="text-sm text-slate-500">
+                        {method.paymentProvider === "plaid"
+                          ? "Plaid Transfer ACH"
+                          : formatMethodMeta(method)}
+                      </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
+                      <span
+                        className={[
+                          "inline-flex items-center rounded-full px-3 py-1 text-xs font-medium",
+                          method.paymentProvider === "plaid"
+                            ? "bg-sky-100 text-sky-700"
+                            : "bg-violet-100 text-violet-700",
+                        ].join(" ")}
+                      >
+                        {method.paymentProvider === "plaid" ? "Plaid ACH" : "Stripe"}
+                      </span>
                       {method.isDefault ? (
                         <span className="inline-flex items-center rounded-full bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-700">
                           Default
@@ -1362,7 +1318,12 @@ export function PaymentsClient({
               <button
                 type="button"
                 onClick={() => handleAutopayChange(!autopayEnabled)}
-                disabled={isUpdatingAutopay}
+                disabled={
+                  isUpdatingAutopay ||
+                  !selectedMethod ||
+                  selectedMethod.paymentProvider !== "stripe" ||
+                  selectedMethod.paymentType !== "card"
+                }
                 className={[
                   "relative mt-1 inline-flex h-8 w-14 items-center rounded-full transition-colors",
                   autopayEnabled ? "bg-emerald-500" : "bg-slate-300",
@@ -1383,7 +1344,9 @@ export function PaymentsClient({
                 <p className="font-medium text-slate-900">Enable Auto-Pay</p>
                 <p className="mt-1 text-sm text-slate-500">
                   {selectedMethod
-                    ? `Future charges can use ${formatMethodLabel(selectedMethod)}.`
+                    ? selectedMethod.paymentProvider === "stripe" && selectedMethod.paymentType === "card"
+                      ? `Future charges can use ${formatMethodLabel(selectedMethod)}.`
+                      : "Auto-pay is available only for saved card payments in this version."
                     : "Select a default saved payment method before enabling auto-pay."}
                 </p>
               </div>

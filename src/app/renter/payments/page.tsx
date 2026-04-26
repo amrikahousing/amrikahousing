@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { RenterShell } from "@/components/RenterShell";
 import { getPortalAccessState } from "@/lib/portal-access";
+import { getPlaidConfig } from "@/lib/plaid";
 import { resolveSharedUserIdentity } from "@/lib/renter-auth";
 import { getTenantPaymentProfile } from "@/lib/renter-payments";
 import { isStripeConfigured } from "@/lib/stripe";
@@ -10,7 +11,8 @@ import { PaymentsClient } from "./PaymentsClient";
 
 type SavedPaymentMethodView = {
   id: string;
-  stripePaymentMethodId: string;
+  paymentProvider: "stripe" | "plaid";
+  stripePaymentMethodId: string | null;
   paymentType: "card" | "us_bank_account";
   brand: string | null;
   bankName: string | null;
@@ -19,6 +21,7 @@ type SavedPaymentMethodView = {
   expMonth: number | null;
   expYear: number | null;
   billingName: string | null;
+  plaidLinkSessionId: string | null;
   isDefault: boolean;
   isActive: boolean;
 };
@@ -109,8 +112,10 @@ export default async function RenterPaymentsPage() {
   const savedPaymentMethods: SavedPaymentMethodView[] =
     paymentProfile?.paymentMethods.map((method) => ({
       ...method,
+      paymentProvider: method.paymentProvider === "plaid" ? "plaid" : "stripe",
       paymentType: method.paymentType === "us_bank_account" ? "us_bank_account" : "card",
     })) ?? [];
+  const plaidConfigured = !("error" in getPlaidConfig());
 
   const allPayments =
     tenant?.lease_tenants.flatMap((lt) => lt.leases.payments) ?? [];
@@ -153,6 +158,7 @@ export default async function RenterPaymentsPage() {
           notes: payment.notes ?? null,
         }))}
         savedPaymentMethods={savedPaymentMethods}
+        plaidConfigured={plaidConfigured}
         stripeConfigured={isStripeConfigured()}
       />
     </RenterShell>

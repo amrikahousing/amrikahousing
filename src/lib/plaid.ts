@@ -30,14 +30,6 @@ type PlaidTransactionsSyncResponse = {
   request_id: string;
 };
 
-export type PlaidLinkSuccessMetadata = {
-  institution?: {
-    institution_id?: string | null;
-    name?: string | null;
-    logo?: string | null;
-  } | null;
-};
-
 type PlaidInstitutionResponse = {
   institution?: {
     institution_id?: string;
@@ -45,6 +37,79 @@ type PlaidInstitutionResponse = {
     logo?: string | null;
   };
   request_id: string;
+};
+
+type PlaidTransferCapabilitiesResponse = {
+  institution_supported_networks?: {
+    rtp?: {
+      credit?: boolean;
+    } | null;
+    rfp?: {
+      debit?: boolean;
+      max_amount?: string | null;
+      iso_currency_code?: string | null;
+    } | null;
+  } | null;
+  request_id: string;
+};
+
+type PlaidTransferAuthorizationDecision = "approved" | "declined";
+
+type PlaidTransferAuthorizationResponse = {
+  authorization: {
+    id: string;
+    decision: PlaidTransferAuthorizationDecision;
+    decision_rationale?: {
+      code?: string | null;
+      description?: string | null;
+    } | null;
+  };
+  request_id: string;
+};
+
+type PlaidTransferCreateResponse = {
+  transfer: {
+    id: string;
+    status: string;
+    authorization_id: string;
+  };
+  request_id: string;
+};
+
+type PlaidTransferEvent = {
+  event_id: number;
+  event_type: string;
+  timestamp: string;
+  transfer_id?: string | null;
+  account_id?: string | null;
+  authorization_id?: string | null;
+  failure_reason?: {
+    failure_code?: string | null;
+    description?: string | null;
+  } | null;
+};
+
+type PlaidTransferEventSyncResponse = {
+  transfer_events: PlaidTransferEvent[];
+  request_id: string;
+};
+
+export type PlaidLinkAccount = {
+  id?: string | null;
+  name?: string | null;
+  mask?: string | null;
+  subtype?: string | null;
+  type?: string | null;
+};
+
+export type PlaidLinkSuccessMetadata = {
+  institution?: {
+    institution_id?: string | null;
+    name?: string | null;
+    logo?: string | null;
+  } | null;
+  accounts?: PlaidLinkAccount[] | null;
+  link_session_id?: string | null;
 };
 
 const TOKEN_ENCRYPTION_ALGORITHM = "aes-256-gcm";
@@ -79,6 +144,35 @@ function plaidErrorMessage(body: PlaidErrorResponse, fallback: string) {
   return body.display_message ?? body.error_message ?? body.error_code ?? fallback;
 }
 
+async function plaidPost<TResponse extends object>(
+  path: string,
+  payload: Record<string, unknown>,
+  fallback: string,
+) {
+  const config = getPlaidConfig();
+  if ("error" in config) return { error: config.error, status: 501 as const };
+
+  const response = await fetch(`${config.baseUrl}${path}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      client_id: config.clientId,
+      secret: config.secret,
+      ...payload,
+    }),
+  });
+  const body = (await response.json()) as TResponse & PlaidErrorResponse;
+
+  if (!response.ok) {
+    return {
+      error: plaidErrorMessage(body, fallback),
+      status: response.status,
+    };
+  }
+
+  return { data: body };
+}
+
 export async function createPlaidLinkToken({
   userId,
   clientName,
@@ -86,15 +180,9 @@ export async function createPlaidLinkToken({
   userId: string;
   clientName: string;
 }) {
-  const config = getPlaidConfig();
-  if ("error" in config) return { error: config.error, status: 501 };
-
-  const response = await fetch(`${config.baseUrl}/link/token/create`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      client_id: config.clientId,
-      secret: config.secret,
+  const result = await plaidPost<PlaidLinkTokenResponse>(
+    "/link/token/create",
+    {
       client_name: clientName,
       country_codes: ["US"],
       language: "en",
@@ -102,45 +190,59 @@ export async function createPlaidLinkToken({
       user: {
         client_user_id: userId,
       },
-    }),
-  });
-  const body = (await response.json()) as PlaidLinkTokenResponse & PlaidErrorResponse;
+    },
+    "Could not create Plaid link token.",
+  );
 
-  if (!response.ok) {
-    return {
-      error: plaidErrorMessage(body, "Could not create Plaid link token."),
-      status: response.status,
-    };
-  }
+  if ("error" in result) return { error: result.error, status: result.status };
 
-  return { linkToken: body.link_token, expiration: body.expiration };
+  return {
+    linkToken: result.data.link_token,
+    expiration: result.data.expiration,
+  };
+}
+
+export async function createPlaidTransferLinkToken({
+  userId,
+  clientName,
+}: {
+  userId: string;
+  clientName: string;
+}) {
+  const result = await plaidPost<PlaidLinkTokenResponse>(
+    "/link/token/create",
+    {
+      client_name: clientName,
+      country_codes: ["US"],
+      language: "en",
+      products: ["transfer"],
+      user: {
+        client_user_id: userId,
+      },
+    },
+    "Could not create Plaid transfer link token.",
+  );
+
+  if ("error" in result) return { error: result.error, status: result.status };
+
+  return {
+    linkToken: result.data.link_token,
+    expiration: result.data.expiration,
+  };
 }
 
 export async function exchangePlaidPublicToken(publicToken: string) {
-  const config = getPlaidConfig();
-  if ("error" in config) return { error: config.error, status: 501 };
+  const result = await plaidPost<PlaidExchangeResponse>(
+    "/item/public_token/exchange",
+    { public_token: publicToken },
+    "Could not connect this Plaid account.",
+  );
 
-  const response = await fetch(`${config.baseUrl}/item/public_token/exchange`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      client_id: config.clientId,
-      secret: config.secret,
-      public_token: publicToken,
-    }),
-  });
-  const body = (await response.json()) as PlaidExchangeResponse & PlaidErrorResponse;
-
-  if (!response.ok) {
-    return {
-      error: plaidErrorMessage(body, "Could not connect this Plaid account."),
-      status: response.status,
-    };
-  }
+  if ("error" in result) return { error: result.error, status: result.status };
 
   return {
-    accessToken: body.access_token,
-    itemId: body.item_id,
+    accessToken: result.data.access_token,
+    itemId: result.data.item_id,
   };
 }
 
@@ -149,32 +251,121 @@ export async function getPlaidInstitution({
 }: {
   institutionId: string;
 }) {
-  const config = getPlaidConfig();
-  if ("error" in config) return { error: config.error, status: 501 };
-
-  const response = await fetch(`${config.baseUrl}/institutions/get_by_id`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      client_id: config.clientId,
-      secret: config.secret,
+  const result = await plaidPost<PlaidInstitutionResponse>(
+    "/institutions/get_by_id",
+    {
       institution_id: institutionId,
       country_codes: ["US"],
       options: {
         include_optional_metadata: true,
       },
-    }),
-  });
-  const body = (await response.json()) as PlaidInstitutionResponse & PlaidErrorResponse;
+    },
+    "Could not fetch Plaid institution.",
+  );
 
-  if (!response.ok) {
-    return {
-      error: plaidErrorMessage(body, "Could not fetch Plaid institution."),
-      status: response.status,
-    };
-  }
+  if ("error" in result) return { error: result.error, status: result.status };
 
-  return { institution: body.institution ?? null };
+  return { institution: result.data.institution ?? null };
+}
+
+export async function getPlaidTransferCapabilities(args: {
+  accessToken: string;
+  accountId: string;
+}) {
+  const result = await plaidPost<PlaidTransferCapabilitiesResponse>(
+    "/transfer/capabilities/get",
+    {
+      access_token: args.accessToken,
+      account_id: args.accountId,
+    },
+    "Could not determine Plaid transfer eligibility.",
+  );
+
+  if ("error" in result) return { error: result.error, status: result.status };
+
+  return {
+    institutionSupported: true,
+    institutionSupportedNetworks: result.data.institution_supported_networks ?? null,
+  };
+}
+
+export async function createPlaidTransferAuthorization(args: {
+  accessToken: string;
+  accountId: string;
+  legalName: string;
+  amount: string;
+  idempotencyKey: string;
+  emailAddress?: string | null;
+}) {
+  const result = await plaidPost<PlaidTransferAuthorizationResponse>(
+    "/transfer/authorization/create",
+    {
+      access_token: args.accessToken,
+      account_id: args.accountId,
+      type: "debit",
+      network: "ach",
+      ach_class: "web",
+      amount: args.amount,
+      user: {
+        legal_name: args.legalName,
+        email_address: args.emailAddress ?? undefined,
+      },
+      idempotency_key: args.idempotencyKey,
+    },
+    "Could not authorize the ACH transfer.",
+  );
+
+  if ("error" in result) return { error: result.error, status: result.status };
+
+  return {
+    authorizationId: result.data.authorization.id,
+    decision: result.data.authorization.decision,
+    decisionRationale: result.data.authorization.decision_rationale ?? null,
+  };
+}
+
+export async function createPlaidTransfer(args: {
+  authorizationId: string;
+  accessToken: string;
+  accountId: string;
+  amount: string;
+  description: string;
+  metadata?: Record<string, string>;
+}) {
+  const result = await plaidPost<PlaidTransferCreateResponse>(
+    "/transfer/create",
+    {
+      authorization_id: args.authorizationId,
+      access_token: args.accessToken,
+      account_id: args.accountId,
+      amount: args.amount,
+      description: args.description,
+      metadata: args.metadata,
+    },
+    "Could not create the ACH transfer.",
+  );
+
+  if ("error" in result) return { error: result.error, status: result.status };
+
+  return {
+    transferId: result.data.transfer.id,
+    authorizationId: result.data.transfer.authorization_id,
+    status: result.data.transfer.status,
+  };
+}
+
+export async function syncPlaidTransferEvents(afterId: number) {
+  const result = await plaidPost<PlaidTransferEventSyncResponse>(
+    "/transfer/event/sync",
+    { after_id: afterId, count: 200 },
+    "Could not sync Plaid transfer events.",
+  );
+
+  if ("error" in result) return { error: result.error, status: result.status };
+
+  return {
+    transferEvents: result.data.transfer_events ?? [],
+  };
 }
 
 export function encryptPlaidAccessToken(accessToken: string) {
@@ -240,9 +431,6 @@ export async function syncPlaidTransactions({
   accessToken: string;
   cursor?: string | null;
 }) {
-  const config = getPlaidConfig();
-  if ("error" in config) return { error: config.error, status: 501 };
-
   let nextCursor = cursor ?? null;
   let hasMore = true;
   const added: Array<Record<string, unknown>> = [];
@@ -252,32 +440,24 @@ export async function syncPlaidTransactions({
   let transactionsUpdateStatus: string | undefined;
 
   while (hasMore) {
-    const response = await fetch(`${config.baseUrl}/transactions/sync`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        client_id: config.clientId,
-        secret: config.secret,
+    const result = await plaidPost<PlaidTransactionsSyncResponse>(
+      "/transactions/sync",
+      {
         access_token: accessToken,
         cursor: nextCursor,
         count: 100,
         options: {
           include_original_description: true,
         },
-      }),
-    });
-    const body = (await response.json()) as
-      | PlaidTransactionsSyncResponse
-      | PlaidErrorResponse;
+      },
+      "Could not fetch Plaid transactions.",
+    );
 
-    if (!response.ok) {
-      return {
-        error: plaidErrorMessage(body, "Could not fetch Plaid transactions."),
-        status: response.status,
-      };
+    if ("error" in result) {
+      return { error: result.error, status: result.status };
     }
 
-    const page = body as PlaidTransactionsSyncResponse;
+    const page = result.data;
     added.push(...page.added);
     modified.push(...page.modified);
     removed.push(...page.removed);
