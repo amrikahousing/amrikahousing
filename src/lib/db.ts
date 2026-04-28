@@ -27,6 +27,7 @@ function prismaModelHasField(
 function hasCurrentAccountingDelegates(client: ReturnType<typeof createPrismaClient>) {
   return (
     typeof client.plaid_items?.findMany === "function" &&
+    typeof client.organization_payment_destinations?.findMany === "function" &&
     typeof client.plaid_institutions?.findMany === "function" &&
     typeof client.plaid_transactions?.findMany === "function" &&
     typeof client.plaid_item_audit_logs?.findMany === "function" &&
@@ -35,6 +36,7 @@ function hasCurrentAccountingDelegates(client: ReturnType<typeof createPrismaCli
     typeof client.accounting_transaction_categories?.findMany === "function" &&
     typeof client.accounting_vendor_category_rules?.findMany === "function" &&
     prismaModelHasField(client, "plaid_items", "sync_enabled") &&
+    prismaModelHasField(client, "organization_payment_destinations", "plaid_funding_account_id") &&
     prismaModelHasField(client, "plaid_items", "last_synced_at") &&
     prismaModelHasField(client, "plaid_institutions", "logo_url") &&
     prismaModelHasField(client, "plaid_transactions", "connection_id") &&

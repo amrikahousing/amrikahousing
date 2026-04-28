@@ -94,6 +94,7 @@ model organizations {
   plaid_item_audit_logs             plaid_item_audit_logs[]
   plaid_data_deletion_requests      plaid_data_deletion_requests[]
   plaid_transactions                plaid_transactions[]
+  organization_payment_destinations organization_payment_destinations?
   manual_transactions               manual_transactions[]
   payment_attempts                  payment_attempts[]
   renter_payment_methods            renter_payment_methods[]
@@ -187,11 +188,31 @@ model plaid_items {
   created_at          DateTime             @default(now()) @db.Timestamptz(6)
   updated_at          DateTime             @default(now()) @db.Timestamptz(6)
   organizations       organizations        @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  organization_payment_destinations organization_payment_destinations[]
   plaid_institutions  plaid_institutions?  @relation(fields: [institution_id], references: [institution_id], onUpdate: NoAction)
   plaid_transactions  plaid_transactions[]
 
   @@index([organization_id], map: "idx_plaid_items_org")
   @@index([institution_id], map: "idx_plaid_items_institution")
+  @@schema("public")
+}
+
+model organization_payment_destinations {
+  id                        String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id           String        @unique @db.Uuid
+  plaid_item_id             String        @db.Uuid
+  plaid_account_id          String?
+  destination_account_label String
+  bank_institution_name     String
+  is_active                 Boolean       @default(true)
+  plaid_funding_account_id  String?
+  created_at                DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at                DateTime      @default(now()) @db.Timestamptz(6)
+  organizations             organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  plaid_items               plaid_items   @relation(fields: [plaid_item_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([plaid_item_id], map: "idx_org_payment_destinations_item")
+  @@index([is_active], map: "idx_org_payment_destinations_active")
   @@schema("public")
 }
 
@@ -477,13 +498,20 @@ model renter_payment_methods {
   tenant_id                 String                   @db.Uuid
   user_id                   String?                  @db.Uuid
   organization_id           String                   @db.Uuid
-  stripe_customer_id        String
-  stripe_payment_method_id  String                   @unique
+  payment_provider          String                   @default("stripe")
+  stripe_customer_id        String?
+  stripe_payment_method_id  String?                  @unique
+  plaid_access_token        String?
+  plaid_item_id             String?
+  plaid_account_id          String?
+  plaid_institution_id      String?
+  plaid_link_session_id     String?
+  plaid_transfer_eligible   Boolean                  @default(false)
   payment_type              String                   @default("card")
   brand                     String?
   bank_name                 String?
   bank_account_type         String?
-  last4                     String                   @db.Char(4)
+  last4                     String
   exp_month                 Int?
   exp_year                  Int?
   billing_name              String?
@@ -532,7 +560,15 @@ model payment_attempts {
   user_id                  String?                 @db.Uuid
   organization_id          String                  @db.Uuid
   renter_payment_method_id String?                 @db.Uuid
-  stripe_payment_intent_id String                  @unique
+  payment_provider         String                  @default("stripe")
+  stripe_payment_intent_id String?                 @unique
+  plaid_authorization_id   String?                 @unique
+  plaid_transfer_id        String?                 @unique
+  plaid_last_event_id      BigInt?
+  consent_text             String?
+  consent_accepted_at      DateTime?               @db.Timestamptz(6)
+  consent_ip_address       String?
+  consent_user_agent       String?
   idempotency_key          String                  @unique
   amount                   Decimal                 @db.Decimal(10, 2)
   currency                 String                  @default("USD") @db.Char(3)

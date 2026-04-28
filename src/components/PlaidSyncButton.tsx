@@ -42,15 +42,17 @@ export function PlaidSyncButton() {
   }
 
   return (
-    <div className="flex flex-col items-end gap-1">
+    <div className="relative flex flex-col items-end">
       <button
         type="button"
         onClick={handleSync}
         disabled={status === "syncing"}
-        className="inline-flex h-9 items-center justify-center gap-2 whitespace-nowrap rounded-lg border border-slate-300 bg-white px-3 text-sm font-semibold leading-none text-slate-700 hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+        aria-label={status === "syncing" ? "Syncing accounts" : "Sync connected accounts"}
+        title={status === "syncing" ? "Syncing accounts" : "Sync connected accounts"}
+        className="inline-flex h-12 w-12 items-center justify-center rounded-2xl border border-stone-300 bg-white text-slate-700 shadow-sm hover:bg-stone-50 disabled:cursor-not-allowed disabled:opacity-60 sm:h-14 sm:w-14"
       >
         <svg
-          className={`h-4 w-4 shrink-0 ${status === "syncing" ? "animate-spin" : ""}`}
+          className={`h-4 w-4 shrink-0 sm:h-5 sm:w-5 ${status === "syncing" ? "animate-spin" : ""}`}
           viewBox="0 0 24 24"
           fill="none"
           stroke="currentColor"
@@ -63,10 +65,16 @@ export function PlaidSyncButton() {
           <path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16" />
           <path d="M8 16H3v5" />
         </svg>
-        {status === "syncing" ? "Syncing…" : "Sync now"}
+        <span className="sr-only">
+          {status === "syncing" ? "Syncing accounts" : "Sync connected accounts"}
+        </span>
       </button>
       {summary ? (
-        <p className={`text-xs ${status === "error" ? "text-red-600" : "text-slate-500"}`}>
+        <p
+          className={`absolute right-0 top-full mt-1 whitespace-nowrap text-xs ${
+            status === "error" ? "text-red-600" : "text-slate-500"
+          }`}
+        >
           {summary}
         </p>
       ) : null}

@@ -54,6 +54,7 @@ export type SerializedAccountingTransaction = Omit<
 export type AccountSummary = {
   id: string;
   plaidItemId: string | null;
+  plaidAccountId: string | null;
   name: string;
   provider: string;
   institutionLogoUrl: string | null;
@@ -86,6 +87,7 @@ type PlaidAccount = {
   account_id?: unknown;
   name?: unknown;
   official_name?: unknown;
+  mask?: unknown;
   subtype?: unknown;
   type?: unknown;
 };
@@ -96,6 +98,11 @@ type PlaidCounterparty = {
   entity_id?: unknown;
   logo_url?: unknown;
   website?: unknown;
+};
+
+type PlaidHiddenAccountLog = {
+  plaid_item_id: string | null;
+  metadata: unknown;
 };
 
 export type AccountingData = {
@@ -559,6 +566,10 @@ function buildAccountsById(
       typeof account.name === "string" && account.name.trim()
         ? account.name.trim()
         : null;
+    const mask =
+      typeof account.mask === "string" && account.mask.trim()
+        ? account.mask.trim()
+        : null;
     const subtype =
       typeof account.subtype === "string" && account.subtype.trim()
         ? account.subtype.trim()
@@ -572,9 +583,38 @@ function buildAccountsById(
     if (name === institutionName && subtype) {
       name = `${institutionName} ${subtype}`;
     }
+    if (mask && !name.includes(mask)) {
+      name = `${name} • ${mask}`;
+    }
     map.set(account.account_id, name);
   }
   return map;
+}
+
+function toConnectedPlaidAccountId(plaidItemId: string, accountId: string | null) {
+  if (!accountId) return `item:${plaidItemId}`;
+  return `${plaidItemId}:${accountId}`;
+}
+
+function hiddenPlaidAccountKey(log: PlaidHiddenAccountLog) {
+  if (!log.plaid_item_id) return null;
+  if (!log.metadata || typeof log.metadata !== "object") return null;
+
+  const metadata = log.metadata as Record<string, unknown>;
+  if (metadata.scope !== "account") return null;
+
+  const actionHidesAccount =
+    metadata.hiddenFromUi === true || metadata.mode === "disconnect_delete";
+  if (!actionHidesAccount) return null;
+
+  const plaidAccountId =
+    typeof metadata.plaidAccountId === "string" && metadata.plaidAccountId.trim()
+      ? metadata.plaidAccountId.trim()
+      : null;
+
+  return plaidAccountId
+    ? toConnectedPlaidAccountId(log.plaid_item_id, plaidAccountId)
+    : null;
 }
 
 function itemNeedsFullPlaidResync(item: Pick<PlaidItemRecord, "created_at" | "last_synced_at">) {
@@ -817,7 +857,7 @@ async function plaidItemsQuery(orgId: string) {
 }
 
 export async function getAccountingData(orgId: string): Promise<AccountingData> {
-  const [payments, manualRows, initialPlaidTxRows, categoryOverrides, vendorRules, plaidItems] =
+  const [payments, manualRows, initialPlaidTxRows, categoryOverrides, vendorRules, plaidItems, hiddenAccountLogs] =
     await Promise.all([
     prisma.payments.findMany({
       where: {
@@ -888,32 +928,24 @@ export async function getAccountingData(orgId: string): Promise<AccountingData> 
       },
     }),
     plaidItemsQuery(orgId),
+    prisma.plaid_item_audit_logs.findMany({
+      where: {
+        organizations: { clerk_org_id: orgId },
+        action: { in: ["disconnect", "disconnect_delete"] },
+      },
+      select: {
+        plaid_item_id: true,
+        metadata: true,
+      },
+    }),
   ]);
-
-  let plaidTxRows = initialPlaidTxRows;
-  const syncablePlaidItems = plaidItems.filter(
-    (item) => item.status === "connected" && item.sync_enabled,
+  const hiddenAccountKeys = new Set(
+    hiddenAccountLogs
+      .map(hiddenPlaidAccountKey)
+      .filter((key): key is string => key !== null),
   );
-  if (syncablePlaidItems.length > 0) {
-    const itemIdsWithTx = new Set(initialPlaidTxRows.map((r) => r.plaid_items.id));
-    const anyItemMissingTx = syncablePlaidItems.some(
-      (item) => !itemIdsWithTx.has(item.id),
-    );
-    const anyTxMissingDetails = initialPlaidTxRows.some(
-      (row) =>
-        row.category_icon_url === null ||
-        (row.merchant_logo_url === null &&
-          row.merchant_entity_id === null &&
-          row.counterparty_type === null),
-    );
-    const anyRecentlyLinkedItem = syncablePlaidItems.some((item) =>
-      itemNeedsFullPlaidResync(item),
-    );
-    if (anyItemMissingTx || anyTxMissingDetails || anyRecentlyLinkedItem) {
-      await syncPlaidItemsToDb(orgId);
-      plaidTxRows = await plaidTransactionsQuery(orgId);
-    }
-  }
+
+  const plaidTxRows = initialPlaidTxRows;
 
   const rules: AccountingVendorRule[] = vendorRules;
   const actorIds = Array.from(
@@ -990,11 +1022,16 @@ export async function getAccountingData(orgId: string): Promise<AccountingData> 
 
   const plaidAccountSummaries = new Map<string, AccountSummary>();
   for (const row of plaidTxRows) {
-    const key = row.account_id;
+    const accountId = row.account_id.trim() || null;
+    const key = toConnectedPlaidAccountId(row.plaid_items.id, accountId);
+    if (hiddenAccountKeys.has(key)) {
+      continue;
+    }
     if (!plaidAccountSummaries.has(key)) {
       plaidAccountSummaries.set(key, {
         id: key,
         plaidItemId: row.plaid_items.id,
+        plaidAccountId: accountId,
         name: row.account_name ?? row.plaid_items.institution_name ?? "Account",
         provider: row.plaid_items.institution_name ?? "Plaid",
         institutionLogoUrl: row.plaid_items.plaid_institutions?.logo_url ?? null,
@@ -1017,11 +1054,18 @@ export async function getAccountingData(orgId: string): Promise<AccountingData> 
     Array.from(plaidAccountSummaries.values()).map((s) => s.plaidItemId),
   );
   for (const item of plaidItems) {
+    const itemHasHiddenAccount = Array.from(hiddenAccountKeys).some((key) =>
+      key.startsWith(`${item.id}:`),
+    );
     if (!itemIdsInSummaries.has(item.id)) {
+      if (itemHasHiddenAccount) {
+        continue;
+      }
       const key = `item:${item.id}`;
       plaidAccountSummaries.set(key, {
         id: key,
         plaidItemId: item.id,
+        plaidAccountId: null,
         name: item.institution_name ?? "Connected Account",
         provider: item.institution_name ?? "Plaid",
         institutionLogoUrl: item.plaid_institutions?.logo_url ?? null,

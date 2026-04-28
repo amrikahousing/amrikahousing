@@ -1,27 +1,94 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useRef, useState } from "react";
 
 type RemoveStatus = "idle" | "confirming" | "submitting" | "success" | "error";
 type DisconnectMode = "disconnect" | "disconnect_hide" | "disconnect_delete";
+type DisconnectScope = "account" | "item";
 
-export function PlaidRemoveButton({ plaidItemId }: { plaidItemId: string }) {
-  const router = useRouter();
+export function PlaidRemoveButton({
+  plaidItemId,
+  plaidAccountId = null,
+  accountName = null,
+}: {
+  plaidItemId: string;
+  plaidAccountId?: string | null;
+  accountName?: string | null;
+}) {
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const buttonRef = useRef<HTMLButtonElement | null>(null);
   const [status, setStatus] = useState<RemoveStatus>("idle");
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
 
-  async function handleRemove(mode: DisconnectMode) {
+  useEffect(() => {
+    if (status !== "confirming") return;
+
+    const updatePosition = () => {
+      const rect = buttonRef.current?.getBoundingClientRect();
+      if (!rect) return;
+
+      const menuWidth = 300;
+      const viewportPadding = 12;
+      const left = Math.min(
+        Math.max(viewportPadding, rect.right - menuWidth),
+        window.innerWidth - menuWidth - viewportPadding,
+      );
+
+      setMenuPosition({
+        top: rect.bottom + 8,
+        left,
+      });
+    };
+
+    const handlePointerDown = (event: MouseEvent) => {
+      if (!containerRef.current?.contains(event.target as Node)) {
+        setStatus("idle");
+      }
+    };
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        setStatus("idle");
+      }
+    };
+
+    updatePosition();
+    window.addEventListener("resize", updatePosition);
+    window.addEventListener("scroll", updatePosition, true);
+    document.addEventListener("mousedown", handlePointerDown);
+    document.addEventListener("keydown", handleKeyDown);
+
+    return () => {
+      window.removeEventListener("resize", updatePosition);
+      window.removeEventListener("scroll", updatePosition, true);
+      document.removeEventListener("mousedown", handlePointerDown);
+      document.removeEventListener("keydown", handleKeyDown);
+    };
+  }, [status]);
+
+  async function handleRemove(mode: DisconnectMode, scope: DisconnectScope = "item") {
+    const scopedPlaidAccountId = scope === "account" ? plaidAccountId : null;
     setStatus("submitting");
     setError(null);
-    setMessage(null);
+    setMessage(
+      scope === "account" && mode === "disconnect"
+        ? "Disconnecting..."
+        : scope === "account"
+          ? "Deleting..."
+          : mode === "disconnect_delete"
+          ? "Deleting..."
+          : mode === "disconnect_hide"
+            ? "Disconnecting..."
+            : "Disconnecting...",
+    );
 
     try {
       const response = await fetch(`/api/plaid/items/${plaidItemId}`, {
         method: "DELETE",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ mode }),
+        body: JSON.stringify({ mode, plaidAccountId: scopedPlaidAccountId }),
       });
       const result = (await response.json()) as { error?: string };
 
@@ -29,15 +96,9 @@ export function PlaidRemoveButton({ plaidItemId }: { plaidItemId: string }) {
         throw new Error(result.error ?? "Failed to remove account.");
       }
 
-      setStatus("success");
-      if (mode === "disconnect_delete") {
-        setMessage("Deleted");
-      } else if (mode === "disconnect_hide") {
-        setMessage("Disconnected + hidden");
-      } else {
-        setMessage("Disconnected");
-      }
-      router.refresh();
+      setStatus("idle");
+      setMessage(null);
+      window.location.reload();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Failed to remove account.");
       setStatus("error");
@@ -46,8 +107,9 @@ export function PlaidRemoveButton({ plaidItemId }: { plaidItemId: string }) {
 
   if (status === "confirming") {
     return (
-      <div className="relative flex flex-col items-end gap-1">
+      <div ref={containerRef} className="flex flex-col items-end gap-1">
         <button
+          ref={buttonRef}
           type="button"
           onClick={() => setStatus("idle")}
           className="inline-flex h-7 w-7 items-center justify-center rounded text-slate-400 hover:bg-slate-100 hover:text-slate-600"
@@ -58,32 +120,53 @@ export function PlaidRemoveButton({ plaidItemId }: { plaidItemId: string }) {
             <path d="m6 6 12 12" />
           </svg>
         </button>
-        <div className="absolute right-0 top-8 z-20 w-[300px] rounded-lg border border-slate-200 bg-white p-3 shadow-xl">
+        <div
+          className="fixed z-50 w-[300px] rounded-lg border border-slate-200 bg-white p-3 shadow-xl"
+          style={{ top: menuPosition.top, left: menuPosition.left }}
+        >
           <p className="text-xs font-semibold text-slate-700">Disconnect account</p>
-          <p className="mt-1 text-xs text-slate-500">
-            We will keep your past transactions unless you choose to delete them.
-          </p>
+          {plaidAccountId ? (
+            <p className="mt-1 text-xs text-slate-500">
+              {accountName ? `${accountName} will` : "This synced account will"} be handled account-first.
+              If it is the only remaining account in this Plaid connection, we will disconnect the whole bank connection automatically.
+            </p>
+          ) : (
+            <p className="mt-1 text-xs text-slate-500">
+              We will keep your past transactions unless you choose to delete them.
+            </p>
+          )}
           <div className="mt-2 space-y-2">
+            {plaidAccountId ? (
+              <button
+                type="button"
+                onClick={() => handleRemove("disconnect", "account")}
+                className="w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-left text-xs font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Disconnect this account
+              </button>
+            ) : null}
             <button
               type="button"
-              onClick={() => handleRemove("disconnect")}
+              onClick={() =>
+                handleRemove(
+                  plaidAccountId ? "disconnect_delete" : "disconnect_hide",
+                  plaidAccountId ? "account" : "item",
+                )
+              }
               className="w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-left text-xs font-medium text-slate-700 hover:bg-slate-50"
             >
-              Disconnect only (keep history)
+              {plaidAccountId
+                ? "Disconnect this account and delete its data"
+                : "Disconnect + hide data"}
             </button>
             <button
               type="button"
-              onClick={() => handleRemove("disconnect_hide")}
-              className="w-full rounded border border-slate-300 bg-white px-2 py-1.5 text-left text-xs font-medium text-slate-700 hover:bg-slate-50"
-            >
-              Disconnect + hide data
-            </button>
-            <button
-              type="button"
-              onClick={() => handleRemove("disconnect_delete")}
+              onClick={() => handleRemove(plaidAccountId ? "disconnect" : "disconnect_delete")}
               className="w-full rounded border border-red-200 bg-red-50 px-2 py-1.5 text-left text-xs font-semibold text-red-700 hover:bg-red-100"
             >
-              Disconnect + delete all data (irreversible)
+              {plaidAccountId
+                ? "Disconnect whole bank connection"
+                : "Disconnect + delete all data (irreversible)"}
             </button>
           </div>
           <div className="mt-2 flex items-center justify-end">
@@ -101,8 +184,9 @@ export function PlaidRemoveButton({ plaidItemId }: { plaidItemId: string }) {
   }
 
   return (
-    <div className="flex flex-col items-end gap-1">
+    <div ref={containerRef} className="flex flex-col items-end gap-1">
       <button
+        ref={buttonRef}
         type="button"
         onClick={() => setStatus("confirming")}
         disabled={status === "submitting"}
@@ -124,13 +208,13 @@ export function PlaidRemoveButton({ plaidItemId }: { plaidItemId: string }) {
           </svg>
         )}
       </button>
-      {status === "error" && error ? (
-        <p className="text-xs text-red-600">{error}</p>
-      ) : null}
-      {status === "success" && message ? (
+      {status === "submitting" && message ? (
         <p className="max-w-[160px] text-right text-xs text-slate-500">
           {message}
         </p>
+      ) : null}
+      {status === "error" && error ? (
+        <p className="text-xs text-red-600">{error}</p>
       ) : null}
     </div>
   );
