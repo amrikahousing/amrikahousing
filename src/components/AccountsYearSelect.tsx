@@ -5,11 +5,13 @@ import { useRouter } from "next/navigation";
 type AccountsYearSelectProps = {
   selectedYear: number;
   yearOptions: number[];
+  selectedRange?: string;
 };
 
 export function AccountsYearSelect({
   selectedYear,
   yearOptions,
+  selectedRange,
 }: AccountsYearSelectProps) {
   const router = useRouter();
 
@@ -23,7 +25,14 @@ export function AccountsYearSelect({
         name="year"
         defaultValue={selectedYear}
         onChange={(event) => {
-          router.replace(`/accounts?year=${event.currentTarget.value}`, {
+          const params = new URLSearchParams({
+            year: event.currentTarget.value,
+          });
+          if (selectedRange) {
+            params.set("range", selectedRange);
+          }
+
+          router.replace(`/accounts?${params.toString()}`, {
             scroll: false,
           });
         }}

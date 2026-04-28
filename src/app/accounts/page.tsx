@@ -44,6 +44,8 @@ function monthLabel(date: Date) {
   return new Intl.DateTimeFormat("en-US", { month: "short" }).format(date);
 }
 
+type ChartRange = "3m" | "6m" | "12m" | "ytd";
+
 function getNiceChartScale(maxValue: number) {
   const target = Math.max(1, maxValue);
   const magnitude = 10 ** Math.floor(Math.log10(target));
@@ -174,7 +176,7 @@ function Icon({ name, className = "" }: { name: string; className?: string }) {
 export default async function AccountsPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ year?: string | string[] }>;
+  searchParams?: Promise<{ year?: string | string[]; range?: string | string[] }>;
 }) {
   const { userId, orgId } = await auth();
   if (!userId) redirect("/login");
@@ -185,7 +187,17 @@ export default async function AccountsPage({
     typeof resolvedSearchParams.year === "string"
       ? Number.parseInt(resolvedSearchParams.year, 10)
       : Number.NaN;
+  const requestedRange =
+    typeof resolvedSearchParams.range === "string"
+      ? resolvedSearchParams.range.toLowerCase()
+      : "";
   const currentYear = now.getFullYear();
+  const selectedRange: ChartRange =
+    requestedRange === "3m" ||
+    requestedRange === "6m" ||
+    requestedRange === "ytd"
+      ? requestedRange
+      : "ytd";
   const selectedYear =
     Number.isInteger(requestedYear) &&
     requestedYear >= currentYear - 5 &&
@@ -195,9 +207,13 @@ export default async function AccountsPage({
   const yearOptions = Array.from({ length: 6 }, (_, index) => currentYear - index);
   const currentMonthStart = monthStart(now);
   const nextMonthStart = new Date(now.getFullYear(), now.getMonth() + 1, 1);
-  const months = Array.from({ length: 6 }, (_, index) => {
-    const date = new Date(now);
-    date.setMonth(now.getMonth() - (5 - index), 1);
+  const chartMonthCount =
+    selectedRange === "3m" ? 3 : selectedRange === "6m" ? 6 : selectedRange === "12m" ? 12 : now.getMonth() + 1;
+  const months = Array.from({ length: chartMonthCount }, (_, index) => {
+    const date =
+      selectedRange === "ytd"
+        ? new Date(selectedYear, index, 1)
+        : new Date(now.getFullYear(), now.getMonth() - (chartMonthCount - 1 - index), 1);
     date.setHours(0, 0, 0, 0);
     return date;
   });
@@ -308,6 +324,23 @@ export default async function AccountsPage({
     .join(" ");
   const revenueAreaPoints = `0,${chartHeight} ${revenuePoints} ${chartWidth},${chartHeight}`;
   const expenseAreaPoints = `0,${chartHeight} ${expensePoints} ${chartWidth},${chartHeight}`;
+  const chartRangeOptions: Array<{ id: ChartRange; label: string }> = [
+    { id: "3m", label: "3M" },
+    { id: "6m", label: "6M" },
+    { id: "12m", label: "12M" },
+    { id: "ytd", label: "YTD" },
+  ];
+  const chartSubtitle =
+    selectedRange === "ytd"
+      ? `${selectedYear} year to date . all properties`
+      : `Trailing ${chartMonthCount} months . all properties`;
+  const chartRangeHref = (range: ChartRange) => {
+    const params = new URLSearchParams({
+      year: String(selectedYear),
+      range,
+    });
+    return `/accounts?${params.toString()}`;
+  };
 
   const ytdStart = new Date(selectedYear, 0, 1);
   const ytdEnd =
@@ -425,16 +458,25 @@ export default async function AccountsPage({
                   Revenue vs Expenses
                 </h2>
                 <p className="mt-1 text-xs text-slate-500 sm:text-sm">
-                  Trailing 12 months . all properties
+                  {chartSubtitle}
                 </p>
               </div>
               <div className="inline-flex h-12 items-center rounded-2xl border border-stone-200 bg-stone-50 p-1 text-xs font-medium text-slate-500 shadow-sm sm:text-sm">
-                <span className="inline-flex h-10 items-center rounded-xl px-4 sm:px-5">3M</span>
-                <span className="inline-flex h-10 items-center rounded-xl px-4 sm:px-5">6M</span>
-                <span className="inline-flex h-10 items-center rounded-xl bg-white px-4 text-slate-950 shadow-sm ring-1 ring-stone-200 sm:px-5">
-                  12M
-                </span>
-                <span className="inline-flex h-10 items-center rounded-xl px-4 sm:px-5">YTD</span>
+                {chartRangeOptions.map((option) => (
+                  <Link
+                    key={option.id}
+                    href={chartRangeHref(option.id)}
+                    scroll={false}
+                    className={cx(
+                      "inline-flex h-10 items-center rounded-xl px-4 sm:px-5",
+                      selectedRange === option.id
+                        ? "bg-white text-slate-950 shadow-sm ring-1 ring-stone-200"
+                        : "text-slate-500 hover:text-slate-700",
+                    )}
+                  >
+                    {option.label}
+                  </Link>
+                ))}
               </div>
             </div>
             <div className="h-[310px] px-5 pb-5">
@@ -568,7 +610,10 @@ export default async function AccountsPage({
                   </svg>
                 </div>
                 <div />
-                <div className="grid grid-cols-6 text-center text-xs text-slate-500 sm:text-sm">
+                <div
+                  className="grid text-center text-xs text-slate-500 sm:text-sm"
+                  style={{ gridTemplateColumns: `repeat(${revenueData.length}, minmax(0, 1fr))` }}
+                >
                   {revenueData.map((item) => (
                     <span key={item.month}>{item.month}</span>
                   ))}
@@ -621,161 +666,166 @@ export default async function AccountsPage({
             </div>
           </article>
 
-          <article className="rounded-lg border border-slate-200 bg-white shadow-sm">
-            <div className="flex flex-col gap-4 border-b border-slate-200 p-5 sm:flex-row sm:items-start sm:justify-between">
-              <div className="flex items-start gap-5">
-                <div>
-                  <h2 className="text-lg font-semibold tracking-tight text-slate-950 sm:text-xl">
-                    Connected Accounts
-                  </h2>
-                  <p className="mt-1 max-w-sm text-xs leading-5 text-slate-500">
-                    Linked bank accounts and credit cards used for rent and expenses.
-                  </p>
-                </div>
-                <div className="hidden items-center gap-2 pt-2 text-xs text-slate-500 md:flex">
-                  <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
-                  <span>Live</span>
-                </div>
+        <article className="rounded-lg border border-slate-200 bg-white shadow-sm">
+          <div className="flex flex-col gap-3 border-b border-slate-200 px-4 py-4 sm:flex-row sm:items-start sm:justify-between sm:px-5">
+            <div className="flex items-start gap-4">
+              <div>
+                <h2 className="text-lg font-semibold tracking-tight text-slate-950">
+                  Connected Accounts
+                </h2>
+                <p className="mt-1 max-w-sm text-xs leading-5 text-slate-500">
+                  Linked bank accounts and credit cards used for rent and expenses.
+                </p>
               </div>
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-2 text-xs text-slate-500 md:hidden">
-                  <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
-                  <span>Live</span>
-                </div>
-                <div>
-                  <PlaidSyncButton />
-                </div>
-                <div>
-                  <PlaidLinkButton />
-                </div>
+              <div className="hidden items-center gap-2 pt-2 text-xs text-slate-500 md:flex">
+                <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                <span>Live</span>
               </div>
             </div>
-            <div className="p-5">
-              {connectedAccounts.length === 0 ? (
-                <div className="flex flex-col items-center gap-3 py-10 text-center">
-                  <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">
-                    <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
-                      <rect x="2" y="5" width="20" height="14" rx="2" />
-                      <path d="M2 10h20" />
-                    </svg>
-                  </div>
-                  <p className="text-sm font-medium text-slate-700">No accounts linked yet</p>
-                  <p className="max-w-sm text-sm text-slate-500">Connect a bank account to track transactions automatically.</p>
-                  <PlaidLinkButton />
+            <div className="flex items-center gap-2.5">
+              <div className="flex items-center gap-2 text-xs text-slate-500 md:hidden">
+                <span className="h-2.5 w-2.5 rounded-full bg-emerald-500" />
+                <span>Live</span>
+              </div>
+              <div>
+                <PlaidSyncButton />
+              </div>
+              <div>
+                <PlaidLinkButton />
+              </div>
+            </div>
+          </div>
+          <div className="p-4 sm:p-5">
+            {connectedAccounts.length === 0 ? (
+              <div className="flex flex-col items-center gap-3 py-10 text-center">
+                <div className="flex h-14 w-14 items-center justify-center rounded-2xl bg-slate-100 text-slate-400">
+                  <svg className="h-6 w-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round">
+                    <rect x="2" y="5" width="20" height="14" rx="2" />
+                    <path d="M2 10h20" />
+                  </svg>
                 </div>
-              ) : (
-                <div className="space-y-4">
-                  {connectedAccounts.map((account) => {
-                    const isRentCollectionAccount =
-                      activeRentCollectionAccountId === account.id;
-                    const isRentCollectionEligible = isEligibleRentCollectionAccount({
-                      connectedAccountId: account.id,
-                      name: account.name,
-                      provider: account.provider,
-                    });
-                    const isRentCollectionDisabled =
-                      !isRentCollectionEligible || account.status !== "Connected";
-                    const isConnected = account.status === "Connected";
-                    const accountTone = isConnected
-                      ? isRentCollectionAccount
-                        ? "border-emerald-400 bg-emerald-50/40"
-                        : "border-stone-200 bg-white"
-                      : "border-amber-200 bg-amber-50/40";
+                <p className="text-sm font-medium text-slate-700">No accounts linked yet</p>
+                <p className="max-w-sm text-sm text-slate-500">Connect a bank account to track transactions automatically.</p>
+                <PlaidLinkButton />
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {connectedAccounts.map((account) => {
+                  const isRentCollectionAccount =
+                    activeRentCollectionAccountId === account.id;
+                  const isRentCollectionEligible = isEligibleRentCollectionAccount({
+                    connectedAccountId: account.id,
+                    name: account.name,
+                    provider: account.provider,
+                  });
+                  const isRentCollectionDisabled =
+                    !isRentCollectionEligible || account.status !== "Connected";
+                  const isConnected = account.status === "Connected";
+                  const accountTone = isConnected
+                    ? isRentCollectionAccount
+                      ? "border-emerald-400 bg-emerald-50/40"
+                      : "border-stone-200 bg-white"
+                    : "border-amber-200 bg-amber-50/40";
 
-                    return (
-                      <article
-                        key={account.id}
-                        className={cx(
-                          "overflow-hidden rounded-[28px] border p-4 shadow-sm transition",
-                          accountTone,
-                        )}
-                      >
-                        <div className="grid gap-5 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
-                          <div className="flex min-w-0 items-center gap-4">
-                            <div className="flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-2xl bg-slate-900 text-base font-semibold text-white shadow-sm">
-                              {account.institutionLogoUrl ? (
-                                <Image
-                                  src={account.institutionLogoUrl}
-                                  alt={`${account.provider} logo`}
-                                  width={40}
-                                  height={40}
-                                  className="h-8 w-8 object-contain"
-                                  loading="lazy"
-                                  unoptimized
-                                />
-                              ) : (
-                                initialsForAccount(account.name, account.provider)
-                              )}
-                            </div>
-                            <div className="min-w-0 flex-1">
-                              <p className="truncate text-base font-semibold tracking-tight text-slate-950 sm:text-lg">
-                                {account.name}
-                              </p>
-                              <p className="mt-1 truncate text-sm text-slate-500">
-                                {account.provider}
-                                <span className="mx-2 text-slate-300">•</span>
-                                <span>
-                                  {isRentCollectionEligible
-                                    ? "Checking or savings"
-                                    : "Credit or ineligible"}
+                  return (
+                    <article
+                      key={account.id}
+                      className={cx(
+                        "overflow-hidden rounded-[24px] border px-4 py-3 shadow-sm transition",
+                        accountTone,
+                      )}
+                    >
+                      <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+                        <div className="flex min-w-0 items-center gap-3">
+                          <div className="flex h-12 w-12 shrink-0 items-center justify-center overflow-hidden rounded-[18px] bg-slate-900 text-sm font-semibold text-white shadow-sm">
+                            {account.institutionLogoUrl ? (
+                              <Image
+                                src={account.institutionLogoUrl}
+                                alt={`${account.provider} logo`}
+                                width={40}
+                                height={40}
+                                className="h-7 w-7 object-contain"
+                                loading="lazy"
+                                unoptimized
+                              />
+                            ) : (
+                              initialsForAccount(account.name, account.provider)
+                            )}
+                          </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-[15px] font-semibold tracking-tight text-slate-950 sm:text-base">
+                              {account.name}
+                            </p>
+                            <p className="mt-0.5 truncate text-sm text-slate-500">
+                              {account.provider}
+                              <span className="mx-2 text-slate-300">•</span>
+                              <span>
+                                {isRentCollectionEligible
+                                  ? "Checking or savings"
+                                  : "Credit or ineligible"}
+                              </span>
+                            </p>
+                            <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                              <span
+                                className={cx(
+                                  "inline-flex items-center rounded-full px-2.5 py-0.5 text-[11px] font-medium",
+                                  isConnected
+                                    ? "bg-emerald-100 text-emerald-700"
+                                    : "bg-amber-100 text-amber-700",
+                                )}
+                              >
+                                {isConnected
+                                  ? syncStatusLabel(account.sync)
+                                  : "Reconnect required"}
+                              </span>
+                              {isRentCollectionAccount ? (
+                                <span className="inline-flex items-center rounded-full bg-emerald-600 px-2.5 py-0.5 text-[11px] font-semibold text-white">
+                                  Rent collection
                                 </span>
-                              </p>
-                              <div className="mt-3 flex flex-wrap items-center gap-2">
-                                <span
-                                  className={cx(
-                                    "inline-flex items-center rounded-full px-3 py-1 text-xs font-medium",
-                                    isConnected
-                                      ? "bg-emerald-100 text-emerald-700"
-                                      : "bg-amber-100 text-amber-700",
-                                  )}
-                                >
-                                  {isConnected
-                                    ? syncStatusLabel(account.sync)
-                                    : "Reconnect required"}
-                                </span>
-                                {isRentCollectionAccount ? (
-                                  <span className="inline-flex items-center rounded-full bg-emerald-600 px-3 py-1 text-xs font-semibold text-white">
-                                    Rent collection
-                                  </span>
-                                ) : null}
-                              </div>
+                              ) : null}
                             </div>
                           </div>
-                          <div className="flex min-w-0 flex-col gap-3 md:items-end">
-                            <p
-                              className={cx(
-                                "max-w-full text-right text-lg font-semibold tracking-tight sm:text-xl",
-                                account.balance >= 0 ? "text-slate-950" : "text-red-600",
-                              )}
-                            >
-                              {account.balance < 0 ? "-" : ""}
-                              {formatCurrency(Math.abs(account.balance))}
-                            </p>
-                            <div className="flex w-full flex-wrap items-center gap-3 md:justify-end">
+                        </div>
+                        <div className="flex min-w-0 flex-col gap-2 md:items-end">
+                          <p
+                            className={cx(
+                              "max-w-full text-right text-xl font-semibold tracking-tight",
+                              account.balance >= 0 ? "text-slate-950" : "text-red-600",
+                            )}
+                          >
+                            {account.balance < 0 ? "-" : ""}
+                            {formatCurrency(Math.abs(account.balance))}
+                          </p>
+                          <div className="flex w-full flex-wrap items-center gap-2 md:justify-end">
+                            {isRentCollectionEligible ? (
                               <RentCollectionAccountRadio
                                 connectedAccountId={account.id}
                                 checked={isRentCollectionAccount}
                                 disabled={isRentCollectionDisabled}
                               />
-                              {account.plaidItemId ? (
-                                <PlaidRemoveButton plaidItemId={account.plaidItemId} />
-                              ) : null}
-                            </div>
-                            <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500 md:justify-end">
-                              <span>{account.status}</span>
-                            </div>
+                            ) : null}
+                            {account.plaidItemId ? (
+                              <PlaidRemoveButton
+                                plaidItemId={account.plaidItemId}
+                                plaidAccountId={account.plaidAccountId}
+                                accountName={account.name}
+                              />
+                            ) : null}
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2 text-[11px] text-slate-500 md:justify-end">
+                            <span>{account.status}</span>
                           </div>
                         </div>
-                      </article>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          </article>
-        </section>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </article>
 
-        <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
+        <section className="rounded-lg border border-slate-200 bg-white shadow-sm xl:col-span-2">
           <div className="flex flex-col gap-4 border-b border-slate-200 p-5 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 className="text-lg font-semibold text-slate-950">
@@ -788,6 +838,7 @@ export default async function AccountsPage({
             <AccountsYearSelect
               selectedYear={selectedYear}
               yearOptions={yearOptions}
+              selectedRange={selectedRange}
             />
           </div>
           <div className="p-5">
@@ -808,6 +859,7 @@ export default async function AccountsPage({
               />
             )}
           </div>
+        </section>
         </section>
 
         <section className="rounded-lg border border-slate-200 bg-white shadow-sm">

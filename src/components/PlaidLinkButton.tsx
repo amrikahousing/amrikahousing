@@ -144,7 +144,7 @@ export function PlaidLinkButton() {
   }
 
   return (
-    <div className="flex flex-col items-end gap-1">
+    <div className="relative flex flex-col items-end">
       <button
         type="button"
         onClick={connectAccount}
@@ -188,8 +188,16 @@ export function PlaidLinkButton() {
           {isConnecting ? "Opening Plaid" : "Add bank account with Plaid"}
         </span>
       </button>
-      {message ? <p className="text-sm text-emerald-700">{message}</p> : null}
-      {error ? <p className="text-sm text-red-600">{error}</p> : null}
+      {message ? (
+        <p className="absolute right-0 top-full mt-1 whitespace-nowrap text-sm text-emerald-700">
+          {message}
+        </p>
+      ) : null}
+      {error ? (
+        <p className="absolute right-0 top-full mt-1 whitespace-nowrap text-sm text-red-600">
+          {error}
+        </p>
+      ) : null}
     </div>
   );
 }

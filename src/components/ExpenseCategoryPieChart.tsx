@@ -47,7 +47,7 @@ export function ExpenseCategoryPieChart({
   });
 
   return (
-    <div className="grid gap-6 lg:grid-cols-[320px_1fr] lg:items-center">
+    <div className="grid gap-6 lg:grid-cols-[minmax(280px,320px)_minmax(0,1fr)] lg:items-center xl:grid-cols-[320px_minmax(360px,1fr)]">
       <div className="relative mx-auto flex aspect-square w-full max-w-[320px] items-center justify-center">
         <svg
           className="h-full w-full -rotate-90 overflow-visible"
@@ -99,33 +99,39 @@ export function ExpenseCategoryPieChart({
         </div>
       </div>
 
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className="grid gap-3 xl:grid-cols-2">
         {categories.map((item, index) => {
           const share = total === 0 ? 0 : (item.amount / total) * 100;
 
           return (
             <div
               key={item.category}
-              className="flex items-center gap-3 rounded-lg border border-slate-200 p-3"
+              className="rounded-xl border border-slate-200 p-3"
             >
-              <span
-                className="h-3 w-3 shrink-0 rounded-full"
-                style={{ backgroundColor: COLORS[index % COLORS.length] }}
-                aria-hidden="true"
-              />
-              <div className="min-w-0 flex-1">
-                <p className="truncate text-sm font-semibold capitalize text-slate-800">
-                  {item.category}
-                </p>
-                <p className="text-xs text-slate-500">{formatPercent(share)} of total</p>
+              <div className="flex items-start gap-3">
+                <span
+                  className="mt-1 h-3 w-3 shrink-0 rounded-full"
+                  style={{ backgroundColor: COLORS[index % COLORS.length] }}
+                  aria-hidden="true"
+                />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold capitalize leading-5 text-slate-800">
+                    {item.category}
+                  </p>
+                  <div className="mt-2 flex items-end justify-between gap-3">
+                    <p className="text-xs font-medium text-slate-500">
+                      {formatPercent(share)} of total
+                    </p>
+                    <p className="shrink-0 whitespace-nowrap text-sm font-bold text-slate-950">
+                      {item.amount.toLocaleString("en-US", {
+                        style: "currency",
+                        currency: "USD",
+                        maximumFractionDigits: 0,
+                      })}
+                    </p>
+                  </div>
+                </div>
               </div>
-              <p className="whitespace-nowrap text-sm font-bold text-slate-950">
-                {item.amount.toLocaleString("en-US", {
-                  style: "currency",
-                  currency: "USD",
-                  maximumFractionDigits: 0,
-                })}
-              </p>
             </div>
           );
         })}

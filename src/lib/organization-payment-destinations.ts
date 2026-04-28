@@ -36,7 +36,11 @@ function toConnectedAccountId(destination: {
   plaid_account_id: string | null;
   plaid_item_id: string;
 }) {
-  return destination.plaid_account_id ?? `item:${destination.plaid_item_id}`;
+  if (!destination.plaid_account_id) {
+    return `item:${destination.plaid_item_id}`;
+  }
+
+  return `${destination.plaid_item_id}:${destination.plaid_account_id}`;
 }
 
 function formatDestination(destination: {
@@ -125,7 +129,7 @@ export async function setOrganizationRentCollectionAccount(args: {
 
   const plaidAccountId = connectedAccount.id.startsWith("item:")
     ? null
-    : connectedAccount.id;
+    : connectedAccount.plaidAccountId;
 
   const destination = await prisma.organization_payment_destinations.upsert({
     where: { organization_id: args.organizationId },

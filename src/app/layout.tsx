@@ -3,6 +3,14 @@ import { ClerkProvider } from "@clerk/nextjs";
 import localFont from "next/font/local";
 import "./globals.css";
 
+const CLERK_JS_URL =
+  process.env.NEXT_PUBLIC_CLERK_JS_URL ??
+  "https://cdn.jsdelivr.net/npm/@clerk/clerk-js@6/dist/clerk.browser.js";
+
+const CLERK_UI_URL =
+  process.env.NEXT_PUBLIC_CLERK_UI_URL ??
+  "https://cdn.jsdelivr.net/npm/@clerk/ui@1/dist/ui.browser.js";
+
 const geistSans = localFont({
   src: "../../node_modules/next/dist/next-devtools/server/font/geist-latin.woff2",
   variable: "--font-geist-sans",
@@ -32,6 +40,8 @@ export default function RootLayout({
       afterSignOutUrl="/login"
       signInUrl="/login"
       signUpUrl="/signup"
+      __internal_clerkJSUrl={CLERK_JS_URL}
+      __internal_clerkUIUrl={CLERK_UI_URL}
     >
       <html
         lang="en"
