@@ -195,6 +195,7 @@ export default async function AccountsPage({
   const selectedRange: ChartRange =
     requestedRange === "3m" ||
     requestedRange === "6m" ||
+    requestedRange === "12m" ||
     requestedRange === "ytd"
       ? requestedRange
       : "ytd";
