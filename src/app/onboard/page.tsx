@@ -1,15 +1,15 @@
 import { auth } from "@clerk/nextjs/server";
-import { redirect } from "next/navigation";
 import { OrganizationList } from "@clerk/nextjs";
+import { redirect } from "next/navigation";
 import { isInternalAdmin } from "@/lib/internal-admin";
 
 export default async function OnboardPage() {
   const { userId, orgId } = await auth();
   const internalAdmin = await isInternalAdmin();
-  const afterOrganizationUrl = internalAdmin ? "/internal/provision" : "/dashboard";
+  const afterOrganizationUrl = internalAdmin ? "/internal/provision" : "/onboard";
 
   if (!userId) redirect("/login");
-  if (orgId) redirect(afterOrganizationUrl);
+  if (orgId) redirect(internalAdmin ? "/internal/provision" : "/dashboard");
 
   return (
     <main className="relative z-0 flex min-h-screen items-center justify-center px-5 py-10 text-white">

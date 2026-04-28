@@ -12,16 +12,8 @@ import {
   syncPlaidTransferEvents,
   type PlaidLinkSuccessMetadata,
 } from "@/lib/plaid";
-import { requireOrganizationRentCollectionAccount } from "@/lib/organization-payment-destinations";
+import { requireOrganizationRentCollectionFundingAccount } from "@/lib/organization-payment-destinations";
 import { getStripeServer } from "@/lib/stripe";
-
-const IN_FLIGHT_PAYMENT_ATTEMPT_STATUSES = [
-  "requires_action",
-  "requires_capture",
-  "requires_confirmation",
-  "requires_payment_method",
-  "processing",
-] as const;
 
 const IN_FLIGHT_PLAID_ATTEMPT_STATUSES = [
   "authorized",
@@ -323,6 +315,12 @@ export async function setDefaultPaymentMethodForTenant(ctx: TenantContext, metho
     throw new Error("Payment method not found.");
   }
 
+  if (method.payment_provider !== "plaid" || method.payment_type !== "us_bank_account") {
+    throw new Error(
+      "Only ACH bank accounts can be used for rent collection. Link a bank account to receive rent in the organization's bank account.",
+    );
+  }
+
   await prisma.$transaction(async (tx) => {
     await tx.renter_payment_methods.updateMany({
       where: {
@@ -457,19 +455,13 @@ export async function setAutopayEnabledForTenant(ctx: TenantContext, enabled: bo
       is_active: true,
       deleted_at: null,
     },
-    select: { id: true, payment_provider: true, payment_type: true },
+    select: { id: true },
   });
 
-  if (enabled && !defaultMethod) {
-    throw new Error("Add and select a default payment method before enabling auto-pay.");
-  }
-
-  if (
-    enabled &&
-    defaultMethod &&
-    (defaultMethod.payment_provider !== "stripe" || defaultMethod.payment_type !== "card")
-  ) {
-    throw new Error("Auto-pay is currently available only for saved card payments.");
+  if (enabled) {
+    throw new Error(
+      "Auto-pay is unavailable right now. Rent payments must be submitted as ACH so funds land in the organization's receiving bank account.",
+    );
   }
 
   await prisma.renter_payment_settings.upsert({
@@ -545,99 +537,9 @@ export async function createPaymentAttempt(
     throw new Error("Use the Plaid ACH flow for this payment method.");
   }
 
-  const normalizedAmount = payment.amount.toFixed(2);
-  if (normalizedAmount !== args.amount) {
-    throw new Error("Payment amount does not match the current charge.");
-  }
-
-  const stripe = getStripeServer();
-  const existingAttempt = await prisma.payment_attempts.findFirst({
-    where: {
-      payment_id: payment.id,
-      tenant_id: ctx.tenantId,
-      renter_payment_method_id: method.id,
-      status: {
-        in: [...IN_FLIGHT_PAYMENT_ATTEMPT_STATUSES],
-      },
-    },
-    orderBy: { created_at: "desc" },
-    select: {
-      id: true,
-      stripe_payment_intent_id: true,
-      status: true,
-    },
-  });
-
-  if (existingAttempt) {
-    if (!existingAttempt.stripe_payment_intent_id) {
-      throw new Error("Saved payment attempt is missing its Stripe payment intent.");
-    }
-    const existingIntent = await stripe.paymentIntents.retrieve(existingAttempt.stripe_payment_intent_id);
-    if (existingIntent.status === "succeeded") {
-      await markPaymentIntentSucceeded(existingIntent);
-    } else if (existingIntent.status === "requires_payment_method" || existingIntent.status === "canceled") {
-      await prisma.payment_attempts.updateMany({
-        where: { stripe_payment_intent_id: existingIntent.id },
-        data: {
-          status: existingIntent.status,
-          failure_code: existingIntent.last_payment_error?.code ?? null,
-          failure_message: existingIntent.last_payment_error?.message ?? null,
-          updated_at: new Date(),
-        },
-      });
-    }
-
-    return {
-      attempt: existingAttempt,
-      paymentIntent: existingIntent,
-    };
-  }
-
-  const idempotencyKey = `${payment.id}:${method.id}`;
-  const paymentIntent = await stripe.paymentIntents.create(
-    {
-      amount: toStripeAmountInMinorUnits(payment.amount),
-      currency: payment.currency.toLowerCase(),
-      customer: method.stripe_customer_id,
-      payment_method: method.stripe_payment_method_id,
-      confirmation_method: "automatic",
-      confirm: false,
-      metadata: {
-        organizationId: ctx.organizationId,
-        paymentId: payment.id,
-        renterPaymentMethodId: method.id,
-        tenantId: ctx.tenantId,
-        sharedUserId: ctx.sharedUserId ?? "",
-      },
-    },
-    { idempotencyKey },
+  throw new Error(
+    "Card payments are unavailable for rent collection. Pay with a linked bank account so funds settle to the organization's receiving account.",
   );
-
-  const attempt = await prisma.payment_attempts.create({
-    data: {
-      payment_id: payment.id,
-      tenant_id: ctx.tenantId,
-      user_id: ctx.sharedUserId,
-      organization_id: ctx.organizationId,
-      renter_payment_method_id: method.id,
-      payment_provider: "stripe",
-      stripe_payment_intent_id: paymentIntent.id,
-      idempotency_key: idempotencyKey,
-      amount: payment.amount,
-      currency: payment.currency,
-      status: paymentIntent.status,
-    },
-    select: {
-      id: true,
-      stripe_payment_intent_id: true,
-      status: true,
-    },
-  });
-
-  return {
-    attempt,
-    paymentIntent,
-  };
 }
 
 export async function createPlaidLinkTokenForTenant(ctx: TenantContext) {
@@ -804,7 +706,7 @@ async function getPlaidTransferContext(
     throw new Error("Payment amount does not match the current charge.");
   }
 
-  const rentCollectionAccount = await requireOrganizationRentCollectionAccount(
+  const rentCollectionAccount = await requireOrganizationRentCollectionFundingAccount(
     ctx.organizationId,
   );
 
@@ -833,7 +735,7 @@ export async function authorizePlaidPaymentAttempt(
     userAgent: string | null;
   },
 ) {
-  const { payment, method } = await getPlaidTransferContext(ctx, args);
+  const { payment, method, rentCollectionAccount } = await getPlaidTransferContext(ctx, args);
   const existingAttempt = await prisma.payment_attempts.findFirst({
     where: {
       payment_id: payment.id,
@@ -874,6 +776,7 @@ export async function authorizePlaidPaymentAttempt(
     amount: args.amount,
     idempotencyKey,
     emailAddress: payment.tenants?.email ?? null,
+    fundingAccountId: rentCollectionAccount.plaidFundingAccountId,
   });
 
   if ("error" in authorization) {
@@ -959,6 +862,7 @@ export async function createPlaidTransferForAttempt(
     accountId: method.plaid_account_id,
     amount: args.amount,
     description: "RENT",
+    fundingAccountId: rentCollectionAccount.plaidFundingAccountId,
     metadata: {
       paymentId: payment.id,
       renterPaymentMethodId: method.id,

@@ -3,6 +3,7 @@ import Image from "next/image";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AccountsYearSelect } from "@/components/AccountsYearSelect";
+import { AccountsRangeSelect } from "@/components/AccountsRangeSelect";
 import { AppShell } from "@/components/AppShell";
 import { ExpenseCategoryPieChart } from "@/components/ExpenseCategoryPieChart";
 import { PlaidLinkButton } from "@/components/PlaidLinkButton";
@@ -325,24 +326,10 @@ export default async function AccountsPage({
     .join(" ");
   const revenueAreaPoints = `0,${chartHeight} ${revenuePoints} ${chartWidth},${chartHeight}`;
   const expenseAreaPoints = `0,${chartHeight} ${expensePoints} ${chartWidth},${chartHeight}`;
-  const chartRangeOptions: Array<{ id: ChartRange; label: string }> = [
-    { id: "3m", label: "3M" },
-    { id: "6m", label: "6M" },
-    { id: "12m", label: "12M" },
-    { id: "ytd", label: "YTD" },
-  ];
   const chartSubtitle =
     selectedRange === "ytd"
       ? `${selectedYear} year to date . all properties`
       : `Trailing ${chartMonthCount} months . all properties`;
-  const chartRangeHref = (range: ChartRange) => {
-    const params = new URLSearchParams({
-      year: String(selectedYear),
-      range,
-    });
-    return `/accounts?${params.toString()}`;
-  };
-
   const ytdStart = new Date(selectedYear, 0, 1);
   const ytdEnd =
     selectedYear === currentYear ? now : new Date(selectedYear + 1, 0, 1);
@@ -462,23 +449,7 @@ export default async function AccountsPage({
                   {chartSubtitle}
                 </p>
               </div>
-              <div className="inline-flex h-12 items-center rounded-2xl border border-stone-200 bg-stone-50 p-1 text-xs font-medium text-slate-500 shadow-sm sm:text-sm">
-                {chartRangeOptions.map((option) => (
-                  <Link
-                    key={option.id}
-                    href={chartRangeHref(option.id)}
-                    scroll={false}
-                    className={cx(
-                      "inline-flex h-10 items-center rounded-xl px-4 sm:px-5",
-                      selectedRange === option.id
-                        ? "bg-white text-slate-950 shadow-sm ring-1 ring-stone-200"
-                        : "text-slate-500 hover:text-slate-700",
-                    )}
-                  >
-                    {option.label}
-                  </Link>
-                ))}
-              </div>
+              <AccountsRangeSelect selectedRange={selectedRange} selectedYear={selectedYear} />
             </div>
             <div className="h-[310px] px-5 pb-5">
               <div className="grid h-full grid-cols-[44px_1fr] grid-rows-[1fr_24px]">

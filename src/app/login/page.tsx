@@ -314,6 +314,16 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     }
   }
 
+  async function navigateAfterAuth(destination: string) {
+    const activeTask = clerk.session?.currentTask;
+    if (activeTask) {
+      await clerk.redirectToTasks({ redirectUrl: destination });
+      return;
+    }
+
+    window.location.href = destination;
+  }
+
   async function completeSignIn() {
     const { error: finalizeError } = await signIn.finalize();
     if (finalizeError) {
@@ -321,7 +331,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
       return;
     }
 
-    window.location.href = await resolvePostSignInDestination();
+    await navigateAfterAuth(await resolvePostSignInDestination());
   }
 
   function redirectToInviteLoginNotice() {
@@ -364,9 +374,9 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
         role === "renter"
           ? "/renter"
           : inviteTicket || role === "property_manager"
-            ? "/onboarding"
+            ? "/onboard"
             : "/dashboard";
-      window.location.href = dest;
+      await navigateAfterAuth(dest);
       return;
     }
 
@@ -393,7 +403,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
       const trimmedEmail = email.trim().toLowerCase();
 
       if (activeEmail?.toLowerCase() === trimmedEmail) {
-        window.location.href = await resolvePostSignInDestination();
+        await navigateAfterAuth(await resolvePostSignInDestination());
         return;
       }
 

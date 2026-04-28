@@ -101,10 +101,23 @@ export async function requireOrganizationRentCollectionAccount(organizationId: s
   return destination;
 }
 
+export async function requireOrganizationRentCollectionFundingAccount(organizationId: string) {
+  const destination = await requireOrganizationRentCollectionAccount(organizationId);
+
+  if (!destination.plaidFundingAccountId) {
+    throw new Error(
+      "This organization has not finished configuring the bank account that should receive rent. Ask your property manager to reconnect the rent collection account so ACH payments can settle to the correct bank account.",
+    );
+  }
+
+  return destination;
+}
+
 export async function setOrganizationRentCollectionAccount(args: {
   organizationId: string;
   clerkOrgId: string;
   connectedAccountId: string;
+  plaidFundingAccountId?: string | null;
 }) {
   const accountingData = await getAccountingData(args.clerkOrgId);
   const connectedAccount = accountingData.accountSummaries.find(
@@ -139,6 +152,7 @@ export async function setOrganizationRentCollectionAccount(args: {
       destination_account_label: connectedAccount.name,
       bank_institution_name: connectedAccount.provider,
       is_active: true,
+      plaid_funding_account_id: args.plaidFundingAccountId ?? undefined,
       updated_at: new Date(),
     },
     create: {
@@ -148,6 +162,7 @@ export async function setOrganizationRentCollectionAccount(args: {
       destination_account_label: connectedAccount.name,
       bank_institution_name: connectedAccount.provider,
       is_active: true,
+      plaid_funding_account_id: args.plaidFundingAccountId ?? null,
     },
     select: {
       id: true,

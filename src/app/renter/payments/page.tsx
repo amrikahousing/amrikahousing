@@ -6,7 +6,6 @@ import { getPortalAccessState } from "@/lib/portal-access";
 import { getPlaidConfig } from "@/lib/plaid";
 import { resolveSharedUserIdentity } from "@/lib/renter-auth";
 import { getTenantPaymentProfile } from "@/lib/renter-payments";
-import { isStripeConfigured } from "@/lib/stripe";
 import { PaymentsClient } from "./PaymentsClient";
 
 type SavedPaymentMethodView = {
@@ -25,10 +24,6 @@ type SavedPaymentMethodView = {
   isDefault: boolean;
   isActive: boolean;
 };
-
-function buildDefaultBillingName(parts: Array<string | null | undefined>) {
-  return parts.filter(Boolean).join(" ").trim();
-}
 
 function formatSavedMethodLabel(method: {
   paymentType: string;
@@ -131,17 +126,10 @@ export default async function RenterPaymentsPage() {
     ? formatSavedMethodLabel(defaultMethod)
     : allPayments.find((payment) => payment.payment_method)?.payment_method ?? null;
   const nextPending = pendingPayments.find((payment) => payment.due_date) ?? pendingPayments[0] ?? null;
-  const defaultBillingName = buildDefaultBillingName([
-    identity.sharedUser?.first_name ?? identity.clerkUser?.firstName ?? tenant?.first_name,
-    identity.sharedUser?.last_name ?? identity.clerkUser?.lastName,
-  ]);
-
   return (
     <RenterShell user={shellUser}>
       <PaymentsClient
-        customerEmail={shellUser.email}
         currentBalance={totalPending}
-        defaultBillingName={defaultBillingName}
         totalPaid={totalPaid}
         autopayEnabled={paymentProfile?.renter_payment_settings?.autopay_enabled ?? false}
         defaultPaymentMethodId={paymentProfile?.renter_payment_settings?.default_payment_method_id ?? null}
@@ -159,7 +147,6 @@ export default async function RenterPaymentsPage() {
         }))}
         savedPaymentMethods={savedPaymentMethods}
         plaidConfigured={plaidConfigured}
-        stripeConfigured={isStripeConfigured()}
       />
     </RenterShell>
   );

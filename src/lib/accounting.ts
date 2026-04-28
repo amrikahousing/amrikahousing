@@ -945,30 +945,7 @@ export async function getAccountingData(orgId: string): Promise<AccountingData> 
       .filter((key): key is string => key !== null),
   );
 
-  let plaidTxRows = initialPlaidTxRows;
-  const syncablePlaidItems = plaidItems.filter(
-    (item) => item.status === "connected" && item.sync_enabled,
-  );
-  if (syncablePlaidItems.length > 0) {
-    const itemIdsWithTx = new Set(initialPlaidTxRows.map((r) => r.plaid_items.id));
-    const anyItemMissingTx = syncablePlaidItems.some(
-      (item) => !itemIdsWithTx.has(item.id),
-    );
-    const anyTxMissingDetails = initialPlaidTxRows.some(
-      (row) =>
-        row.category_icon_url === null ||
-        (row.merchant_logo_url === null &&
-          row.merchant_entity_id === null &&
-          row.counterparty_type === null),
-    );
-    const anyRecentlyLinkedItem = syncablePlaidItems.some((item) =>
-      itemNeedsFullPlaidResync(item),
-    );
-    if (anyItemMissingTx || anyTxMissingDetails || anyRecentlyLinkedItem) {
-      await syncPlaidItemsToDb(orgId);
-      plaidTxRows = await plaidTransactionsQuery(orgId);
-    }
-  }
+  const plaidTxRows = initialPlaidTxRows;
 
   const rules: AccountingVendorRule[] = vendorRules;
   const actorIds = Array.from(

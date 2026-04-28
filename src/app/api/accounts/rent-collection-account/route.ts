@@ -7,6 +7,7 @@ import {
 
 type PostBody = {
   connectedAccountId?: unknown;
+  plaidFundingAccountId?: unknown;
 };
 
 export async function POST(request: Request) {
@@ -34,6 +35,10 @@ export async function POST(request: Request) {
       organizationId: access.orgDbId,
       clerkOrgId: access.orgId,
       connectedAccountId: body.connectedAccountId.trim(),
+      plaidFundingAccountId:
+        typeof body.plaidFundingAccountId === "string" && body.plaidFundingAccountId.trim()
+          ? body.plaidFundingAccountId.trim()
+          : null,
     });
 
     return NextResponse.json({ destination });

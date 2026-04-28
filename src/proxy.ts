@@ -10,7 +10,7 @@ const isPublicRoute = createRouteMatcher([
 
 // Routes that require an active org (not just authentication)
 const isSignupRoute = createRouteMatcher(["/signup(.*)"]);
-const isOnboardingRoute = createRouteMatcher(["/onboarding(.*)"]);
+const isLegacyOnboardingRoute = createRouteMatcher(["/onboarding(.*)"]);
 
 const isOrgRoute = createRouteMatcher([
   "/dashboard(.*)",
@@ -24,12 +24,20 @@ const isOrgRoute = createRouteMatcher([
 ]);
 
 export default clerkMiddleware(async (auth, request) => {
-  if (isOnboardingRoute(request) && request.nextUrl.searchParams.has("__clerk_ticket")) {
+  if (isLegacyOnboardingRoute(request) && request.nextUrl.searchParams.has("__clerk_ticket")) {
     const signup = new URL("/signup", request.url);
     request.nextUrl.searchParams.forEach((value, key) => {
       signup.searchParams.set(key, value);
     });
     return NextResponse.redirect(signup);
+  }
+
+  if (isLegacyOnboardingRoute(request)) {
+    const onboard = new URL("/onboard", request.url);
+    request.nextUrl.searchParams.forEach((value, key) => {
+      onboard.searchParams.set(key, value);
+    });
+    return NextResponse.redirect(onboard);
   }
 
   if (isSignupRoute(request) && !request.nextUrl.searchParams.has("__clerk_ticket")) {

@@ -296,12 +296,14 @@ export async function createPlaidTransferAuthorization(args: {
   amount: string;
   idempotencyKey: string;
   emailAddress?: string | null;
+  fundingAccountId?: string | null;
 }) {
   const result = await plaidPost<PlaidTransferAuthorizationResponse>(
     "/transfer/authorization/create",
     {
       access_token: args.accessToken,
       account_id: args.accountId,
+      funding_account_id: args.fundingAccountId ?? undefined,
       type: "debit",
       network: "ach",
       ach_class: "web",
@@ -331,6 +333,7 @@ export async function createPlaidTransfer(args: {
   amount: string;
   description: string;
   metadata?: Record<string, string>;
+  fundingAccountId?: string | null;
 }) {
   const result = await plaidPost<PlaidTransferCreateResponse>(
     "/transfer/create",
@@ -338,6 +341,7 @@ export async function createPlaidTransfer(args: {
       authorization_id: args.authorizationId,
       access_token: args.accessToken,
       account_id: args.accountId,
+      funding_account_id: args.fundingAccountId ?? undefined,
       amount: args.amount,
       description: args.description,
       metadata: args.metadata,
