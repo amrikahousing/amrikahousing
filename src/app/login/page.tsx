@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useMemo, useState } from "react";
-import { useAuth, useClerk, useSignIn, useSignUp } from "@clerk/nextjs";
+import { useAuth, useClerk, useSignIn, useSignUp, useUser } from "@clerk/nextjs";
 import { isClerkAPIResponseError } from "@clerk/nextjs/errors";
 
 type LoginRole = "property_manager" | "renter";
@@ -158,6 +158,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
   const { signUp, errors: signUpErrors, fetchStatus: signUpFetchStatus } =
     useSignUp();
   const { isSignedIn } = useAuth();
+  const { user } = useUser();
   const clerk = useClerk();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const isLoading =
@@ -399,7 +400,10 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     };
 
     const handleExistingSession = async () => {
-      const activeEmail = await getActiveSessionEmail();
+      const activeEmail =
+        user?.primaryEmailAddress?.emailAddress ??
+        clerk.user?.primaryEmailAddress?.emailAddress ??
+        (await getActiveSessionEmail());
       const trimmedEmail = email.trim().toLowerCase();
 
       if (activeEmail?.toLowerCase() === trimmedEmail) {
