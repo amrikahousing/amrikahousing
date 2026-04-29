@@ -6,6 +6,11 @@ import Link from "next/link";
 import { AppShell } from "@/components/AppShell";
 import { PropertiesList } from "@/components/PropertiesList";
 import { prisma } from "@/lib/db";
+import {
+  getOrgPermissionContext,
+  propertyScopeWhere,
+  requirePermission,
+} from "@/lib/org-authorization";
 
 function SparklesIcon({ className = "" }: { className?: string }) {
   return (
@@ -33,24 +38,23 @@ function PlusIcon({ className = "" }: { className?: string }) {
 }
 
 export default async function PropertiesPage() {
-  const { userId, orgId } = await auth();
+  const { userId } = await auth();
   if (!userId) redirect("/login");
+  const access = await getOrgPermissionContext();
+  if ("error" in access) redirect("/dashboard");
+  const viewError = requirePermission(access, "view_properties");
+  if (viewError) redirect("/dashboard");
 
-  const properties = orgId
-    ? await prisma.properties.findMany({
-        where: {
-          organizations: { clerk_org_id: orgId },
-          deleted_at: null,
-        },
-        include: {
-          units: {
-            where: { deleted_at: null },
-            orderBy: { unit_number: "asc" },
-          },
-        },
-        orderBy: { created_at: "desc" },
-      })
-    : [];
+  const properties = await prisma.properties.findMany({
+    where: propertyScopeWhere(access),
+    include: {
+      units: {
+        where: { deleted_at: null },
+        orderBy: { unit_number: "asc" },
+      },
+    },
+    orderBy: { created_at: "desc" },
+  });
 
   const propertyGroups = properties.map((property) => ({
     id: property.id,
@@ -89,13 +93,15 @@ export default async function PropertiesPage() {
               <SparklesIcon className="h-4 w-4" />
               Add with AI
             </Link>
-            <Link
-              href="/properties/new"
-              className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
-            >
-              <PlusIcon className="h-4 w-4" />
-              Add property
-            </Link>
+            {access.permissions.create_properties ? (
+              <Link
+                href="/properties/new"
+                className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+              >
+                <PlusIcon className="h-4 w-4" />
+                Add property
+              </Link>
+            ) : null}
           </div>
         </header>
 

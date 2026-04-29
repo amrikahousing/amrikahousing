@@ -1,5 +1,5 @@
-import { requireOrgAccess, isAccessError } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { getOrgPermissionContext, requirePropertyPermission } from "@/lib/org-authorization";
 
 type RouteContext = {
   params: Promise<{ id: string; unitId: string }>;
@@ -30,12 +30,16 @@ async function findScopedUnit(propertyId: string, unitId: string, organizationId
 }
 
 export async function PATCH(request: Request, context: RouteContext) {
-  const ctx = await requireOrgAccess();
-  if (isAccessError(ctx)) {
+  const ctx = await getOrgPermissionContext();
+  if ("error" in ctx) {
     return Response.json({ error: ctx.error }, { status: ctx.status });
   }
 
   const { id, unitId } = await context.params;
+  const permissionError = requirePropertyPermission(ctx, "manage_units", id);
+  if (permissionError) {
+    return Response.json({ error: permissionError.error }, { status: permissionError.status });
+  }
   const unit = await findScopedUnit(id, unitId, ctx.orgDbId);
 
   if (!unit) {
@@ -99,12 +103,16 @@ export async function PATCH(request: Request, context: RouteContext) {
 }
 
 export async function DELETE(_request: Request, context: RouteContext) {
-  const ctx = await requireOrgAccess();
-  if (isAccessError(ctx)) {
+  const ctx = await getOrgPermissionContext();
+  if ("error" in ctx) {
     return Response.json({ error: ctx.error }, { status: ctx.status });
   }
 
   const { id, unitId } = await context.params;
+  const permissionError = requirePropertyPermission(ctx, "manage_units", id);
+  if (permissionError) {
+    return Response.json({ error: permissionError.error }, { status: permissionError.status });
+  }
   const unit = await findScopedUnit(id, unitId, ctx.orgDbId);
 
   if (!unit) {

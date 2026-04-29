@@ -1,16 +1,20 @@
 import { NextResponse } from "next/server";
 import { getTransactionsMatchingRule } from "@/lib/accounting-rule-matches";
-import { isAccessError, requireOrgAccess } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { getOrgPermissionContext, requirePermission } from "@/lib/org-authorization";
 
 function cleanText(value: unknown) {
   return typeof value === "string" ? value.trim() : "";
 }
 
 export async function POST(request: Request) {
-  const access = await requireOrgAccess();
-  if (isAccessError(access)) {
+  const access = await getOrgPermissionContext();
+  if ("error" in access) {
     return NextResponse.json({ error: access.error }, { status: access.status });
+  }
+  const permissionError = requirePermission(access, "manage_accounting");
+  if (permissionError) {
+    return NextResponse.json({ error: permissionError.error }, { status: permissionError.status });
   }
 
   const body = (await request.json().catch(() => null)) as {

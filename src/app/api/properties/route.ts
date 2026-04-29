@@ -1,5 +1,6 @@
-import { requireOrgAccess, isAccessError } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { getOrgPermissionContext, requirePermission } from "@/lib/org-authorization";
+import { assignPropertiesToUser } from "@/lib/permissions";
 import { isSupportedPropertyType } from "@/lib/property-types";
 
 type UnitInput = {
@@ -23,9 +24,13 @@ type PropertyInput = {
 };
 
 export async function POST(request: Request) {
-  const ctx = await requireOrgAccess();
-  if (isAccessError(ctx)) {
+  const ctx = await getOrgPermissionContext();
+  if ("error" in ctx) {
     return Response.json({ error: ctx.error }, { status: ctx.status });
+  }
+  const permissionError = requirePermission(ctx, "create_properties");
+  if (permissionError) {
+    return Response.json({ error: permissionError.error }, { status: permissionError.status });
   }
 
   let body: PropertyInput;
@@ -74,6 +79,9 @@ export async function POST(request: Request) {
   }
 
   await prisma.units.createMany({ data: unitData });
+  if (!ctx.isOrgAdmin && ctx.userDbId) {
+    await assignPropertiesToUser(ctx.userDbId, [property.id]);
+  }
 
   return Response.json({ propertyId: property.id }, { status: 201 });
 }

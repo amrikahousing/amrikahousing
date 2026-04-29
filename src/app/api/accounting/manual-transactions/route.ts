@@ -1,10 +1,10 @@
 import { currentUser } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
 import { canonicalAccountingCategory } from "@/lib/accounting-categories";
-import { isAccessError, requireOrgAccess } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import { manualMerchantMetadata } from "@/lib/manual-merchant-logos";
 import type { SerializedAccountingTransaction } from "@/lib/accounting";
+import { getOrgPermissionContext, requirePermission } from "@/lib/org-authorization";
 
 function cleanText(value: unknown, limit: number) {
   if (typeof value !== "string") return "";
@@ -95,9 +95,13 @@ function serializeManualTransaction(
 }
 
 export async function POST(request: Request) {
-  const [access, user] = await Promise.all([requireOrgAccess(), currentUser()]);
-  if (isAccessError(access)) {
+  const [access, user] = await Promise.all([getOrgPermissionContext(), currentUser()]);
+  if ("error" in access) {
     return NextResponse.json({ error: access.error }, { status: access.status });
+  }
+  const permissionError = requirePermission(access, "manage_accounting");
+  if (permissionError) {
+    return NextResponse.json({ error: permissionError.error }, { status: permissionError.status });
   }
 
   const body = (await request.json().catch(() => null)) as {
@@ -152,9 +156,13 @@ export async function POST(request: Request) {
 }
 
 export async function PATCH(request: Request) {
-  const [access, user] = await Promise.all([requireOrgAccess(), currentUser()]);
-  if (isAccessError(access)) {
+  const [access, user] = await Promise.all([getOrgPermissionContext(), currentUser()]);
+  if ("error" in access) {
     return NextResponse.json({ error: access.error }, { status: access.status });
+  }
+  const permissionError = requirePermission(access, "manage_accounting");
+  if (permissionError) {
+    return NextResponse.json({ error: permissionError.error }, { status: permissionError.status });
   }
 
   const body = (await request.json().catch(() => null)) as {

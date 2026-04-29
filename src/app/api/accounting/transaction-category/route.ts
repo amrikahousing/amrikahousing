@@ -1,7 +1,7 @@
 import { currentUser } from "@clerk/nextjs/server";
 import { NextResponse } from "next/server";
-import { isAccessError, requireOrgAccess } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { getOrgPermissionContext, requirePermission } from "@/lib/org-authorization";
 
 const SOURCES = new Set(["plaid", "rent", "manual"]);
 
@@ -16,9 +16,13 @@ function normalizeCategory(value: unknown) {
 }
 
 export async function PATCH(request: Request) {
-  const [access, user] = await Promise.all([requireOrgAccess(), currentUser()]);
-  if (isAccessError(access)) {
+  const [access, user] = await Promise.all([getOrgPermissionContext(), currentUser()]);
+  if ("error" in access) {
     return NextResponse.json({ error: access.error }, { status: access.status });
+  }
+  const permissionError = requirePermission(access, "manage_accounting");
+  if (permissionError) {
+    return NextResponse.json({ error: permissionError.error }, { status: permissionError.status });
   }
 
   const body = (await request.json().catch(() => null)) as {

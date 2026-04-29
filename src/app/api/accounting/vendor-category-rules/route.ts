@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { canonicalAccountingCategory } from "@/lib/accounting-categories";
 import { cleanVendorName, normalizeRuleContext, normalizeVendorKey } from "@/lib/accounting-vendor-rules";
-import { isAccessError, requireOrgAccess } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { getOrgPermissionContext, requirePermission } from "@/lib/org-authorization";
 
 function cleanOptionalText(value: unknown, limit: number) {
   if (typeof value !== "string") return "";
@@ -10,9 +10,13 @@ function cleanOptionalText(value: unknown, limit: number) {
 }
 
 export async function GET() {
-  const access = await requireOrgAccess();
-  if (isAccessError(access)) {
+  const access = await getOrgPermissionContext();
+  if ("error" in access) {
     return NextResponse.json({ error: access.error }, { status: access.status });
+  }
+  const permissionError = requirePermission(access, "manage_accounting");
+  if (permissionError) {
+    return NextResponse.json({ error: permissionError.error }, { status: permissionError.status });
   }
 
   const rules = await prisma.accounting_vendor_category_rules.findMany({
@@ -35,9 +39,13 @@ export async function GET() {
 }
 
 export async function PATCH(request: Request) {
-  const access = await requireOrgAccess();
-  if (isAccessError(access)) {
+  const access = await getOrgPermissionContext();
+  if ("error" in access) {
     return NextResponse.json({ error: access.error }, { status: access.status });
+  }
+  const permissionError = requirePermission(access, "manage_accounting");
+  if (permissionError) {
+    return NextResponse.json({ error: permissionError.error }, { status: permissionError.status });
   }
 
   const body = (await request.json().catch(() => null)) as {
@@ -79,9 +87,13 @@ export async function PATCH(request: Request) {
 }
 
 export async function DELETE(request: Request) {
-  const access = await requireOrgAccess();
-  if (isAccessError(access)) {
+  const access = await getOrgPermissionContext();
+  if ("error" in access) {
     return NextResponse.json({ error: access.error }, { status: access.status });
+  }
+  const permissionError = requirePermission(access, "manage_accounting");
+  if (permissionError) {
+    return NextResponse.json({ error: permissionError.error }, { status: permissionError.status });
   }
 
   const body = (await request.json().catch(() => null)) as {
@@ -105,9 +117,13 @@ export async function DELETE(request: Request) {
 }
 
 export async function POST(request: Request) {
-  const access = await requireOrgAccess();
-  if (isAccessError(access)) {
+  const access = await getOrgPermissionContext();
+  if ("error" in access) {
     return NextResponse.json({ error: access.error }, { status: access.status });
+  }
+  const permissionError = requirePermission(access, "manage_accounting");
+  if (permissionError) {
+    return NextResponse.json({ error: permissionError.error }, { status: permissionError.status });
   }
 
   const body = (await request.json().catch(() => null)) as {

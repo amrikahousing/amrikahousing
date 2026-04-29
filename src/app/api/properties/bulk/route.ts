@@ -1,14 +1,19 @@
 import { randomUUID } from "crypto";
-import { requireOrgAccess, isAccessError } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import type { AiParsedProperty } from "@/lib/ai-import-types";
+import { getOrgPermissionContext, requirePermission } from "@/lib/org-authorization";
+import { assignPropertiesToUser } from "@/lib/permissions";
 import { normalizePropertyType } from "@/lib/property-types";
 
 export async function POST(request: Request) {
   try {
-    const ctx = await requireOrgAccess();
-    if (isAccessError(ctx)) {
+    const ctx = await getOrgPermissionContext();
+    if ("error" in ctx) {
       return Response.json({ error: ctx.error }, { status: ctx.status });
+    }
+    const permissionError = requirePermission(ctx, "create_properties");
+    if (permissionError) {
+      return Response.json({ error: permissionError.error }, { status: permissionError.status });
     }
 
     let body: { properties: AiParsedProperty[] };
@@ -74,6 +79,9 @@ export async function POST(request: Request) {
     });
 
     await prisma.$transaction(ops);
+    if (!ctx.isOrgAdmin && ctx.userDbId) {
+      await assignPropertiesToUser(ctx.userDbId, propertyIds);
+    }
 
     return Response.json({ importedCount: propertyIds.length, propertyIds }, { status: 201 });
   } catch (err) {

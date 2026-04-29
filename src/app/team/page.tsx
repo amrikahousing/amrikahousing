@@ -2,14 +2,19 @@ import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { PropertyManagersClient } from "@/components/PropertyManagersClient";
+import { getOrgPermissionContext, requirePermission } from "@/lib/org-authorization";
 
 export default async function TeamPage() {
-  const { userId, orgId, orgRole } = await auth();
+  const { userId, orgId } = await auth();
 
   if (!userId) redirect("/login");
   if (!orgId) redirect("/onboard");
+  const access = await getOrgPermissionContext();
+  if ("error" in access) redirect("/dashboard");
+  const permissionError = requirePermission(access, "manage_team");
+  if (permissionError) redirect("/dashboard");
 
-  const canInvite = orgRole === "org:admin";
+  const canInvite = true;
 
   return (
     <AppShell>

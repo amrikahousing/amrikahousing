@@ -1,11 +1,14 @@
 import { auth, clerkClient, currentUser } from "@clerk/nextjs/server";
 import { prisma } from "./db";
+import { syncClerkMembershipAccess } from "./permissions";
 
 export type OrgContext = {
   userId: string;
   orgId: string;
   orgDbId: string;
   userDbId: string | null;
+  orgRole: string | null;
+  isOrgAdmin: boolean;
 };
 
 type AccessError = { error: string; status: number };
@@ -98,11 +101,13 @@ export async function syncLocalUser({
   orgId,
   orgDbId,
   user,
+  orgRole,
 }: {
   userId: string;
   orgId: string;
   orgDbId?: string;
   user?: ClerkUser;
+  orgRole?: string | null;
 }) {
   let dbOrgId = orgDbId;
   if (!dbOrgId) {
@@ -121,6 +126,15 @@ export async function syncLocalUser({
       orgDbId: dbOrgId,
       user: clerkUser,
     });
+    await syncClerkMembershipAccess({
+      userId,
+      userDbId: record.id,
+      orgId,
+      orgDbId: dbOrgId,
+      isOrgAdmin: orgRole === "org:admin",
+    }).catch((error) => {
+      console.warn("[syncClerkMembershipAccess]", error);
+    });
     return record.id;
   } catch (error) {
     console.warn("[syncLocalUser]", error);
@@ -134,7 +148,7 @@ export async function syncLocalUser({
  * Returns OrgContext on success, AccessError on failure.
  */
 export async function requireOrgAccess(): Promise<OrgContext | AccessError> {
-  const [{ userId, orgId }, user] = await Promise.all([
+  const [{ userId, orgId, orgRole }, user] = await Promise.all([
     auth(),
     currentUser().catch(() => null),
   ]);
@@ -163,9 +177,17 @@ export async function requireOrgAccess(): Promise<OrgContext | AccessError> {
     orgId,
     orgDbId: org.id,
     user,
+    orgRole,
   });
 
-  return { userId, orgId, orgDbId: org.id, userDbId };
+  return {
+    userId,
+    orgId,
+    orgDbId: org.id,
+    userDbId,
+    orgRole: orgRole ?? null,
+    isOrgAdmin: orgRole === "org:admin",
+  };
 }
 
 export function isAccessError(v: OrgContext | AccessError): v is AccessError {

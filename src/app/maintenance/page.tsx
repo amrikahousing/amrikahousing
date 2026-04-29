@@ -9,20 +9,23 @@ import type {
   RequestStatus,
 } from "@/components/MaintenanceClient";
 import { prisma } from "@/lib/db";
+import { getOrgPermissionContext, propertyScopeWhere, requirePermission } from "@/lib/org-authorization";
 
 export default async function MaintenancePage() {
-  const { userId, orgId } = await auth();
+  const { userId } = await auth();
   if (!userId) redirect("/login");
+  const access = await getOrgPermissionContext();
+  if ("error" in access) redirect("/dashboard");
+  const permissionError = requirePermission(access, "manage_maintenance");
+  if (permissionError) redirect("/dashboard");
   const role = "manager";
 
   const maintenanceRequests = await prisma.maintenance_requests.findMany({
-    where: orgId
-      ? {
-          organizations: { clerk_org_id: orgId },
-        }
-      : {
-          organization_id: "__missing_org__",
-        },
+    where: {
+      units: {
+        properties: propertyScopeWhere(access),
+      },
+    },
     include: {
       units: {
         include: {
@@ -43,15 +46,10 @@ export default async function MaintenancePage() {
     orderBy: [{ created_at: "desc" }],
   });
 
-  const properties = orgId
-    ? await prisma.properties.findMany({
-        where: {
-          organizations: { clerk_org_id: orgId },
-          deleted_at: null,
-        },
-        orderBy: { created_at: "desc" },
-      })
-    : [];
+  const properties = await prisma.properties.findMany({
+    where: propertyScopeWhere(access),
+    orderBy: { created_at: "desc" },
+  });
 
   const initialProperties: Property[] = properties.map((property) => ({
     id: property.id,

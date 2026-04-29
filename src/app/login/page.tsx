@@ -239,15 +239,6 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     return () => window.clearInterval(id);
   }, [headlineWords.length]);
 
-  const roleLabel = useMemo(() => {
-    switch (role) {
-      case "renter":
-        return "Renter";
-      default:
-        return "Property Manager";
-    }
-  }, [role]);
-
   const title =
     mode === "signup"
       ? "Create your account"

@@ -94,6 +94,11 @@ type PlaidTransferEventSyncResponse = {
   request_id: string;
 };
 
+type PlaidTransferOriginatorFundingAccountCreateResponse = {
+  funding_account_id: string;
+  request_id: string;
+};
+
 export type PlaidLinkAccount = {
   id?: string | null;
   name?: string | null;
@@ -369,6 +374,32 @@ export async function syncPlaidTransferEvents(afterId: number) {
 
   return {
     transferEvents: result.data.transfer_events ?? [],
+  };
+}
+
+export async function createPlaidOriginatorFundingAccount(args: {
+  originatorClientId: string;
+  accessToken: string;
+  accountId: string;
+  displayName?: string | null;
+}) {
+  const result = await plaidPost<PlaidTransferOriginatorFundingAccountCreateResponse>(
+    "/transfer/originator/funding_account/create",
+    {
+      originator_client_id: args.originatorClientId,
+      funding_account: {
+        access_token: args.accessToken,
+        account_id: args.accountId,
+        display_name: args.displayName ?? undefined,
+      },
+    },
+    "Could not connect this receiving account for Plaid Transfer.",
+  );
+
+  if ("error" in result) return { error: result.error, status: result.status };
+
+  return {
+    fundingAccountId: result.data.funding_account_id,
   };
 }
 
