@@ -14,7 +14,11 @@ import {
   type AccountingVendorRule,
 } from "@/lib/accounting-vendor-rules";
 import { manualMerchantMetadata } from "@/lib/manual-merchant-logos";
-import { decryptPlaidAccessToken, syncPlaidTransactions } from "@/lib/plaid";
+import {
+  decryptPlaidAccessToken,
+  getPlaidAccounts,
+  syncPlaidTransactions,
+} from "@/lib/plaid";
 
 export type AccountingTransaction = {
   id: string;
@@ -57,6 +61,8 @@ export type AccountSummary = {
   plaidAccountId: string | null;
   name: string;
   provider: string;
+  accountType: string | null;
+  accountSubtype: string | null;
   institutionLogoUrl: string | null;
   balance: number;
   sync: string;
@@ -103,6 +109,12 @@ type PlaidCounterparty = {
 type PlaidHiddenAccountLog = {
   plaid_item_id: string | null;
   metadata: unknown;
+};
+
+type PlaidAccountIdentity = {
+  name: string;
+  type: string | null;
+  subtype: string | null;
 };
 
 export type AccountingData = {
@@ -533,7 +545,7 @@ function mapPlaidTxToRow(
       source: "plaid",
       connection_id: item.item_id,
       account_id: accountKey,
-      account_name: accountsById.get(accountKey) ?? item.institution_name ?? null,
+      account_name: accountsById.get(accountKey)?.name ?? item.institution_name ?? null,
       date: parsePlaidDate(transaction.date),
       description: merchant,
       merchant_name: merchantName ?? merchant,
@@ -554,8 +566,8 @@ function mapPlaidTxToRow(
 function buildAccountsById(
   accounts: Array<Record<string, unknown>>,
   institutionName: string | null,
-): Map<string, string> {
-  const map = new Map<string, string>();
+): Map<string, PlaidAccountIdentity> {
+  const map = new Map<string, PlaidAccountIdentity>();
   for (const account of accounts as PlaidAccount[]) {
     if (typeof account.account_id !== "string") continue;
     const officialName =
@@ -586,7 +598,14 @@ function buildAccountsById(
     if (mask && !name.includes(mask)) {
       name = `${name} • ${mask}`;
     }
-    map.set(account.account_id, name);
+    map.set(account.account_id, {
+      name,
+      type:
+        typeof account.type === "string" && account.type.trim()
+          ? account.type.trim()
+          : null,
+      subtype,
+    });
   }
   return map;
 }
@@ -842,6 +861,7 @@ async function plaidItemsQuery(orgId: string) {
     where: { organizations: { clerk_org_id: orgId }, hidden_at: null },
     select: {
       id: true,
+      access_token: true,
       institution_name: true,
       status: true,
       sync_enabled: true,
@@ -944,6 +964,29 @@ export async function getAccountingData(orgId: string): Promise<AccountingData> 
       .map(hiddenPlaidAccountKey)
       .filter((key): key is string => key !== null),
   );
+  const livePlaidAccountsByItem = new Map<string, Map<string, PlaidAccountIdentity>>();
+  await Promise.all(
+    plaidItems.map(async (item) => {
+      if (item.status !== "connected") {
+        return;
+      }
+
+      try {
+        const accessToken = decryptPlaidAccessToken(item.access_token);
+        const accountsResult = await getPlaidAccounts({ accessToken });
+        if ("error" in accountsResult) {
+          return;
+        }
+
+        livePlaidAccountsByItem.set(
+          item.id,
+          buildAccountsById(accountsResult.accounts, item.institution_name),
+        );
+      } catch {
+        // Fall back to persisted transaction labels if live account metadata is unavailable.
+      }
+    }),
+  );
 
   const plaidTxRows = initialPlaidTxRows;
 
@@ -1027,13 +1070,19 @@ export async function getAccountingData(orgId: string): Promise<AccountingData> 
     if (hiddenAccountKeys.has(key)) {
       continue;
     }
+    const liveAccount =
+      accountId
+        ? livePlaidAccountsByItem.get(row.plaid_items.id)?.get(accountId) ?? null
+        : null;
     if (!plaidAccountSummaries.has(key)) {
       plaidAccountSummaries.set(key, {
         id: key,
         plaidItemId: row.plaid_items.id,
         plaidAccountId: accountId,
-        name: row.account_name ?? row.plaid_items.institution_name ?? "Account",
+        name: liveAccount?.name ?? row.account_name ?? row.plaid_items.institution_name ?? "Account",
         provider: row.plaid_items.institution_name ?? "Plaid",
+        accountType: liveAccount?.type ?? null,
+        accountSubtype: liveAccount?.subtype ?? null,
         institutionLogoUrl: row.plaid_items.plaid_institutions?.logo_url ?? null,
         balance: 0,
         sync: "synced",
@@ -1054,9 +1103,38 @@ export async function getAccountingData(orgId: string): Promise<AccountingData> 
     Array.from(plaidAccountSummaries.values()).map((s) => s.plaidItemId),
   );
   for (const item of plaidItems) {
+    const liveAccounts = livePlaidAccountsByItem.get(item.id);
     const itemHasHiddenAccount = Array.from(hiddenAccountKeys).some((key) =>
       key.startsWith(`${item.id}:`),
     );
+    if (liveAccounts && liveAccounts.size > 0) {
+      for (const [accountId, account] of liveAccounts.entries()) {
+        const key = toConnectedPlaidAccountId(item.id, accountId);
+        if (hiddenAccountKeys.has(key) || plaidAccountSummaries.has(key)) {
+          continue;
+        }
+
+        plaidAccountSummaries.set(key, {
+          id: key,
+          plaidItemId: item.id,
+          plaidAccountId: accountId,
+          name: account.name,
+          provider: item.institution_name ?? "Plaid",
+          accountType: account.type,
+          accountSubtype: account.subtype,
+          institutionLogoUrl: item.plaid_institutions?.logo_url ?? null,
+          balance: 0,
+          sync: item.last_synced_at ? "synced" : "sync needed",
+          status:
+            item.status === "connected" && item.sync_enabled
+              ? "Connected"
+              : "Disconnected",
+          icon: "bank",
+        });
+      }
+      continue;
+    }
+
     if (!itemIdsInSummaries.has(item.id)) {
       if (itemHasHiddenAccount) {
         continue;
@@ -1068,6 +1146,8 @@ export async function getAccountingData(orgId: string): Promise<AccountingData> 
         plaidAccountId: null,
         name: item.institution_name ?? "Connected Account",
         provider: item.institution_name ?? "Plaid",
+        accountType: null,
+        accountSubtype: null,
         institutionLogoUrl: item.plaid_institutions?.logo_url ?? null,
         balance: 0,
         sync: item.last_synced_at ? "synced" : "sync needed",

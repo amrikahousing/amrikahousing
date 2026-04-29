@@ -695,6 +695,8 @@ export default async function AccountsPage({
                     connectedAccountId: account.id,
                     name: account.name,
                     provider: account.provider,
+                    accountType: account.accountType,
+                    accountSubtype: account.accountSubtype,
                   });
                   const isRentCollectionDisabled =
                     !isRentCollectionEligible || account.status !== "Connected";

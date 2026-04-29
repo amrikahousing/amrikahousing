@@ -23,9 +23,20 @@ export function isEligibleRentCollectionAccount(args: {
   connectedAccountId: string;
   name: string;
   provider: string;
+  accountType?: string | null;
+  accountSubtype?: string | null;
 }) {
   if (args.connectedAccountId.startsWith("item:")) {
     return false;
+  }
+
+  const structuredLabel = `${args.accountSubtype ?? ""} ${args.accountType ?? ""}`.toLowerCase();
+  if (structuredLabel.trim()) {
+    const isStructuredDepositAccount = /\b(checking|savings)\b/.test(structuredLabel);
+    const isStructuredCardLike =
+      /\b(credit|card|loan|line of credit)\b/.test(structuredLabel);
+
+    return isStructuredDepositAccount && !isStructuredCardLike;
   }
 
   const label = `${args.name} ${args.provider}`.toLowerCase();
@@ -137,6 +148,8 @@ export async function setOrganizationRentCollectionAccount(args: {
       connectedAccountId: connectedAccount.id,
       name: connectedAccount.name,
       provider: connectedAccount.provider,
+      accountType: connectedAccount.accountType,
+      accountSubtype: connectedAccount.accountSubtype,
     })
   ) {
     throw new Error(

@@ -39,6 +39,11 @@ type PlaidInstitutionResponse = {
   request_id: string;
 };
 
+type PlaidAccountsGetResponse = {
+  accounts?: Array<Record<string, unknown>>;
+  request_id: string;
+};
+
 type PlaidTransferCapabilitiesResponse = {
   institution_supported_networks?: {
     rtp?: {
@@ -271,6 +276,26 @@ export async function getPlaidInstitution({
   if ("error" in result) return { error: result.error, status: result.status };
 
   return { institution: result.data.institution ?? null };
+}
+
+export async function getPlaidAccounts({
+  accessToken,
+}: {
+  accessToken: string;
+}) {
+  const result = await plaidPost<PlaidAccountsGetResponse>(
+    "/accounts/get",
+    {
+      access_token: accessToken,
+    },
+    "Could not fetch Plaid accounts.",
+  );
+
+  if ("error" in result) return { error: result.error, status: result.status };
+
+  return {
+    accounts: result.data.accounts ?? [],
+  };
 }
 
 export async function getPlaidTransferCapabilities(args: {
