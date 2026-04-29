@@ -1,5 +1,5 @@
 import { prisma } from "./db";
-import { resolveSharedUserIdentity } from "./renter-auth";
+import { findExistingSharedUserIdentity } from "./renter-auth";
 
 export type PortalAccessState = {
   canAccessPropertyManager: boolean;
@@ -24,8 +24,11 @@ export async function getPortalAccessState({
     };
   }
 
-  const sharedIdentity = await resolveSharedUserIdentity(userId);
-  const resolvedEmail = sharedIdentity.sharedUser?.email ?? email?.toLowerCase() ?? null;
+  const sharedIdentity = await findExistingSharedUserIdentity({
+    userId,
+    email,
+  });
+  const resolvedEmail = sharedIdentity.email;
   if (!resolvedEmail) {
     return {
       canAccessPropertyManager: Boolean(orgId),

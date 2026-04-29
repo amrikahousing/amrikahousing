@@ -100,7 +100,6 @@ export async function POST(request: NextRequest) {
       organization_id: ctx.orgDbId,
       first_name: normalizedFirstName,
       last_name: normalizedLastName,
-      ...(normalizedPhone ? { phone: normalizedPhone } : {}),
       ...(clerkUserIdToLink ? { clerk_user_id: clerkUserIdToLink } : {}),
       role:
         existingSharedUser?.role && existingSharedUser.role !== "renter"
