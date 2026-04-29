@@ -512,7 +512,7 @@ async function createAiVendorRulesForSync({
 function mapPlaidTxToRow(
   transaction: PlaidTransaction,
   item: PlaidItemRecord,
-  accountsById: Map<string, string>,
+  accountsById: Map<string, PlaidAccountIdentity>,
   rules: AccountingVendorRule[],
 ): PlaidTxRow | null {
   if (typeof transaction.transaction_id !== "string") return null;
