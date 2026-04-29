@@ -1,5 +1,5 @@
-import { requireOrgAccess, isAccessError } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { getOrgPermissionContext, requirePropertyPermission } from "@/lib/org-authorization";
 
 type RouteContext = {
   params: Promise<{ id: string; unitId: string }>;
@@ -10,12 +10,16 @@ type DuplicateUnitInput = {
 };
 
 export async function POST(request: Request, context: RouteContext) {
-  const ctx = await requireOrgAccess();
-  if (isAccessError(ctx)) {
+  const ctx = await getOrgPermissionContext();
+  if ("error" in ctx) {
     return Response.json({ error: ctx.error }, { status: ctx.status });
   }
 
   const { id, unitId } = await context.params;
+  const permissionError = requirePropertyPermission(ctx, "manage_units", id);
+  if (permissionError) {
+    return Response.json({ error: permissionError.error }, { status: permissionError.status });
+  }
 
   let body: DuplicateUnitInput;
   try {

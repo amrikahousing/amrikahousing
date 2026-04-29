@@ -1,13 +1,7 @@
-import { auth, currentUser } from "@clerk/nextjs/server";
+import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import { AppShell, type AppShellUser } from "@/components/AppShell";
+import { AppShell, getAppShellUser } from "@/components/AppShell";
 import { prisma } from "@/lib/db";
-import { getPortalAccessState } from "@/lib/portal-access";
-
-function metadataString(metadata: Record<string, unknown>, key: string) {
-  const value = metadata[key];
-  return typeof value === "string" && value.trim() ? value : null;
-}
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("en-US", {
@@ -101,30 +95,11 @@ function Icon({ name, className = "" }: { name: string; className?: string }) {
 }
 
 export default async function DashboardPage() {
-  const [{ userId, orgId, orgRole }, user] = await Promise.all([auth(), currentUser()]);
+  const [{ userId, orgId }, shellUser] = await Promise.all([
+    auth(),
+    getAppShellUser(),
+  ]);
   if (!userId) redirect("/login");
-
-  const unsafeMetadata = (user?.unsafeMetadata ?? {}) as Record<string, unknown>;
-  const organizationName = metadataString(unsafeMetadata, "organizationName");
-  const firstName =
-    user?.firstName ?? metadataString(unsafeMetadata, "firstName") ?? null;
-  const role = metadataString(unsafeMetadata, "role") ?? "property_manager";
-  const isOrgAdmin = orgRole === "org:admin";
-  const portalAccess = await getPortalAccessState({
-    userId,
-    orgId,
-    email: user?.primaryEmailAddress?.emailAddress ?? null,
-  });
-  const shellUser: AppShellUser = {
-    email: user?.primaryEmailAddress?.emailAddress ?? null,
-    firstName,
-    imageUrl: user?.imageUrl ?? null,
-    portal: "property_manager",
-    role: isOrgAdmin ? "admin" : role === "renter" || role === "tenant" ? "property_manager" : role,
-    organizationName,
-    isOrgAdmin,
-    ...portalAccess,
-  };
 
   const months = Array.from({ length: 6 }, (_, index) => {
     const date = new Date();
@@ -573,9 +548,9 @@ export default async function DashboardPage() {
               Dashboard
             </h1>
             <p className="mt-1 text-slate-500">
-              {firstName ? `Welcome back, ${firstName}. ` : ""}
+              {shellUser.firstName ? `Welcome back, ${shellUser.firstName}. ` : ""}
               Overview of{" "}
-              {organizationName ? `${organizationName}'s ` : "your "}
+              {shellUser.organizationName ? `${shellUser.organizationName}'s ` : "your "}
               rental portfolio performance.
             </p>
           </div>

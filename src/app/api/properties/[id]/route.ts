@@ -1,5 +1,5 @@
-import { requireOrgAccess, isAccessError } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { getOrgPermissionContext, requirePropertyPermission } from "@/lib/org-authorization";
 import { isSupportedPropertyType } from "@/lib/property-types";
 
 type RouteContext = {
@@ -28,12 +28,16 @@ async function findScopedProperty(propertyId: string, organizationId: string) {
 }
 
 export async function PATCH(request: Request, context: RouteContext) {
-  const ctx = await requireOrgAccess();
-  if (isAccessError(ctx)) {
+  const ctx = await getOrgPermissionContext();
+  if ("error" in ctx) {
     return Response.json({ error: ctx.error }, { status: ctx.status });
   }
 
   const { id } = await context.params;
+  const permissionError = requirePropertyPermission(ctx, "manage_properties", id);
+  if (permissionError) {
+    return Response.json({ error: permissionError.error }, { status: permissionError.status });
+  }
   const property = await findScopedProperty(id, ctx.orgDbId);
   if (!property) {
     return Response.json({ error: "Property not found." }, { status: 404 });
@@ -90,12 +94,16 @@ export async function PATCH(request: Request, context: RouteContext) {
 }
 
 export async function DELETE(_request: Request, context: RouteContext) {
-  const ctx = await requireOrgAccess();
-  if (isAccessError(ctx)) {
+  const ctx = await getOrgPermissionContext();
+  if ("error" in ctx) {
     return Response.json({ error: ctx.error }, { status: ctx.status });
   }
 
   const { id } = await context.params;
+  const permissionError = requirePropertyPermission(ctx, "manage_properties", id);
+  if (permissionError) {
+    return Response.json({ error: permissionError.error }, { status: permissionError.status });
+  }
   const property = await findScopedProperty(id, ctx.orgDbId);
   if (!property) {
     return Response.json({ error: "Property not found." }, { status: 404 });

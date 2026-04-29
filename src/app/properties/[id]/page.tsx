@@ -6,17 +6,29 @@ import { auth } from "@clerk/nextjs/server";
 import { AppShell } from "@/components/AppShell";
 import { PropertyDetailsClient } from "@/components/PropertyDetailsClient";
 import { prisma } from "@/lib/db";
+import {
+  getOrgPermissionContext,
+  hasPropertyAccess,
+  requirePermission,
+} from "@/lib/org-authorization";
 
 export default async function PropertyDetailsPage({
   params,
 }: {
   params: Promise<{ id: string }>;
 }) {
-  const { userId, orgId, orgRole } = await auth();
+  const { userId, orgId } = await auth();
   if (!userId) redirect("/login");
   if (!orgId) notFound();
+  const access = await getOrgPermissionContext();
+  if ("error" in access) notFound();
+  const viewError = requirePermission(access, "view_properties");
+  if (viewError) notFound();
 
   const { id } = await params;
+  if (!hasPropertyAccess(access, id)) {
+    notFound();
+  }
   const property = await prisma.properties.findFirst({
     where: {
       id,
@@ -117,7 +129,12 @@ export default async function PropertyDetailsPage({
           Back to Properties
         </Link>
 
-        <PropertyDetailsClient initialProperty={propertyDetails} canInviteRenters={orgRole === "org:admin"} />
+        <PropertyDetailsClient
+          initialProperty={propertyDetails}
+          canManageProperty={access.permissions.manage_properties}
+          canManageUnits={access.permissions.manage_units}
+          canInviteRenters={access.permissions.invite_renters}
+        />
       </div>
     </AppShell>
   );

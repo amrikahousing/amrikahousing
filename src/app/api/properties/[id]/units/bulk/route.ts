@@ -1,6 +1,6 @@
-import { requireOrgAccess, isAccessError } from "@/lib/auth";
 import { prisma } from "@/lib/db";
 import type { AiParsedUnit } from "@/lib/ai-import-types";
+import { getOrgPermissionContext, requirePropertyPermission } from "@/lib/org-authorization";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -8,12 +8,16 @@ export type SkippedUnit = { unit_number: string; reason: string };
 
 export async function POST(request: Request, context: RouteContext) {
   try {
-    const ctx = await requireOrgAccess();
-    if (isAccessError(ctx)) {
+    const ctx = await getOrgPermissionContext();
+    if ("error" in ctx) {
       return Response.json({ error: ctx.error }, { status: ctx.status });
     }
 
     const { id } = await context.params;
+    const permissionError = requirePropertyPermission(ctx, "manage_units", id);
+    if (permissionError) {
+      return Response.json({ error: permissionError.error }, { status: permissionError.status });
+    }
 
     const property = await prisma.properties.findFirst({
       where: { id, organization_id: ctx.orgDbId, deleted_at: null },

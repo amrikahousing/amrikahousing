@@ -10,6 +10,7 @@ import {
   serializeAccountingTransaction,
   sortTransactionsByDate,
 } from "@/lib/accounting";
+import { getOrgPermissionContext } from "@/lib/org-authorization";
 
 type SearchParams = Record<string, string | string[] | undefined>;
 
@@ -133,6 +134,9 @@ export default async function TransactionsPage({
 }) {
   const { userId, orgId } = await auth();
   if (!userId) redirect("/login");
+  const access = await getOrgPermissionContext();
+  if ("error" in access) redirect("/dashboard");
+  if (!access.permissions.manage_accounting) redirect("/dashboard");
 
   const resolvedSearchParams = searchParams ? await searchParams : {};
   const currentYear = String(new Date().getFullYear());

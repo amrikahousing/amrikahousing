@@ -103,14 +103,6 @@ function PhoneIcon({ className = "" }: { className?: string }) {
   );
 }
 
-function CalendarIcon({ className = "" }: { className?: string }) {
-  return (
-    <svg aria-hidden="true" className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <rect width="18" height="18" x="3" y="4" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" />
-    </svg>
-  );
-}
-
 function EditIcon({ className = "" }: { className?: string }) {
   return (
     <svg aria-hidden="true" className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -193,12 +185,14 @@ function UnitCardMenu({
   onEdit,
   onDelete,
   onInviteRenter,
+  canManageUnits,
   canInviteRenters,
 }: {
   unit: UnitDetails;
   onEdit: (unit: UnitDetails) => void;
   onDelete: (unit: UnitDetails) => void;
   onInviteRenter: (unit: UnitDetails) => void;
+  canManageUnits: boolean;
   canInviteRenters: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -215,6 +209,10 @@ function UnitCardMenu({
     return () => document.removeEventListener("mousedown", handleClick);
   }, [open]);
 
+  if (!canManageUnits && !canInviteRenters) {
+    return null;
+  }
+
   return (
     <div ref={ref} className="relative">
       <button
@@ -226,29 +224,33 @@ function UnitCardMenu({
       </button>
       {open && (
         <div className="absolute right-0 top-8 z-20 w-44 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg">
-          <button
-            onClick={() => { setOpen(false); onEdit(unit); }}
-            className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50"
-          >
-            <EditIcon className="h-4 w-4" />
-            Edit unit
-          </button>
+          {canManageUnits ? (
+            <button
+              onClick={() => { setOpen(false); onEdit(unit); }}
+              className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50"
+            >
+              <EditIcon className="h-4 w-4" />
+              Edit unit
+            </button>
+          ) : null}
           {canInviteRenters && (
             <button
               onClick={() => { setOpen(false); onInviteRenter(unit); }}
-              className="flex w-full items-center gap-2 border-t border-gray-100 px-4 py-2.5 text-sm text-blue-600 hover:bg-blue-50"
+              className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-blue-600 hover:bg-blue-50"
             >
               <SendIcon className="h-4 w-4" />
               Invite renter
             </button>
           )}
-          <button
-            onClick={() => { setOpen(false); onDelete(unit); }}
-            className="flex w-full items-center gap-2 border-t border-gray-100 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50"
-          >
-            <TrashIcon className="h-4 w-4" />
-            Delete
-          </button>
+          {canManageUnits ? (
+            <button
+              onClick={() => { setOpen(false); onDelete(unit); }}
+              className="flex w-full items-center gap-2 border-t border-gray-100 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50"
+            >
+              <TrashIcon className="h-4 w-4" />
+              Delete
+            </button>
+          ) : null}
         </div>
       )}
     </div>
@@ -263,6 +265,7 @@ function UnitCard({
   onDelete,
   onInviteRenter,
   deleting,
+  canManageUnits,
   canInviteRenters,
   inviteSent,
 }: {
@@ -271,6 +274,7 @@ function UnitCard({
   onDelete: (unit: UnitDetails) => void;
   onInviteRenter: (unit: UnitDetails) => void;
   deleting: boolean;
+  canManageUnits: boolean;
   canInviteRenters: boolean;
   inviteSent: boolean;
 }) {
@@ -296,6 +300,7 @@ function UnitCard({
             onEdit={onEdit}
             onDelete={onDelete}
             onInviteRenter={onInviteRenter}
+            canManageUnits={canManageUnits}
             canInviteRenters={canInviteRenters}
           />
         </div>
@@ -377,9 +382,13 @@ function UnitCard({
 
 export function PropertyDetailsClient({
   initialProperty,
+  canManageProperty = false,
+  canManageUnits = false,
   canInviteRenters = false,
 }: {
   initialProperty: PropertyDetails;
+  canManageProperty?: boolean;
+  canManageUnits?: boolean;
   canInviteRenters?: boolean;
 }) {
   const router = useRouter();
@@ -588,6 +597,7 @@ export function PropertyDetailsClient({
           firstName: inviteForm.firstName.trim(),
           lastName: inviteForm.lastName.trim(),
           phone: inviteForm.phone.trim() || undefined,
+          propertyId: property.id,
         }),
       });
       const data = await res.json() as { error?: string; invited?: string; linked?: string };
@@ -675,13 +685,15 @@ export function PropertyDetailsClient({
                   <span>{getPropertyTypeLabel(property.type)}</span>
                 </div>
               </div>
-              <button
-                onClick={() => setEditingProperty((v) => !v)}
-                className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-              >
-                <EditIcon className="h-4 w-4" />
-                {editingProperty ? "Cancel" : "Edit"}
-              </button>
+              {canManageProperty ? (
+                <button
+                  onClick={() => setEditingProperty((v) => !v)}
+                  className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                >
+                  <EditIcon className="h-4 w-4" />
+                  {editingProperty ? "Cancel" : "Edit"}
+                </button>
+              ) : null}
             </div>
 
             {/* Stats */}
@@ -709,7 +721,7 @@ export function PropertyDetailsClient({
         </div>
 
         {/* Inline property edit form */}
-        {editingProperty && (
+        {canManageProperty && editingProperty && (
           <form onSubmit={saveProperty} className="border-t border-gray-100 bg-gray-50 p-6 space-y-4">
             <div className="grid gap-4 sm:grid-cols-2">
               <label className={labelClass}>
@@ -788,13 +800,15 @@ export function PropertyDetailsClient({
               <option value="maintenance">Maintenance</option>
             </select>
             {/* Add unit */}
-            <button
-              onClick={() => { setAddingUnit(true); setNewUnitForm(emptyUnitForm); setError(null); }}
-              className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-blue-600 px-3 text-sm font-semibold text-white hover:bg-blue-700 transition-colors"
-            >
-              <PlusIcon className="h-4 w-4" />
-              Add Unit
-            </button>
+            {canManageUnits ? (
+              <button
+                onClick={() => { setAddingUnit(true); setNewUnitForm(emptyUnitForm); setError(null); }}
+                className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-blue-600 px-3 text-sm font-semibold text-white hover:bg-blue-700 transition-colors"
+              >
+                <PlusIcon className="h-4 w-4" />
+                Add Unit
+              </button>
+            ) : null}
           </div>
         </div>
 
@@ -817,6 +831,7 @@ export function PropertyDetailsClient({
                   onDelete={(u) => setDeletingUnit(u)}
                   onInviteRenter={(u) => { setInvitingUnit(u); setInviteForm({ firstName: "", lastName: "", email: "", phone: "" }); setInviteError(null); }}
                   deleting={deletingUnitId === unit.id}
+                  canManageUnits={canManageUnits}
                   canInviteRenters={canInviteRenters}
                   inviteSent={invitedUnitIds.has(unit.id)}
                 />
@@ -829,7 +844,7 @@ export function PropertyDetailsClient({
       {/* ── Modals ── */}
 
       {/* Add unit */}
-      {addingUnit && (
+      {canManageUnits && addingUnit && (
         <Modal title="Add Unit" onClose={() => setAddingUnit(false)}>
           <form onSubmit={createUnit} className="space-y-4">
             <UnitFormFields form={newUnitForm} onChange={(f) => setNewUnitForm(f)} />
@@ -843,7 +858,7 @@ export function PropertyDetailsClient({
       )}
 
       {/* Edit unit */}
-      {editingUnit && (
+      {canManageUnits && editingUnit && (
         <Modal title={`Edit Unit ${editingUnit.unitNumber}`} onClose={() => setEditingUnit(null)}>
           <form onSubmit={saveUnit} className="space-y-4">
             <UnitFormFields form={unitForm} onChange={(f) => setUnitForm(f)} />
@@ -857,7 +872,7 @@ export function PropertyDetailsClient({
       )}
 
       {/* Delete unit confirmation */}
-      {deletingUnit && (
+      {canManageUnits && deletingUnit && (
         <Modal title="Delete unit?" onClose={() => setDeletingUnit(null)}>
           <p className="text-sm text-gray-600">
             Unit <span className="font-semibold text-gray-900">{deletingUnit.unitNumber}</span> will

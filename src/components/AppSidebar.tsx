@@ -14,6 +14,14 @@ type AppSidebarProps = {
     role: string;
     organizationName: string | null;
     isOrgAdmin: boolean;
+    permissions: {
+      manage_team: boolean;
+      manage_bank_accounts: boolean;
+      manage_accounting: boolean;
+      create_properties: boolean;
+      view_properties: boolean;
+      manage_maintenance: boolean;
+    };
     canAccessPropertyManager: boolean;
     canAccessRenter: boolean;
     hasBothPortals: boolean;
@@ -27,13 +35,6 @@ type IconName =
   | "wrench"
   | "users"
   | "profile";
-
-const navigation: Array<{ name: string; href: string; icon: IconName }> = [
-  { name: "Dashboard", href: "/dashboard", icon: "dashboard" },
-  { name: "Properties", href: "/properties", icon: "building" },
-  { name: "Accounts", href: "/accounts", icon: "accounts" },
-  { name: "Maintenance", href: "/maintenance", icon: "wrench" },
-];
 
 const implementedRoutes = new Set([
   "/dashboard",
@@ -123,9 +124,21 @@ export function AppSidebar({ user }: AppSidebarProps) {
   const roleLabel = user.isOrgAdmin ? "Admin" : roleLabels[user.role] ?? "Workspace";
   const displayName = user.firstName ?? user.email ?? "Account";
   const initial = (user.firstName?.[0] ?? user.email?.[0] ?? "U").toUpperCase();
-  const visibleNavigation = user.isOrgAdmin
-    ? [...navigation, { name: "Team", href: "/team", icon: "users" as const }]
-    : navigation;
+  const visibleNavigation = [
+    { name: "Dashboard", href: "/dashboard", icon: "dashboard" as const },
+    ...(user.permissions.view_properties || user.permissions.create_properties
+      ? [{ name: "Properties", href: "/properties", icon: "building" as const }]
+      : []),
+    ...(user.permissions.manage_accounting || user.permissions.manage_bank_accounts
+      ? [{ name: "Accounts", href: "/accounts", icon: "accounts" as const }]
+      : []),
+    ...(user.permissions.manage_maintenance
+      ? [{ name: "Maintenance", href: "/maintenance", icon: "wrench" as const }]
+      : []),
+    ...(user.permissions.manage_team
+      ? [{ name: "Team", href: "/team", icon: "users" as const }]
+      : []),
+  ];
 
   const content = (
     <div className="flex h-full flex-col bg-slate-950 text-white">

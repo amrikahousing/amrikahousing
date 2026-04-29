@@ -1,118 +1,304 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
-type EmailRow = {
+type PropertyOption = {
   id: string;
-  value: string;
+  name: string;
 };
 
-function createEmailRow(value = ""): EmailRow {
-  return {
-    id: globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random()}`,
-    value,
-  };
+type PresetRole = {
+  value: string;
+  label: string;
+};
+
+type ManagerRecord = {
+  id: string;
+  email: string | null;
+  firstName: string | null;
+  lastName: string | null;
+  permissionRole: string;
+  propertyIds: string[];
+  active: boolean;
+};
+
+type PendingInvite = {
+  id: string;
+  email: string;
+  permissionRole: string;
+  propertyIds: string[];
+  active: boolean;
+};
+
+type TeamPayload = {
+  properties: PropertyOption[];
+  presetRoles: PresetRole[];
+  managers: ManagerRecord[];
+  pendingInvites: PendingInvite[];
+};
+
+function roleDescription(properties: PropertyOption[]) {
+  if (properties.length === 0) {
+    return "Managers can enter the portal and create the first property.";
+  }
+  if (properties.length === 1) {
+    return "The only property will be assigned automatically unless you choose otherwise later.";
+  }
+  return "Choose one or more properties for this manager.";
 }
 
-function PlusIcon({ className = "" }: { className?: string }) {
+function rolePill(role: string) {
+  if (role === "leasing_manager") return "bg-sky-50 text-sky-700 border-sky-200";
+  if (role === "accounting_manager") return "bg-amber-50 text-amber-700 border-amber-200";
+  return "bg-emerald-50 text-emerald-700 border-emerald-200";
+}
+
+function PropertyChecklist({
+  properties,
+  selected,
+  onChange,
+  required,
+}: {
+  properties: PropertyOption[];
+  selected: string[];
+  onChange: (next: string[]) => void;
+  required?: boolean;
+}) {
+  if (properties.length === 0) {
+    return (
+      <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+        No properties exist yet. This manager can still create the first property.
+      </p>
+    );
+  }
+
+  if (properties.length === 1) {
+    return (
+      <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+        The only property, <span className="font-medium text-slate-900">{properties[0].name}</span>, will be assigned automatically.
+      </p>
+    );
+  }
+
   return (
-    <svg
-      aria-hidden="true"
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth="1.8"
-    >
-      <path d="M12 5v14M5 12h14" />
-    </svg>
+    <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+      <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+        Assigned properties{required ? " *" : ""}
+      </p>
+      {properties.map((property) => {
+        const checked = selected.includes(property.id);
+        return (
+          <label
+            key={property.id}
+            className="flex items-center gap-3 rounded-md bg-white px-3 py-2 text-sm text-slate-700"
+          >
+            <input
+              type="checkbox"
+              checked={checked}
+              onChange={() =>
+                onChange(
+                  checked
+                    ? selected.filter((id) => id !== property.id)
+                    : [...selected, property.id],
+                )
+              }
+              className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+            />
+            <span>{property.name}</span>
+          </label>
+        );
+      })}
+    </div>
   );
 }
 
-function TrashIcon({ className = "" }: { className?: string }) {
+function ManagerCard({
+  manager,
+  properties,
+  roles,
+  onSaved,
+}: {
+  manager: ManagerRecord;
+  properties: PropertyOption[];
+  roles: PresetRole[];
+  onSaved: () => Promise<void>;
+}) {
+  const [permissionRole, setPermissionRole] = useState(manager.permissionRole);
+  const [propertyIds, setPropertyIds] = useState<string[]>(manager.propertyIds);
+  const [active, setActive] = useState(manager.active);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setPermissionRole(manager.permissionRole);
+    setPropertyIds(manager.propertyIds);
+    setActive(manager.active);
+  }, [manager]);
+
+  async function save() {
+    setSaving(true);
+    setError(null);
+    try {
+      const response = await fetch(`/api/property-managers/${manager.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ permissionRole, propertyIds, active }),
+      });
+      const data = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        setError(data.error ?? "Could not save manager access.");
+        return;
+      }
+      await onSaved();
+    } catch {
+      setError("Network error. Please try again.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
-    <svg
-      aria-hidden="true"
-      className={className}
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-      strokeWidth="1.8"
-    >
-      <path d="M3 6h18M8 6V4h8v2M6 6l1 14h10l1-14M10 11v5M14 11v5" />
-    </svg>
+    <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-sm font-semibold text-slate-900">
+            {[manager.firstName, manager.lastName].filter(Boolean).join(" ") || manager.email || "Manager"}
+          </p>
+          <p className="mt-1 text-sm text-slate-500">{manager.email ?? "No email on file"}</p>
+        </div>
+        <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${rolePill(permissionRole)}`}>
+          {roles.find((role) => role.value === permissionRole)?.label ?? permissionRole}
+        </span>
+      </div>
+
+      <div className="mt-4 grid gap-4 lg:grid-cols-[220px,1fr]">
+        <label className="block text-sm">
+          <span className="mb-1.5 block font-medium text-slate-700">Preset role</span>
+          <select
+            value={permissionRole}
+            onChange={(event) => setPermissionRole(event.target.value)}
+            className="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm text-slate-900 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+          >
+            {roles.map((role) => (
+              <option key={role.value} value={role.value}>
+                {role.label}
+              </option>
+            ))}
+          </select>
+        </label>
+
+        <PropertyChecklist
+          properties={properties}
+          selected={propertyIds}
+          onChange={setPropertyIds}
+          required={properties.length > 1}
+        />
+      </div>
+
+      <div className="mt-4 flex flex-wrap items-center gap-3">
+        <label className="inline-flex items-center gap-2 text-sm text-slate-700">
+          <input
+            type="checkbox"
+            checked={active}
+            onChange={(event) => setActive(event.target.checked)}
+            className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+          />
+          Active access
+        </label>
+        <button
+          type="button"
+          onClick={save}
+          disabled={saving}
+          className="inline-flex h-10 items-center justify-center rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+        >
+          {saving ? "Saving..." : "Save access"}
+        </button>
+      </div>
+
+      {error ? (
+        <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+          {error}
+        </p>
+      ) : null}
+    </article>
   );
 }
 
 export function PropertyManagersClient({ canInvite }: { canInvite: boolean }) {
-  const [emailRows, setEmailRows] = useState<EmailRow[]>(() => [createEmailRow()]);
+  const [loading, setLoading] = useState(true);
+  const [properties, setProperties] = useState<PropertyOption[]>([]);
+  const [roles, setRoles] = useState<PresetRole[]>([]);
+  const [managers, setManagers] = useState<ManagerRecord[]>([]);
+  const [pendingInvites, setPendingInvites] = useState<PendingInvite[]>([]);
+  const [form, setForm] = useState({
+    email: "",
+    permissionRole: "operations_manager",
+    propertyIds: [] as string[],
+  });
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  function updateEmail(index: number, value: string) {
-    setError(null);
-    setNotice(null);
-    setEmailRows((prev) =>
-      prev.map((row, i) => (i === index ? { ...row, value } : row)),
-    );
-  }
-
-  function addEmail() {
-    setError(null);
-    setNotice(null);
-    setEmailRows((prev) => [...prev, createEmailRow()]);
-  }
-
-  function removeEmail(index: number) {
-    setError(null);
-    setNotice(null);
-    setEmailRows((prev) => prev.filter((_, i) => i !== index));
-  }
-
-  async function sendInvites(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    setError(null);
-    setNotice(null);
-
-    const normalizedEmails = emailRows
-      .map((row) => row.value.trim())
-      .filter(Boolean);
-    if (!normalizedEmails.length) {
-      setError("Enter at least one property manager email.");
-      return;
+  async function loadData() {
+    setLoading(true);
+    try {
+      const response = await fetch("/api/property-managers");
+      const data = (await response.json()) as TeamPayload & { error?: string };
+      if (!response.ok) {
+        setError(data.error ?? "Could not load team access.");
+        return;
+      }
+      setProperties(data.properties);
+      setRoles(data.presetRoles);
+      setManagers(data.managers);
+      setPendingInvites(data.pendingInvites);
+      setForm((current) => ({
+        ...current,
+        permissionRole: data.presetRoles[0]?.value ?? "operations_manager",
+      }));
+    } catch {
+      setError("Network error. Please try again.");
+    } finally {
+      setLoading(false);
     }
+  }
 
+  useEffect(() => {
+    if (!canInvite) return;
+    void loadData();
+  }, [canInvite]);
+
+  async function inviteManager(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
     setSubmitting(true);
+    setError(null);
+    setNotice(null);
     try {
       const response = await fetch("/api/property-managers", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ emails: normalizedEmails }),
+        body: JSON.stringify(form),
       });
       const data = (await response.json()) as {
         error?: string;
-        invited?: string[];
-        failed?: string[];
+        invited?: string;
+        memberUpdated?: string;
       };
-
-      if (!response.ok && response.status !== 207) {
-        setError(data.error ?? "Could not send invites.");
+      if (!response.ok) {
+        setError(data.error ?? "Could not save manager access.");
         return;
       }
-
-      if (data.failed?.length) {
-        setError(data.error ?? "Some invites could not be sent.");
-        setEmailRows(data.failed.map((email) => createEmailRow(email)));
-        return;
-      }
-
-      setNotice(`Invites sent to ${data.invited?.join(", ") ?? "your team"}.`);
-      setEmailRows([createEmailRow()]);
+      setNotice(
+        data.memberUpdated
+          ? `${data.memberUpdated} already belonged to the organization. Access was updated.`
+          : `Invite sent to ${data.invited}.`,
+      );
+      setForm({
+        email: "",
+        permissionRole: roles[0]?.value ?? "operations_manager",
+        propertyIds: [],
+      });
+      await loadData();
     } catch {
       setError("Network error. Please try again.");
     } finally {
@@ -123,80 +309,143 @@ export function PropertyManagersClient({ canInvite }: { canInvite: boolean }) {
   if (!canInvite) {
     return (
       <div className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-        Only organization admins can add property managers.
+        Only organization admins can manage property manager access.
+      </div>
+    );
+  }
+
+  if (loading) {
+    return (
+      <div className="rounded-lg border border-slate-200 bg-white px-4 py-10 text-center text-sm text-slate-500 shadow-sm">
+        Loading team access...
       </div>
     );
   }
 
   return (
-    <form
-      onSubmit={sendInvites}
-      className="max-w-2xl rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
-    >
-      <div>
-        <h2 className="text-lg font-semibold text-slate-900">Add property managers</h2>
-        <p className="mt-1 text-sm text-slate-500">
-          Invite teammates who should help manage properties, units, and maintenance.
-        </p>
-      </div>
+    <div className="space-y-6">
+      <form
+        onSubmit={inviteManager}
+        className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
+      >
+        <div>
+          <h2 className="text-lg font-semibold text-slate-900">Invite property manager</h2>
+          <p className="mt-1 text-sm text-slate-500">{roleDescription(properties)}</p>
+        </div>
 
-      <div className="mt-5 space-y-2">
-        {emailRows.map((row, index) => (
-          <div key={row.id} className="flex items-center gap-2">
+        <div className="mt-5 grid gap-4 lg:grid-cols-[1.2fr,220px]">
+          <label className="block text-sm">
+            <span className="mb-1.5 block font-medium text-slate-700">Email</span>
             <input
               type="email"
-              value={row.value}
-              onChange={(event) => updateEmail(index, event.target.value)}
+              value={form.email}
+              onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
               placeholder="manager@company.com"
-              className="h-10 flex-1 rounded-lg border border-slate-300 px-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+              className="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+              required
             />
-            {emailRows.length > 1 ? (
-              <button
-                type="button"
-                onClick={() => removeEmail(index)}
-                className="flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 text-slate-500 transition hover:border-red-200 hover:text-red-600"
-                aria-label="Remove email"
-              >
-                <TrashIcon className="h-4 w-4" />
-              </button>
-            ) : null}
+          </label>
+
+          <label className="block text-sm">
+            <span className="mb-1.5 block font-medium text-slate-700">Preset role</span>
+            <select
+              value={form.permissionRole}
+              onChange={(event) =>
+                setForm((current) => ({ ...current, permissionRole: event.target.value }))
+              }
+              className="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+            >
+              {roles.map((role) => (
+                <option key={role.value} value={role.value}>
+                  {role.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+
+        <div className="mt-4">
+          <PropertyChecklist
+            properties={properties}
+            selected={form.propertyIds}
+            onChange={(propertyIds) => setForm((current) => ({ ...current, propertyIds }))}
+            required={properties.length > 1}
+          />
+        </div>
+
+        {error ? (
+          <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {error}
+          </p>
+        ) : null}
+
+        {notice ? (
+          <p className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
+            {notice}
+          </p>
+        ) : null}
+
+        <div className="mt-5">
+          <button
+            type="submit"
+            disabled={submitting}
+            className="inline-flex h-10 items-center justify-center rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            {submitting ? "Saving..." : "Invite manager"}
+          </button>
+        </div>
+      </form>
+
+      <section className="space-y-4">
+        <div>
+          <h2 className="text-lg font-semibold text-slate-900">Current managers</h2>
+          <p className="mt-1 text-sm text-slate-500">
+            Update preset roles, property assignments, and active status.
+          </p>
+        </div>
+
+        {managers.length === 0 ? (
+          <div className="rounded-lg border border-slate-200 bg-white px-4 py-8 text-center text-sm text-slate-500 shadow-sm">
+            No property managers added yet.
           </div>
-        ))}
-      </div>
+        ) : (
+          managers.map((manager) => (
+            <ManagerCard
+              key={manager.id}
+              manager={manager}
+              properties={properties}
+              roles={roles}
+              onSaved={loadData}
+            />
+          ))
+        )}
+      </section>
 
-      {error ? (
-        <p
-          role="alert"
-          className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700"
-        >
-          {error}
-        </p>
+      {pendingInvites.length > 0 ? (
+        <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
+          <h2 className="text-lg font-semibold text-slate-900">Pending invites</h2>
+          <div className="mt-4 space-y-3">
+            {pendingInvites.map((invite) => (
+              <div
+                key={invite.id}
+                className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3"
+              >
+                <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                  <div>
+                    <p className="text-sm font-medium text-slate-900">{invite.email}</p>
+                    <p className="mt-1 text-xs text-slate-500">
+                      Awaiting acceptance
+                    </p>
+                  </div>
+                  <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${rolePill(invite.permissionRole)}`}>
+                    {roles.find((role) => role.value === invite.permissionRole)?.label ?? invite.permissionRole}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        </section>
       ) : null}
-
-      {notice ? (
-        <p className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-          {notice}
-        </p>
-      ) : null}
-
-      <div className="mt-5 flex flex-wrap items-center gap-3">
-        <button
-          type="button"
-          onClick={addEmail}
-          className="inline-flex h-10 items-center justify-center gap-1.5 whitespace-nowrap rounded-lg border border-slate-300 bg-white px-4 text-sm font-semibold leading-none text-slate-700 transition hover:border-emerald-300 hover:text-emerald-700"
-        >
-          <PlusIcon className="h-4 w-4" />
-          Add another
-        </button>
-
-        <button
-          type="submit"
-          disabled={submitting}
-          className="inline-flex h-10 items-center justify-center whitespace-nowrap rounded-lg bg-emerald-600 px-4 text-sm font-semibold leading-none text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
-        >
-          {submitting ? "Sending invites..." : "Send invites"}
-        </button>
-      </div>
-    </form>
+    </div>
   );
 }

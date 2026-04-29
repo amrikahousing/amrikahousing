@@ -106,7 +106,7 @@ export function RentCollectionAccountRadio({
         </span>
       </label>
       <p className="text-[11px] text-slate-500 sm:text-xs">
-        {isSubmitting ? "Saving..." : optimisticChecked ? "On" : disabled ? "Off" : "Off"}
+        {isSubmitting ? "Connecting..." : optimisticChecked ? "On" : disabled ? "Off" : "Off"}
       </p>
       {error ? <p className="max-w-[220px] text-right text-xs text-red-600">{error}</p> : null}
     </div>

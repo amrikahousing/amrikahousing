@@ -19,6 +19,7 @@ import {
   getOrganizationRentCollectionAccount,
   isEligibleRentCollectionAccount,
 } from "@/lib/organization-payment-destinations";
+import { getOrgPermissionContext } from "@/lib/org-authorization";
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("en-US", {
@@ -181,6 +182,11 @@ export default async function AccountsPage({
 }) {
   const { userId, orgId } = await auth();
   if (!userId) redirect("/login");
+  const access = await getOrgPermissionContext();
+  if ("error" in access) redirect("/dashboard");
+  const accountingAccess =
+    access.permissions.manage_accounting || access.permissions.manage_bank_accounts;
+  if (!accountingAccess) redirect("/dashboard");
 
   const now = new Date();
   const resolvedSearchParams = searchParams ? await searchParams : {};

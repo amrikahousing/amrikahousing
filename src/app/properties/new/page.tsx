@@ -2,10 +2,15 @@ import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { PropertyForm } from "@/components/PropertyForm";
 import { AppShell } from "@/components/AppShell";
+import { getOrgPermissionContext, requirePermission } from "@/lib/org-authorization";
 
 export default async function NewPropertyPage() {
   const { userId } = await auth();
   if (!userId) redirect("/login");
+  const access = await getOrgPermissionContext();
+  if ("error" in access) redirect("/properties");
+  const permissionError = requirePermission(access, "create_properties");
+  if (permissionError) redirect("/properties");
 
   return (
     <AppShell>

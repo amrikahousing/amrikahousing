@@ -1,13 +1,17 @@
-import { isAccessError, requireOrgAccess } from "@/lib/auth";
 import { prisma } from "@/lib/db";
+import { getOrgPermissionContext, requirePermission } from "@/lib/org-authorization";
 
 export async function POST(
   request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const access = await requireOrgAccess();
-  if (isAccessError(access)) {
+  const access = await getOrgPermissionContext();
+  if ("error" in access) {
     return Response.json({ error: access.error }, { status: access.status });
+  }
+  const permissionError = requirePermission(access, "manage_bank_accounts");
+  if (permissionError) {
+    return Response.json({ error: permissionError.error }, { status: permissionError.status });
   }
 
   const { id } = await params;

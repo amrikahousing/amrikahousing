@@ -1,24 +1,17 @@
-import { auth, clerkClient } from "@clerk/nextjs/server";
+import { clerkClient } from "@clerk/nextjs/server";
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
-import { isAccessError, requireOrgAccess } from "@/lib/auth";
+import {
+  getOrgPermissionContext,
+  requirePropertyPermission,
+} from "@/lib/org-authorization";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 export async function POST(request: NextRequest) {
-  const { userId, orgRole } = await auth();
-  if (!userId) return Response.json({ error: "Unauthorized." }, { status: 401 });
-
-  const ctx = await requireOrgAccess();
-  if (isAccessError(ctx)) {
+  const ctx = await getOrgPermissionContext();
+  if ("error" in ctx) {
     return Response.json({ error: ctx.error }, { status: ctx.status });
-  }
-
-  if (orgRole !== "org:admin") {
-    return Response.json(
-      { error: "Only organization admins can invite renters." },
-      { status: 403 },
-    );
   }
 
   let body: unknown;
@@ -28,7 +21,7 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: "Invalid JSON body." }, { status: 400 });
   }
 
-  const { email, firstName, lastName, phone } = body as Record<string, unknown>;
+  const { email, firstName, lastName, phone, propertyId } = body as Record<string, unknown>;
 
   if (!email || typeof email !== "string" || !EMAIL_PATTERN.test(email.trim())) {
     return Response.json({ error: "A valid email address is required." }, { status: 422 });
@@ -38,6 +31,17 @@ export async function POST(request: NextRequest) {
   }
   if (!lastName || typeof lastName !== "string" || !lastName.trim()) {
     return Response.json({ error: "Last name is required." }, { status: 422 });
+  }
+  if (!propertyId || typeof propertyId !== "string" || !propertyId.trim()) {
+    return Response.json({ error: "propertyId is required." }, { status: 422 });
+  }
+  const permissionError = requirePropertyPermission(
+    ctx,
+    "invite_renters",
+    propertyId.trim(),
+  );
+  if (permissionError) {
+    return Response.json({ error: permissionError.error }, { status: permissionError.status });
   }
 
   const normalizedEmail = email.trim().toLowerCase();

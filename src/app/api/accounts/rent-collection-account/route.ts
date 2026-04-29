@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { isAccessError, requireOrgAccess } from "@/lib/auth";
+import { getOrgPermissionContext, requirePermission } from "@/lib/org-authorization";
 import {
   clearOrganizationRentCollectionAccount,
   setOrganizationRentCollectionAccount,
@@ -7,13 +7,16 @@ import {
 
 type PostBody = {
   connectedAccountId?: unknown;
-  plaidFundingAccountId?: unknown;
 };
 
 export async function POST(request: Request) {
-  const access = await requireOrgAccess();
-  if (isAccessError(access)) {
+  const access = await getOrgPermissionContext();
+  if ("error" in access) {
     return NextResponse.json({ error: access.error }, { status: access.status });
+  }
+  const permissionError = requirePermission(access, "manage_bank_accounts");
+  if (permissionError) {
+    return NextResponse.json({ error: permissionError.error }, { status: permissionError.status });
   }
 
   let body: PostBody;
@@ -35,10 +38,6 @@ export async function POST(request: Request) {
       organizationId: access.orgDbId,
       clerkOrgId: access.orgId,
       connectedAccountId: body.connectedAccountId.trim(),
-      plaidFundingAccountId:
-        typeof body.plaidFundingAccountId === "string" && body.plaidFundingAccountId.trim()
-          ? body.plaidFundingAccountId.trim()
-          : null,
     });
 
     return NextResponse.json({ destination });
@@ -56,9 +55,13 @@ export async function POST(request: Request) {
 }
 
 export async function DELETE() {
-  const access = await requireOrgAccess();
-  if (isAccessError(access)) {
+  const access = await getOrgPermissionContext();
+  if ("error" in access) {
     return NextResponse.json({ error: access.error }, { status: access.status });
+  }
+  const permissionError = requirePermission(access, "manage_bank_accounts");
+  if (permissionError) {
+    return NextResponse.json({ error: permissionError.error }, { status: permissionError.status });
   }
 
   await clearOrganizationRentCollectionAccount(access.orgDbId);
