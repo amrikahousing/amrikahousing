@@ -24,6 +24,49 @@ function metadataString(metadata: Record<string, unknown> | null | undefined, ke
   return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
+export async function findExistingSharedUserIdentity({
+  userId,
+  email,
+}: {
+  userId?: string | null;
+  email?: string | null;
+}) {
+  const normalizedEmail = email?.toLowerCase() ?? null;
+
+  const sharedUser =
+    (userId
+      ? await prisma.users.findUnique({
+          where: { clerk_user_id: userId },
+          select: {
+            id: true,
+            organization_id: true,
+            email: true,
+            first_name: true,
+            last_name: true,
+            role: true,
+          },
+        })
+      : null) ??
+    (normalizedEmail
+      ? await prisma.users.findUnique({
+          where: { email: normalizedEmail },
+          select: {
+            id: true,
+            organization_id: true,
+            email: true,
+            first_name: true,
+            last_name: true,
+            role: true,
+          },
+        })
+      : null);
+
+  return {
+    email: sharedUser?.email ?? normalizedEmail,
+    sharedUser,
+  };
+}
+
 export async function resolveSharedUserIdentity(userId: string) {
   const clerkUser =
     (await currentUser().catch(() => null)) ??
@@ -39,6 +82,9 @@ export async function resolveSharedUserIdentity(userId: string) {
     clerkUser?.lastName ??
     metadataString(clerkUser?.unsafeMetadata as Record<string, unknown> | null, "lastName") ??
     metadataString(clerkUser?.publicMetadata as Record<string, unknown> | null, "lastName");
+  const clerkRole =
+    metadataString(clerkUser?.unsafeMetadata as Record<string, unknown> | null, "role") ??
+    metadataString(clerkUser?.publicMetadata as Record<string, unknown> | null, "role");
 
   if (!email) {
     return { clerkUser, email: null, sharedUser: null as SharedUser | null };
@@ -75,11 +121,13 @@ export async function resolveSharedUserIdentity(userId: string) {
     }));
 
   const desiredRole =
-    existing?.role && existing.role !== "renter"
-      ? existing.role
-      : matchingTenant
-        ? "renter"
-        : existing?.role ?? "renter";
+    clerkRole === "property_manager"
+      ? "property_manager"
+      : existing?.role && existing.role !== "renter"
+        ? existing.role
+        : matchingTenant
+          ? "renter"
+          : existing?.role ?? "renter";
 
   const data = {
     clerk_user_id: userId,
