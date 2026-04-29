@@ -459,12 +459,6 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
         return;
       }
 
-      if (signIn.status !== "complete" || !signIn.createdSessionId) {
-        setClientError("We could not finish signing you in. Please try again.");
-        setIsSubmitting(false);
-        return;
-      }
-
       await completeSignIn();
     } catch (error) {
       setClientError(getErrorMessage(error, "Something went wrong. Please try again."));
