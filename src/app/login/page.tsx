@@ -129,7 +129,7 @@ function isConsumedInvitationError(error: unknown) {
 }
 
 function requiresEmailCodeChallenge(status: unknown) {
-  return status === "needs_factor_two" || status === "needs_client_trust";
+  return status === "needs_second_factor" || status === "needs_client_trust";
 }
 
 export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode }) {
