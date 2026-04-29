@@ -128,8 +128,8 @@ function isConsumedInvitationError(error: unknown) {
   });
 }
 
-function isPendingMfaSignIn(status: unknown) {
-  return status === "needs_factor_two";
+function requiresEmailCodeChallenge(status: unknown) {
+  return status === "needs_factor_two" || status === "needs_client_trust";
 }
 
 export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode }) {
@@ -446,7 +446,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
         return;
       }
 
-      if (isPendingMfaSignIn(signIn.status)) {
+      if (requiresEmailCodeChallenge(signIn.status)) {
         const { error: sendError } = await signIn.mfa.sendEmailCode();
         if (sendError) {
           setClientError(getErrorMessage(sendError, "We could not send a verification code."));
@@ -455,6 +455,12 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
         }
         setVerificationCode("");
         switchMode("signin_mfa");
+        setIsSubmitting(false);
+        return;
+      }
+
+      if (signIn.status !== "complete") {
+        setClientError(`Sign-in requires an additional step (${String(signIn.status)}).`);
         setIsSubmitting(false);
         return;
       }
