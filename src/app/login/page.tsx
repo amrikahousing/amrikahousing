@@ -128,6 +128,10 @@ function isConsumedInvitationError(error: unknown) {
   });
 }
 
+function isPendingMfaSignIn(status: unknown) {
+  return status === "needs_factor_two";
+}
+
 export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode }) {
   const emailId = useId();
   const passwordId = useId();
@@ -442,7 +446,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
         return;
       }
 
-      if (!signIn.createdSessionId) {
+      if (isPendingMfaSignIn(signIn.status)) {
         const { error: sendError } = await signIn.mfa.sendEmailCode();
         if (sendError) {
           setClientError(getErrorMessage(sendError, "We could not send a verification code."));
@@ -451,6 +455,12 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
         }
         setVerificationCode("");
         switchMode("signin_mfa");
+        setIsSubmitting(false);
+        return;
+      }
+
+      if (signIn.status !== "complete" || !signIn.createdSessionId) {
+        setClientError("We could not finish signing you in. Please try again.");
         setIsSubmitting(false);
         return;
       }
