@@ -234,15 +234,6 @@ function UnitCardMenu({
               Edit unit
             </button>
           ) : null}
-          {canInviteRenters && (
-            <button
-              onClick={() => { setOpen(false); onInviteRenter(unit); }}
-              className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-blue-600 hover:bg-blue-50"
-            >
-              <SendIcon className="h-4 w-4" />
-              Invite renter
-            </button>
-          )}
           {canManageUnits ? (
             <button
               onClick={() => { setOpen(false); onDelete(unit); }}
@@ -279,20 +270,32 @@ function UnitCard({
   canInviteRenters: boolean;
   inviteSent: boolean;
 }) {
+  const accentColor =
+    unit.status === "occupied"
+      ? "bg-emerald-500"
+      : unit.status === "vacant"
+      ? "bg-blue-400"
+      : unit.status === "maintenance"
+      ? "bg-amber-400"
+      : "bg-gray-300";
+
   return (
-    <div className="rounded-xl border border-gray-200 bg-white shadow-sm transition-shadow hover:shadow-md">
+    <div className="group rounded-2xl border border-slate-200 bg-slate-50 shadow-sm transition-all hover:shadow-md overflow-hidden">
+      {/* Status accent bar */}
+      <div className={`h-1 w-full ${accentColor}`} />
+
       {/* Top row */}
-      <div className="flex items-start justify-between p-4 pb-3">
+      <div className="flex items-start justify-between px-5 pt-4 pb-3">
         <div>
-          <p className="text-lg font-bold text-gray-900">Unit {unit.unitNumber}</p>
-          <span className={`mt-1 inline-flex rounded-full border px-2.5 py-0.5 text-xs font-medium ${statusBadge(unit.status)}`}>
+          <p className="text-base font-bold text-gray-900 tracking-tight">Unit {unit.unitNumber}</p>
+          <span className={`mt-1.5 inline-flex rounded-full border px-2.5 py-0.5 text-xs font-medium ${statusBadge(unit.status)}`}>
             {statusLabel(unit.status)}
           </span>
         </div>
-        <div className="flex items-start gap-3">
+        <div className="flex items-start gap-2">
           <div className="text-right">
-            <p className="text-xs text-gray-500">Monthly Rent</p>
-            <p className="text-lg font-bold text-gray-900">
+            <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">Monthly Rent</p>
+            <p className="text-xl font-bold text-gray-900">
               {unit.rentAmount !== null ? `$${unit.rentAmount.toLocaleString()}` : "—"}
             </p>
           </div>
@@ -307,51 +310,45 @@ function UnitCard({
         </div>
       </div>
 
-      <div className="mx-4 border-t border-gray-100" />
-
       {/* Specs */}
-      <div className="grid grid-cols-3 gap-3 p-4 py-3">
-        <div>
-          <p className="text-xs text-gray-500">Bedrooms</p>
-          <p className="mt-0.5 font-semibold text-gray-900">{unit.bedrooms} BD</p>
+      <div className="mx-5 my-3 grid grid-cols-3 divide-x divide-gray-100 rounded-xl bg-gray-50 px-1 py-2.5">
+        <div className="flex flex-col items-center gap-0.5">
+          <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">Beds</p>
+          <p className="text-sm font-bold text-gray-800">{unit.bedrooms} BD</p>
         </div>
-        <div>
-          <p className="text-xs text-gray-500">Bathrooms</p>
-          <p className="mt-0.5 font-semibold text-gray-900">{unit.bathrooms} BA</p>
+        <div className="flex flex-col items-center gap-0.5">
+          <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">Baths</p>
+          <p className="text-sm font-bold text-gray-800">{unit.bathrooms} BA</p>
         </div>
-        <div>
-          <p className="text-xs text-gray-500">Sq Ft</p>
-          <p className="mt-0.5 font-semibold text-gray-900">
+        <div className="flex flex-col items-center gap-0.5">
+          <p className="text-[11px] font-medium uppercase tracking-wide text-gray-400">Sq Ft</p>
+          <p className="text-sm font-bold text-gray-800">
             {unit.squareFeet ? unit.squareFeet.toLocaleString() : "—"}
           </p>
         </div>
       </div>
 
-      <div className="mx-4 border-t border-gray-100" />
-
       {/* Tenant section */}
-      <div className="p-4 pt-3">
+      <div className="border-t border-gray-100 px-5 py-3">
         {unit.tenant ? (
-          <div className="space-y-2">
-            <div className="flex items-center gap-2 text-sm text-gray-700">
-              <UserIcon className="h-4 w-4 shrink-0 text-gray-400" />
-              <span className="font-medium">{unit.tenant.firstName} {unit.tenant.lastName}</span>
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-indigo-50 text-indigo-600 font-semibold text-sm">
+              {unit.tenant.firstName[0]}{unit.tenant.lastName[0]}
             </div>
-            <div className="flex items-center gap-2 text-sm text-gray-500">
-              <MailIcon className="h-4 w-4 shrink-0 text-gray-400" />
-              <span className="truncate">{unit.tenant.email}</span>
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-gray-900">{unit.tenant.firstName} {unit.tenant.lastName}</p>
+              <p className="truncate text-xs text-gray-500">{unit.tenant.email}</p>
+              {unit.tenant.phone && (
+                <p className="text-xs text-gray-400">{unit.tenant.phone}</p>
+              )}
             </div>
-            {unit.tenant.phone && (
-              <div className="flex items-center gap-2 text-sm text-gray-500">
-                <PhoneIcon className="h-4 w-4 shrink-0 text-gray-400" />
-                <span>{unit.tenant.phone}</span>
-              </div>
-            )}
           </div>
         ) : (
           <div className="flex flex-col items-center gap-2 py-1 text-center">
-            <HomeIcon className="h-7 w-7 text-gray-200" />
-            <p className="text-sm text-gray-400">No tenant assigned</p>
+            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-100">
+              <UserIcon className="h-4 w-4 text-gray-300" />
+            </div>
+            <p className="text-xs text-gray-400">No tenant assigned</p>
             {canInviteRenters && (
               <button
                 onClick={() => !inviteSent && onInviteRenter(unit)}
@@ -371,7 +368,7 @@ function UnitCard({
       </div>
 
       {deleting && (
-        <div className="border-t border-gray-100 px-4 py-2 text-center text-xs text-gray-400">
+        <div className="border-t border-gray-100 px-5 py-2 text-center text-xs text-gray-400">
           Deleting…
         </div>
       )}
@@ -782,7 +779,7 @@ export function PropertyDetailsClient({
             {canManageUnits ? (
               <button
                 onClick={() => { setAddingUnit(true); setNewUnitForm(emptyUnitForm); }}
-                className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-blue-600 px-3 text-sm font-semibold text-white hover:bg-blue-700 transition-colors"
+                className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-emerald-600 px-3 text-sm font-semibold text-white hover:bg-emerald-700 transition-colors"
               >
                 <PlusIcon className="h-4 w-4" />
                 Add Unit

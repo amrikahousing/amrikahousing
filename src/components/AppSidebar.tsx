@@ -149,7 +149,7 @@ export function AppSidebar({ user }: AppSidebarProps) {
             className="flex items-center gap-2"
             onClick={() => setIsOpen(false)}
           >
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-500">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-emerald-600">
               <Icon name="building" className="h-5 w-5 text-white" />
             </div>
             <span className="text-xl font-bold tracking-tight">

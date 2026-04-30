@@ -411,7 +411,7 @@ export default async function AccountsPage({
           </div>
           <Link
             href="/accounts/transactions"
-            className="inline-flex h-10 items-center justify-center rounded-lg bg-slate-950 px-4 text-sm font-semibold text-white hover:bg-slate-800"
+            className="inline-flex h-10 items-center justify-center rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-700"
           >
             View all transactions
           </Link>
