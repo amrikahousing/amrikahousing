@@ -45,11 +45,17 @@ export async function POST(request: Request) {
     return Response.json({ error: "Invalid request body." }, { status: 400 });
   }
 
-  const { title, description, priority } = body as Record<string, unknown>;
+  const { category, description, priority } = body as Record<string, unknown>;
 
-  if (!title || typeof title !== "string" || !title.trim()) {
-    return Response.json({ error: "Title is required." }, { status: 400 });
-  }
+  const categoryLabels: Record<string, string> = {
+    plumbing: "Plumbing", electrical: "Electrical", hvac: "HVAC",
+    appliance: "Appliance", pest: "Pest", security: "Security", general: "General",
+  };
+  const categoryLabel = categoryLabels[typeof category === "string" ? category : ""] ?? "General";
+  const descSnippet = typeof description === "string" && description.trim()
+    ? description.trim().slice(0, 50).replace(/\s+\S*$/, "")
+    : null;
+  const title = descSnippet ? `${categoryLabel}: ${descSnippet}` : `${categoryLabel} maintenance request`;
 
   // Find the tenant's active lease to get the unit
   const leaseTenant = await prisma.lease_tenants.findFirst({

@@ -15,7 +15,7 @@ type MaintenanceRequest = {
   resolved_at: Date | null;
   units: {
     unit_number: string;
-    properties: { name: string };
+    properties: { name: string; address: string };
   };
 };
 
@@ -25,33 +25,52 @@ type Props = {
   unitLabel: string | null;
 };
 
+type ParseResult = {
+  ready: boolean;
+  question: string;
+  priority: string;
+  description: string;
+  category: string;
+};
+
 function formatDate(date: Date | string | null | undefined) {
   if (!date) return "—";
   return new Intl.DateTimeFormat("en-US", {
     month: "short",
     day: "numeric",
     year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
   }).format(new Date(date));
 }
 
 const priorityColors: Record<string, string> = {
-  low: "bg-slate-100 text-slate-600 border-slate-200",
-  normal: "bg-sky-50 text-sky-700 border-sky-200",
-  high: "bg-amber-50 text-amber-700 border-amber-200",
-  emergency: "bg-rose-50 text-rose-700 border-rose-200",
+  low: "bg-slate-100 text-slate-600",
+  normal: "bg-sky-50 text-sky-700",
+  high: "bg-amber-50 text-amber-700",
+  emergency: "bg-rose-50 text-rose-700",
+};
+
+const priorityLabels: Record<string, string> = {
+  low: "Low",
+  normal: "Normal",
+  high: "High",
+  emergency: "Emergency",
 };
 
 const statusColors: Record<string, string> = {
   open: "bg-amber-50 text-amber-700",
   in_progress: "bg-sky-50 text-sky-700",
-  resolved: "bg-emerald-50 text-emerald-700",
-  closed: "bg-slate-100 text-slate-600",
+  completed: "bg-emerald-50 text-emerald-700",
+  rejected: "bg-slate-100 text-slate-500",
+  closed: "bg-slate-100 text-slate-500",
 };
 
 const statusLabels: Record<string, string> = {
   open: "Open",
   in_progress: "In Progress",
-  resolved: "Resolved",
+  completed: "Completed",
+  rejected: "Rejected",
   closed: "Closed",
 };
 
@@ -66,102 +85,131 @@ function Icon({ name, className = "" }: { name: string; className?: string }) {
     viewBox: "0 0 24 24",
     "aria-hidden": true,
   };
-
-  if (name === "wrench") {
-    return (
-      <svg {...shared}>
-        <path d="M14.7 6.3a4 4 0 0 0 5 5L11 20l-4-4 8.7-8.7Z" />
-        <path d="m7 16-3 3 1 1 3-3" />
-      </svg>
-    );
-  }
-  if (name === "plus") {
-    return (
-      <svg {...shared}>
-        <path d="M12 5v14M5 12h14" />
-      </svg>
-    );
-  }
-  if (name === "x") {
-    return (
-      <svg {...shared}>
-        <path d="M18 6 6 18M6 6l12 12" />
-      </svg>
-    );
-  }
+  if (name === "wrench") return <svg {...shared}><path d="M14.7 6.3a4 4 0 0 0 5 5L11 20l-4-4 8.7-8.7Z" /><path d="m7 16-3 3 1 1 3-3" /></svg>;
+  if (name === "x") return <svg {...shared}><path d="M18 6 6 18M6 6l12 12" /></svg>;
+  if (name === "sparkles") return <svg {...shared}><path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" /></svg>;
   return null;
 }
 
 export function MaintenanceClient({ requests, hasActiveLease, unitLabel }: Props) {
   const router = useRouter();
-  const [showForm, setShowForm] = useState(false);
-  const [activeTab, setActiveTab] = useState<"active" | "completed">("active");
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [priority, setPriority] = useState("normal");
+
+  const [freeformInput, setFreeformInput] = useState("");
+  const [isParsing, setIsParsing] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
-  const activeRequests = requests.filter((request) => request.status === "open" || request.status === "in_progress");
-  const completedRequests = requests.filter((request) => request.status === "resolved" || request.status === "closed");
-  const visibleRequests = activeTab === "active" ? activeRequests : completedRequests;
 
-  async function handleSubmit(e: React.FormEvent) {
-    e.preventDefault();
-    setError(null);
+  // Pre-filled fallback form
+  const [prefilled, setPrefilled] = useState<ParseResult | null>(null);
+  const [prefilledCategory, setPrefilledCategory] = useState("general");
+  const [prefilledDescription, setPrefilledDescription] = useState("");
+  const [prefilledPriority, setPrefilledPriority] = useState("normal");
+  const [isPrefilledSubmitting, setIsPrefilledSubmitting] = useState(false);
+  const [prefilledError, setPrefilledError] = useState<string | null>(null);
 
-    if (!title.trim()) {
-      setError("Please enter a title for your request.");
-      return;
-    }
+  const [closingId, setClosingId] = useState<string | null>(null);
 
-    setIsSubmitting(true);
+  async function handleClose(id: string) {
+    setClosingId(id);
     try {
-      const res = await fetch("/api/renter/maintenance", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: title.trim(), description: description.trim(), priority }),
-      });
-
+      const res = await fetch(`/api/renter/maintenance/${id}`, { method: "PATCH" });
       if (!res.ok) {
         const data = (await res.json()) as { error?: string };
-        setError(data.error ?? "Failed to submit request. Please try again.");
-        setIsSubmitting(false);
+        alert(data.error ?? "Could not close the request.");
         return;
       }
-
-      setSuccess(true);
-      setTitle("");
-      setDescription("");
-      setPriority("normal");
-      setShowForm(false);
       router.refresh();
-    } catch {
-      setError("Something went wrong. Please try again.");
     } finally {
+      setClosingId(null);
+    }
+  }
+
+  const busy = isParsing || isSubmitting;
+
+  function resetLeft() {
+    setFreeformInput("");
+    setError(null);
+    setPrefilled(null);
+    setPrefilledError(null);
+    setPrefilledCategory("general");
+    setPrefilledDescription("");
+    setPrefilledPriority("normal");
+  }
+
+  async function callParse(input: string): Promise<ParseResult> {
+    const res = await fetch("/api/renter/maintenance/parse", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ input }),
+    });
+    if (!res.ok) {
+      const data = (await res.json().catch(() => ({}))) as { error?: string };
+      throw new Error(data.error ?? "Could not understand the description.");
+    }
+    return res.json() as Promise<ParseResult>;
+  }
+
+  async function submitFields(fields: { category: string; description: string; priority: string }) {
+    const res = await fetch("/api/renter/maintenance", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(fields),
+    });
+    if (!res.ok) {
+      const data = (await res.json()) as { error?: string };
+      throw new Error(data.error ?? "Failed to submit request.");
+    }
+  }
+
+  async function handleSubmit() {
+    if (!freeformInput.trim()) return;
+    setError(null);
+    setIsParsing(true);
+    try {
+      const result = await callParse(freeformInput);
+      if (!result.ready) {
+        setPrefilled(result);
+        setPrefilledCategory(result.category || "general");
+        setPrefilledDescription(result.description);
+        setPrefilledPriority(result.priority);
+        return;
+      }
+      setIsSubmitting(true);
+      await submitFields({ category: result.category, description: result.description, priority: result.priority });
+      setSuccess(true);
+      resetLeft();
+      router.refresh();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+    } finally {
+      setIsParsing(false);
       setIsSubmitting(false);
     }
   }
 
+
+  async function handlePrefilledSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setPrefilledError(null);
+    setIsPrefilledSubmitting(true);
+    try {
+      await submitFields({ category: prefilledCategory, description: prefilledDescription, priority: prefilledPriority });
+      setSuccess(true);
+      resetLeft();
+      router.refresh();
+    } catch (err) {
+      setPrefilledError(err instanceof Error ? err.message : "Something went wrong. Please try again.");
+    } finally {
+      setIsPrefilledSubmitting(false);
+    }
+  }
+
   return (
-    <div className="space-y-8">
-      <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight text-slate-900">Maintenance</h1>
-          <p className="mt-1 text-slate-500">Track and submit maintenance requests for your unit.</p>
-        </div>
-        {hasActiveLease && !showForm && (
-          <button
-            onClick={() => {
-              setShowForm(true);
-              setSuccess(false);
-            }}
-            className="flex shrink-0 items-center gap-2 rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-sky-700"
-          >
-            <Icon name="plus" className="h-4 w-4" />
-            New Request
-          </button>
-        )}
+    <div className="space-y-6">
+      <header>
+        <h1 className="text-3xl font-bold tracking-tight text-slate-900">Maintenance</h1>
+        <p className="mt-1 text-slate-500">Submit a request and track updates from your property team.</p>
       </header>
 
       {success && (
@@ -170,234 +218,215 @@ export function MaintenanceClient({ requests, hasActiveLease, unitLabel }: Props
         </div>
       )}
 
-      <section className="grid gap-4 md:grid-cols-3">
-        <article className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm font-medium text-slate-500">Open Requests</p>
-          <p className="mt-3 text-3xl font-bold text-slate-900">{activeRequests.length}</p>
-          <p className="mt-1 text-sm text-slate-500">
-            {activeRequests.some((request) => request.status === "in_progress") ? "In progress" : "Awaiting update"}
-          </p>
-        </article>
-        <article className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm font-medium text-slate-500">Completed</p>
-          <p className="mt-3 text-3xl font-bold text-slate-900">{completedRequests.length}</p>
-          <p className="mt-1 text-sm text-slate-500">All time</p>
-        </article>
-        <article className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-          <p className="text-sm font-medium text-slate-500">Avg Response Time</p>
-          <p className="mt-3 text-3xl font-bold text-slate-900">24h</p>
-          <p className="mt-1 text-sm text-slate-500">Very responsive</p>
-        </article>
-      </section>
-
-      {/* Submit form */}
-      {showForm && hasActiveLease && (
-        <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
-          <div className="flex items-center justify-between border-b border-slate-100 p-5">
-            <h2 className="font-semibold text-slate-900">New Maintenance Request</h2>
-            <button
-              onClick={() => {
-                setShowForm(false);
-                setError(null);
-              }}
-              className="rounded-lg p-1 text-slate-400 hover:bg-slate-100 hover:text-slate-600"
-              aria-label="Close form"
-            >
-              <Icon name="x" className="h-5 w-5" />
-            </button>
+      <div className="grid gap-6 lg:grid-cols-[380px_1fr]">
+        {/* Left — Submit Request */}
+        <div className="rounded-xl border border-slate-200 bg-white shadow-sm self-start">
+          <div className="border-b border-slate-100 px-6 py-5">
+            <h2 className="text-lg font-semibold text-slate-900">Submit Request</h2>
           </div>
-          <form onSubmit={handleSubmit} className="space-y-4 p-5">
+
+          <div className="px-6 py-5 space-y-5">
+            {/* Property label */}
             {unitLabel && (
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Property</p>
+                <p className="mt-1 text-sm text-slate-700">{unitLabel}</p>
+              </div>
+            )}
+
+            {!hasActiveLease ? (
               <p className="text-sm text-slate-500">
-                Submitting for: <span className="font-medium text-slate-700">{unitLabel}</span>
+                You need an active lease to submit maintenance requests. Contact your property manager.
               </p>
+            ) : prefilled ? (
+              /* Prefilled fallback form */
+              <form onSubmit={(e) => void handlePrefilledSubmit(e)} className="space-y-4">
+                <p className="text-xs text-amber-700 font-medium">
+                  We filled in what we could — review and complete before submitting.
+                </p>
+                <div className="space-y-1.5">
+                  <label htmlFor="pf-category" className="block text-sm font-medium text-slate-700">
+                    Category
+                  </label>
+                  <select
+                    id="pf-category"
+                    value={prefilledCategory}
+                    onChange={(e) => setPrefilledCategory(e.target.value)}
+                    disabled={isPrefilledSubmitting}
+                    className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20"
+                  >
+                    <option value="plumbing">Plumbing</option>
+                    <option value="electrical">Electrical</option>
+                    <option value="hvac">HVAC</option>
+                    <option value="appliance">Appliance</option>
+                    <option value="pest">Pest</option>
+                    <option value="security">Security</option>
+                    <option value="general">General</option>
+                  </select>
+                </div>
+                <div className="space-y-1.5">
+                  <label htmlFor="pf-description" className="block text-sm font-medium text-slate-700">
+                    Description
+                  </label>
+                  <textarea
+                    id="pf-description"
+                    value={prefilledDescription}
+                    onChange={(e) => setPrefilledDescription(e.target.value)}
+                    rows={4}
+                    disabled={isPrefilledSubmitting}
+                    className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20"
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label htmlFor="pf-priority" className="block text-sm font-medium text-slate-700">
+                    Priority
+                  </label>
+                  <select
+                    id="pf-priority"
+                    value={prefilledPriority}
+                    onChange={(e) => setPrefilledPriority(e.target.value)}
+                    disabled={isPrefilledSubmitting}
+                    className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20"
+                  >
+                    <option value="low">Low — Minor inconvenience</option>
+                    <option value="normal">Normal — Needs attention soon</option>
+                    <option value="high">High — Urgent repair needed</option>
+                    <option value="emergency">Emergency — Safety hazard</option>
+                  </select>
+                </div>
+                {prefilledError && (
+                  <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                    {prefilledError}
+                  </p>
+                )}
+                <div className="flex gap-3">
+                  <button
+                    type="submit"
+                    disabled={isPrefilledSubmitting}
+                    className="flex-1 rounded-lg bg-emerald-600 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {isPrefilledSubmitting ? "Submitting…" : "Submit Request"}
+                  </button>
+                  <button
+                    type="button"
+                    onClick={resetLeft}
+                    disabled={isPrefilledSubmitting}
+                    className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50 disabled:opacity-60"
+                  >
+                    Start over
+                  </button>
+                </div>
+              </form>
+            ) : (
+              /* AI freeform input */
+              <div className="space-y-4">
+                <textarea
+                  value={freeformInput}
+                  onChange={(e) => { setFreeformInput(e.target.value); setError(null); }}
+                  onKeyDown={(e) => { if (e.key === "Enter" && (e.metaKey || e.ctrlKey)) void handleSubmit(); }}
+                  placeholder={`e.g. "my heat doesn't work and it's cold" or "the bathroom faucet is dripping"`}
+                  rows={5}
+                  disabled={busy}
+                  className="w-full rounded-lg border border-slate-300 px-3 py-2.5 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20 disabled:opacity-60 resize-none"
+                />
+                {error && (
+                  <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
+                    {error}
+                  </p>
+                )}
+                <button
+                  type="button"
+                  onClick={() => void handleSubmit()}
+                  disabled={!freeformInput.trim() || busy}
+                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {busy ? (
+                    <>
+                      <span className="inline-block h-3.5 w-3.5 animate-spin rounded-full border-2 border-white border-t-transparent" />
+                      {isParsing ? "Reviewing…" : "Submitting…"}
+                    </>
+                  ) : (
+                    "Submit Request"
+                  )}
+                </button>
+                <p className="text-xs text-slate-400 text-center">⌘↵ to submit</p>
+              </div>
             )}
-
-            <div className="space-y-1.5">
-              <label htmlFor="title" className="block text-sm font-medium text-slate-700">
-                Issue Title <span className="text-rose-500">*</span>
-              </label>
-              <input
-                id="title"
-                type="text"
-                value={title}
-                onChange={(e) => setTitle(e.target.value)}
-                placeholder="e.g. Leaking faucet in bathroom"
-                className="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20"
-                required
-                disabled={isSubmitting}
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label htmlFor="description" className="block text-sm font-medium text-slate-700">
-                Description
-              </label>
-              <textarea
-                id="description"
-                value={description}
-                onChange={(e) => setDescription(e.target.value)}
-                placeholder="Describe the issue in detail..."
-                rows={4}
-                className="w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20"
-                disabled={isSubmitting}
-              />
-            </div>
-
-            <div className="space-y-1.5">
-              <label htmlFor="priority" className="block text-sm font-medium text-slate-700">
-                Priority
-              </label>
-              <select
-                id="priority"
-                value={priority}
-                onChange={(e) => setPriority(e.target.value)}
-                className="h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20"
-                disabled={isSubmitting}
-              >
-                <option value="low">Low — Minor inconvenience</option>
-                <option value="normal">Normal — Needs attention soon</option>
-                <option value="high">High — Urgent repair needed</option>
-                <option value="emergency">Emergency — Safety hazard</option>
-              </select>
-            </div>
-
-            {error && (
-              <p role="alert" className="rounded-lg border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">
-                {error}
-              </p>
-            )}
-
-            <div className="flex gap-3">
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className="flex-1 rounded-lg bg-sky-600 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-sky-700 disabled:cursor-not-allowed disabled:opacity-60"
-              >
-                {isSubmitting ? "Submitting..." : "Submit Request"}
-              </button>
-              <button
-                type="button"
-                onClick={() => {
-                  setShowForm(false);
-                  setError(null);
-                }}
-                className="rounded-lg border border-slate-300 px-4 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50"
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
-        </section>
-      )}
-
-      {!hasActiveLease && (
-        <div className="rounded-xl border border-dashed border-slate-300 bg-white p-8 text-center text-slate-500">
-          You need an active lease to submit maintenance requests. Contact your property manager.
-        </div>
-      )}
-
-      {/* Request list */}
-      <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
-        <div className="border-b border-slate-100 p-5">
-          <h2 className="font-semibold text-slate-900">
-            Your Requests{" "}
-            {requests.length > 0 && (
-              <span className="ml-1 rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">
-                {requests.length}
-              </span>
-            )}
-          </h2>
-        </div>
-        <div className="border-b border-slate-100 px-5 py-4">
-        <div className="inline-flex rounded-xl bg-slate-100 p-1 text-sm font-medium text-slate-500">
-          <button
-            type="button"
-            onClick={() => setActiveTab("active")}
-            className={[
-              "rounded-lg px-4 py-2 transition-colors",
-              activeTab === "active"
-                ? "bg-sky-600 text-white shadow-lg shadow-sky-950/20"
-                : "hover:text-slate-700",
-            ].join(" ")}
-          >
-            Active Requests
-          </button>
-          <button
-            type="button"
-            onClick={() => setActiveTab("completed")}
-            className={[
-              "rounded-lg px-4 py-2 transition-colors",
-              activeTab === "completed"
-                ? "bg-sky-600 text-white shadow-lg shadow-sky-950/20"
-                : "hover:text-slate-700",
-            ].join(" ")}
-          >
-            Completed
-          </button>
           </div>
         </div>
-        {visibleRequests.length === 0 ? (
-          <div className="flex flex-col items-center gap-3 p-10 text-center">
-            <Icon name="wrench" className="h-8 w-8 text-slate-300" />
-            <p className="text-sm text-slate-500">
-              {activeTab === "active" ? "No active maintenance requests." : "No completed requests yet."}
-            </p>
-            {hasActiveLease && activeTab === "active" && (
-              <button
-                onClick={() => setShowForm(true)}
-                className="mt-1 text-sm font-medium text-sky-600 hover:text-sky-700"
-              >
-                Submit your first request
-              </button>
-            )}
+
+        {/* Right — Request Timeline */}
+        <div className="rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-100 px-6 py-5">
+            <h2 className="text-lg font-semibold text-slate-900">Request Timeline</h2>
           </div>
-        ) : (
-          <div className="divide-y divide-slate-100">
-            {visibleRequests.map((req) => (
-              <article key={req.id} className="p-5">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                  <div className="min-w-0">
-                    <h3 className="font-semibold text-slate-900">{req.title}</h3>
-                    <p className="mt-0.5 text-xs text-slate-500">
-                      {req.units.properties.name} · Unit {req.units.unit_number} · Submitted {formatDate(req.created_at)}
-                    </p>
-                    {req.description && (
-                      <p className="mt-2 text-sm text-slate-600">{req.description}</p>
+
+          {requests.length === 0 ? (
+            <div className="flex flex-col items-center gap-3 p-12 text-center">
+              <Icon name="wrench" className="h-8 w-8 text-slate-300" />
+              <p className="text-sm text-slate-500">No maintenance requests yet.</p>
+            </div>
+          ) : (
+            <div className="divide-y divide-slate-100">
+              {requests.map((req) => (
+                <article key={req.id} className="px-6 py-5">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">
+                    {req.units.properties.address}
+                  </p>
+                  <div className="flex items-start justify-between gap-4">
+                    <h3 className="font-semibold text-slate-900 leading-snug">{req.title}</h3>
+                    <div className="flex shrink-0 gap-1.5">
+                      <span className={`rounded px-2 py-0.5 text-xs font-medium ${statusColors[req.status] ?? "bg-slate-100 text-slate-600"}`}>
+                        {statusLabels[req.status] ?? req.status}
+                      </span>
+                      <span className={`rounded px-2 py-0.5 text-xs font-medium capitalize ${priorityColors[req.priority] ?? "bg-slate-100 text-slate-600"}`}>
+                        {priorityLabels[req.priority] ?? req.priority}
+                      </span>
+                    </div>
+                  </div>
+                  {req.description && (
+                    <p className="mt-1.5 text-sm text-slate-500 line-clamp-2">{req.description}</p>
+                  )}
+                  <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-slate-500">
+                    <div>
+                      <p className="font-semibold uppercase tracking-wider text-slate-400">Submitted</p>
+                      <p className="mt-0.5">{formatDate(req.created_at)}</p>
+                    </div>
+                    <div>
+                      <p className="font-semibold uppercase tracking-wider text-slate-400">Current Status</p>
+                      <p className="mt-0.5">{statusLabels[req.status] ?? req.status}</p>
+                    </div>
+                    {req.scheduled_date && (
+                      <div>
+                        <p className="font-semibold uppercase tracking-wider text-slate-400">Scheduled</p>
+                        <p className="mt-0.5">{formatDate(req.scheduled_date)}</p>
+                      </div>
+                    )}
+                    {req.resolved_at && (
+                      <div>
+                        <p className="font-semibold uppercase tracking-wider text-slate-400">Resolved</p>
+                        <p className="mt-0.5">{formatDate(req.resolved_at)}</p>
+                      </div>
                     )}
                   </div>
-                  <div className="flex shrink-0 flex-wrap gap-2 sm:flex-col sm:items-end">
-                    <span
-                      className={[
-                        "rounded-full px-2.5 py-0.5 text-xs font-medium",
-                        statusColors[req.status] ?? "bg-slate-100 text-slate-600",
-                      ].join(" ")}
-                    >
-                      {statusLabels[req.status] ?? req.status}
-                    </span>
-                    <span
-                      className={[
-                        "rounded-full border px-2.5 py-0.5 text-xs font-medium capitalize",
-                        priorityColors[req.priority] ?? "bg-slate-100 text-slate-600 border-slate-200",
-                      ].join(" ")}
-                    >
-                      {req.priority}
-                    </span>
-                  </div>
-                </div>
-                <div className="mt-3 flex flex-wrap gap-4 text-xs text-slate-400">
-                  {req.scheduled_date && (
-                    <span>Scheduled: {formatDate(req.scheduled_date)}</span>
+                  {(req.status === "open" || req.status === "in_progress") && (
+                    <div className="mt-3 flex justify-end">
+                      <button
+                        type="button"
+                        onClick={() => void handleClose(req.id)}
+                        disabled={closingId === req.id}
+                        className="text-xs font-medium text-slate-400 hover:text-rose-600 transition-colors disabled:opacity-50"
+                      >
+                        {closingId === req.id ? "Closing…" : "Cancel request"}
+                      </button>
+                    </div>
                   )}
-                  {req.resolved_at && (
-                    <span>Resolved: {formatDate(req.resolved_at)}</span>
-                  )}
-                </div>
-              </article>
-            ))}
-          </div>
-        )}
-      </section>
+                </article>
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
