@@ -11,6 +11,7 @@ import {
 } from "react";
 import { mergeAccountingCategoryOptions } from "@/lib/accounting-categories";
 import type { SerializedAccountingTransaction } from "@/lib/accounting";
+import { useToast } from "./ToastProvider";
 
 type RowStatus = "idle" | "saving" | "saved" | "error";
 type AiStatus = "idle" | "loading" | "success" | "error";
@@ -45,6 +46,10 @@ type ManualDraft = {
 };
 
 type ManualSaveStatus = "idle" | "saving" | "saved" | "error";
+type PendingManualDelete = {
+  transaction: SerializedAccountingTransaction;
+  fromDrawer: boolean;
+};
 
 type PastApplyPrompt = {
   ruleId: string;
@@ -409,6 +414,7 @@ export function TransactionsLedger({
   years,
 }: TransactionsLedgerProps) {
   const router = useRouter();
+  const toast = useToast();
   const [rows, setRows] = useState(transactions);
   const [statuses, setStatuses] = useState<Record<string, RowStatus>>({});
   const [customCategoryRows, setCustomCategoryRows] = useState<Record<string, boolean>>({});
@@ -447,6 +453,8 @@ export function TransactionsLedger({
   const [manualSaveStatus, setManualSaveStatus] = useState<ManualSaveStatus>("idle");
   const [manualSaveMessage, setManualSaveMessage] = useState("");
   const [editingManualId, setEditingManualId] = useState<string | null>(null);
+  const [deletingManualId, setDeletingManualId] = useState<string | null>(null);
+  const [pendingManualDelete, setPendingManualDelete] = useState<PendingManualDelete | null>(null);
   const [lastAddedManual, setLastAddedManual] = useState<SerializedAccountingTransaction | null>(null);
   const [failedLogoUrls, setFailedLogoUrls] = useState<Record<string, boolean>>({});
   const manualSaveInFlight = useRef(false);
@@ -1131,6 +1139,12 @@ export function TransactionsLedger({
       setQuickManualInput("");
       setManualDraft(emptyManualDraft());
       setEditingManualId(null);
+      toast.success(
+        isEditing
+          ? `${result.transaction.description} was updated.`
+          : `${result.transaction.description} was added as a manual transaction.`,
+        { title: "Transactions" },
+      );
       router.refresh();
     } catch (error) {
       setManualSaveStatus("error");
@@ -1165,26 +1179,75 @@ export function TransactionsLedger({
     }
   }
 
-  async function handleDeleteManualRow(transaction: SerializedAccountingTransaction) {
-    const confirmed = window.confirm(`Delete ${transaction.description}?`);
-    if (!confirmed) return;
+  async function confirmDeleteManualTransaction() {
+    if (!pendingManualDelete) return;
 
-    setStatuses((current) => ({ ...current, [transaction.id]: "saving" }));
+    const { transaction, fromDrawer } = pendingManualDelete;
+
+    if (fromDrawer) {
+      setDeletingManualId(transaction.id);
+      setManualSaveStatus("idle");
+      setManualSaveMessage("");
+    } else {
+      setStatuses((current) => ({ ...current, [transaction.id]: "saving" }));
+    }
+
     try {
       const response = await fetch("/api/accounting/manual-transactions", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ transactionId: transaction.id, deleted: true }),
       });
-      if (!response.ok) throw new Error("Could not delete transaction.");
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+      if (!response.ok) throw new Error(payload?.error ?? "Could not delete transaction.");
       setRows((current) => current.filter((row) => row.id !== transaction.id));
       if (lastAddedManual?.id === transaction.id) {
         setLastAddedManual(null);
       }
+      if (fromDrawer) {
+        setManualDrawerOpen(false);
+        setEditingManualId(null);
+        setManualDraft(emptyManualDraft());
+      }
+      setPendingManualDelete(null);
+      toast.success(`${transaction.description} was deleted.`, { title: "Transactions" });
       router.refresh();
-    } catch {
-      setStatuses((current) => ({ ...current, [transaction.id]: "error" }));
+    } catch (error) {
+      if (fromDrawer) {
+        setManualSaveStatus("error");
+        setManualSaveMessage(
+          error instanceof Error ? error.message : "Could not delete transaction.",
+        );
+      } else {
+        setStatuses((current) => ({ ...current, [transaction.id]: "error" }));
+        toast.error(
+          error instanceof Error ? error.message : "Could not delete transaction.",
+          { title: "Transactions" },
+        );
+      }
+    } finally {
+      if (fromDrawer) {
+        setDeletingManualId(null);
+      }
     }
+  }
+
+  function requestDeleteManualTransaction(
+    transaction: SerializedAccountingTransaction,
+    options?: { fromDrawer?: boolean },
+  ) {
+    setPendingManualDelete({
+      transaction,
+      fromDrawer: options?.fromDrawer ?? false,
+    });
+  }
+
+  async function handleDeleteEditingManualTransaction() {
+    if (!editingManualId) return;
+
+    const transaction = rowsById.get(editingManualId);
+    if (!transaction || transaction.source !== "manual") return;
+    requestDeleteManualTransaction(transaction, { fromDrawer: true });
   }
 
   function handleDownloadCsv() {
@@ -1487,8 +1550,8 @@ export function TransactionsLedger({
                       key={transaction.id}
                       className={
                         index === 0
-                          ? "grid gap-4 px-4 py-4 text-sm transition-colors hover:bg-slate-50 lg:grid-cols-[minmax(0,1.35fr)_minmax(240px,0.85fr)_minmax(118px,auto)] lg:items-center"
-                          : "grid gap-4 border-t border-slate-100 px-4 py-4 text-sm transition-colors hover:bg-slate-50 lg:grid-cols-[minmax(0,1.35fr)_minmax(240px,0.85fr)_minmax(118px,auto)] lg:items-center"
+                          ? "group grid gap-4 px-4 py-4 text-sm transition-colors hover:bg-slate-50 lg:grid-cols-[minmax(0,1.35fr)_minmax(240px,0.85fr)_minmax(118px,auto)] lg:items-center"
+                          : "group grid gap-4 border-t border-slate-100 px-4 py-4 text-sm transition-colors hover:bg-slate-50 lg:grid-cols-[minmax(0,1.35fr)_minmax(240px,0.85fr)_minmax(118px,auto)] lg:items-center"
                       }
                     >
                       <div className="flex min-w-0 items-center gap-3">
@@ -1518,9 +1581,46 @@ export function TransactionsLedger({
                           <p className="mt-0.5 truncate text-sm font-medium text-slate-500" title={accountLabel}>
                             {accountLabel || "Account unavailable"}
                           </p>
-                          <span className="mt-1 inline-flex rounded bg-blue-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-blue-700">
-                            {transaction.source}
-                          </span>
+                          <div className="mt-1 flex flex-wrap items-center gap-2">
+                            <span className="inline-flex rounded bg-blue-50 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-blue-700">
+                              {transaction.source}
+                            </span>
+                            {transaction.source === "manual" ? (
+                              <>
+                                <button
+                                  type="button"
+                                  title="Edit transaction"
+                                  onClick={() =>
+                                    openManualDrawer(
+                                      "details",
+                                      draftFromTransaction(transaction),
+                                      transaction.id,
+                                    )
+                                  }
+                                  className="rounded p-1 text-slate-400 opacity-0 transition-opacity hover:bg-slate-100 hover:text-slate-700 group-hover:opacity-100"
+                                >
+                                  <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7" />
+                                    <path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z" />
+                                  </svg>
+                                </button>
+                                <button
+                                  type="button"
+                                  title="Delete transaction"
+                                  onClick={() => requestDeleteManualTransaction(transaction)}
+                                  className="rounded p-1 text-slate-400 opacity-0 transition-opacity hover:bg-red-50 hover:text-red-600 group-hover:opacity-100"
+                                >
+                                  <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                                    <polyline points="3 6 5 6 21 6" />
+                                    <path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
+                                    <path d="M10 11v6" />
+                                    <path d="M14 11v6" />
+                                    <path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+                                  </svg>
+                                </button>
+                              </>
+                            ) : null}
+                          </div>
                         </div>
                       </div>
 
@@ -1634,25 +1734,6 @@ export function TransactionsLedger({
                             {transaction.isIncome ? "+" : "-"}
                             {formatCurrency(transaction.amount)}
                           </span>
-                          {transaction.source === "manual" ? (
-                            <button
-                              type="button"
-                              onClick={() => handleDeleteManualRow(transaction)}
-                              title="Delete manual transaction"
-                              className="inline-flex h-8 w-8 items-center justify-center rounded-lg text-slate-400 hover:bg-red-50 hover:text-red-600"
-                            >
-                              <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                                <path d="M3 6h18" />
-                                <path d="M8 6V4h8v2" />
-                                <path d="M19 6l-1 14H6L5 6" />
-                                <path d="M10 11v5" />
-                                <path d="M14 11v5" />
-                              </svg>
-                            </button>
-                          ) : null}
-                          <svg className="hidden h-5 w-5 shrink-0 text-slate-300 sm:block" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M9 18l6-6-6-6" />
-                          </svg>
                         </div>
                       </div>
                     </div>
@@ -1807,9 +1888,10 @@ export function TransactionsLedger({
                     <input
                       type="date"
                       value={manualDraft.date}
-                      onChange={(event) =>
-                        setManualDraft((draft) => ({ ...draft, date: event.currentTarget.value }))
-                      }
+                      onChange={(event) => {
+                        const value = event.currentTarget.value;
+                        setManualDraft((draft) => ({ ...draft, date: value }));
+                      }}
                       className={drawerInputClass}
                     />
                   </label>
@@ -1817,9 +1899,10 @@ export function TransactionsLedger({
                     <span className="text-sm font-semibold text-slate-700">Amount</span>
                     <input
                       value={manualDraft.amount}
-                      onChange={(event) =>
-                        setManualDraft((draft) => ({ ...draft, amount: event.currentTarget.value }))
-                      }
+                      onChange={(event) => {
+                        const value = event.currentTarget.value;
+                        setManualDraft((draft) => ({ ...draft, amount: value }));
+                      }}
                       inputMode="decimal"
                       placeholder="0.00"
                       className={drawerInputClass}
@@ -1829,9 +1912,10 @@ export function TransactionsLedger({
                     <span className="text-sm font-semibold text-slate-700">Description</span>
                     <input
                       value={manualDraft.description}
-                      onChange={(event) =>
-                        setManualDraft((draft) => ({ ...draft, description: event.currentTarget.value }))
-                      }
+                      onChange={(event) => {
+                        const value = event.currentTarget.value;
+                        setManualDraft((draft) => ({ ...draft, description: value }));
+                      }}
                       placeholder="Vendor or memo"
                       className={drawerInputClass}
                     />
@@ -1840,12 +1924,13 @@ export function TransactionsLedger({
                     <span className="text-sm font-semibold text-slate-700">Type</span>
                     <select
                       value={manualDraft.isIncome ? "income" : "expense"}
-                      onChange={(event) =>
+                      onChange={(event) => {
+                        const value = event.currentTarget.value;
                         setManualDraft((draft) => ({
                           ...draft,
-                          isIncome: event.currentTarget.value === "income",
-                        }))
-                      }
+                          isIncome: value === "income",
+                        }));
+                      }}
                       className={drawerInputClass}
                     >
                       <option value="expense">Expense</option>
@@ -1856,9 +1941,10 @@ export function TransactionsLedger({
                     <span className="text-sm font-semibold text-slate-700">Category</span>
                     <select
                       value={optionValueForCategory(categoryList, manualDraft.category)}
-                      onChange={(event) =>
-                        setManualDraft((draft) => ({ ...draft, category: event.currentTarget.value }))
-                      }
+                      onChange={(event) => {
+                        const value = event.currentTarget.value;
+                        setManualDraft((draft) => ({ ...draft, category: value }));
+                      }}
                       className={`${drawerInputClass} capitalize`}
                     >
                       {categoryList.map((category) => (
@@ -1872,9 +1958,10 @@ export function TransactionsLedger({
                     <span className="text-sm font-semibold text-slate-700">Account or unit</span>
                     <input
                       value={manualDraft.account}
-                      onChange={(event) =>
-                        setManualDraft((draft) => ({ ...draft, account: event.currentTarget.value }))
-                      }
+                      onChange={(event) => {
+                        const value = event.currentTarget.value;
+                        setManualDraft((draft) => ({ ...draft, account: value }));
+                      }}
                       placeholder="Manual, Unit 2B, Operating account"
                       className={drawerInputClass}
                     />
@@ -1883,9 +1970,10 @@ export function TransactionsLedger({
                     <span className="text-sm font-semibold text-slate-700">Reference</span>
                     <input
                       value={manualDraft.reference}
-                      onChange={(event) =>
-                        setManualDraft((draft) => ({ ...draft, reference: event.currentTarget.value }))
-                      }
+                      onChange={(event) => {
+                        const value = event.currentTarget.value;
+                        setManualDraft((draft) => ({ ...draft, reference: value }));
+                      }}
                       placeholder="Check, invoice, memo"
                       className={drawerInputClass}
                     />
@@ -1894,9 +1982,10 @@ export function TransactionsLedger({
                     <span className="text-sm font-semibold text-slate-700">Notes</span>
                     <input
                       value={manualDraft.notes}
-                      onChange={(event) =>
-                        setManualDraft((draft) => ({ ...draft, notes: event.currentTarget.value }))
-                      }
+                      onChange={(event) => {
+                        const value = event.currentTarget.value;
+                        setManualDraft((draft) => ({ ...draft, notes: value }));
+                      }}
                       placeholder="Optional"
                       className={drawerInputClass}
                     />
@@ -1910,13 +1999,25 @@ export function TransactionsLedger({
             </div>
 
             <div className="flex items-center justify-between gap-3 border-t border-slate-200 px-5 py-4">
-              <button
-                type="button"
-                onClick={() => setManualDrawerOpen(false)}
-                className="h-10 rounded-lg px-4 text-sm font-semibold text-slate-600 hover:bg-slate-100"
-              >
-                Cancel
-              </button>
+              <div className="flex items-center gap-2">
+                {editingManualId ? (
+                  <button
+                    type="button"
+                    onClick={() => void handleDeleteEditingManualTransaction()}
+                    disabled={manualSaveStatus === "saving" || deletingManualId === editingManualId}
+                    className="h-10 rounded-lg px-4 text-sm font-semibold text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:text-slate-400"
+                  >
+                    {deletingManualId === editingManualId ? "Deleting..." : "Delete transaction"}
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={() => setManualDrawerOpen(false)}
+                  className="h-10 rounded-lg px-4 text-sm font-semibold text-slate-600 hover:bg-slate-100"
+                >
+                  Cancel
+                </button>
+              </div>
               <div className="flex items-center gap-2">
                 {manualMode === "quick" ? (
                   <button
@@ -2384,6 +2485,42 @@ export function TransactionsLedger({
                   </button>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {pendingManualDelete ? (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/35 px-4"
+          onClick={() => setPendingManualDelete(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl border border-slate-200 bg-white shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="border-b border-slate-200 px-5 py-4">
+              <h3 className="text-base font-semibold text-slate-950">Delete manual transaction?</h3>
+              <p className="mt-1 text-sm text-slate-500">
+                {pendingManualDelete.transaction.description} will be removed from your manual records.
+              </p>
+            </div>
+            <div className="flex items-center justify-end gap-3 px-5 py-4">
+              <button
+                type="button"
+                onClick={() => setPendingManualDelete(null)}
+                className="h-10 rounded-lg px-4 text-sm font-semibold text-slate-600 hover:bg-slate-100"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmDeleteManualTransaction()}
+                disabled={deletingManualId === pendingManualDelete.transaction.id}
+                className="h-10 rounded-lg bg-red-600 px-4 text-sm font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+              >
+                {deletingManualId === pendingManualDelete.transaction.id ? "Deleting..." : "Delete"}
+              </button>
             </div>
           </div>
         </div>

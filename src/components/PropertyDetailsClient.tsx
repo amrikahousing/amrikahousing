@@ -3,6 +3,7 @@
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PROPERTY_TYPE_OPTIONS, getPropertyTypeLabel, normalizePropertyType } from "@/lib/property-types";
+import { useToast } from "./ToastProvider";
 
 type PropertyDetails = {
   id: string;
@@ -392,6 +393,7 @@ export function PropertyDetailsClient({
   canInviteRenters?: boolean;
 }) {
   const router = useRouter();
+  const toast = useToast();
   const [property, setProperty] = useState(initialProperty);
 
   // Property edit state
@@ -432,10 +434,6 @@ export function PropertyDetailsClient({
   const [inviteError, setInviteError] = useState<string | null>(null);
   const [invitedUnitIds, setInvitedUnitIds] = useState<Set<string>>(new Set());
 
-  // Messages
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
   // ── Stats ──────────────────────────────────────────────────────────────────
 
   const totalUnits = property.units.length;
@@ -459,20 +457,16 @@ export function PropertyDetailsClient({
   // ── Handlers ───────────────────────────────────────────────────────────────
 
   function notify(msg: string) {
-    setMessage(msg);
-    setError(null);
-    setTimeout(() => setMessage(null), 4000);
+    toast.success(msg, { title: "Property" });
   }
 
   function fail(msg: string) {
-    setError(msg);
-    setMessage(null);
+    toast.error(msg, { title: "Property" });
   }
 
   async function saveProperty(e: React.FormEvent) {
     e.preventDefault();
     setSavingProperty(true);
-    setError(null);
     try {
       const res = await fetch(`/api/properties/${property.id}`, {
         method: "PATCH",
@@ -495,7 +489,6 @@ export function PropertyDetailsClient({
   async function createUnit(e: React.FormEvent) {
     e.preventDefault();
     setSavingNewUnit(true);
-    setError(null);
     try {
       const res = await fetch(`/api/properties/${property.id}/units`, {
         method: "POST",
@@ -542,7 +535,6 @@ export function PropertyDetailsClient({
     e.preventDefault();
     if (!editingUnit) return;
     setSavingUnit(true);
-    setError(null);
     try {
       const res = await fetch(`/api/properties/${property.id}/units/${editingUnit.id}`, {
         method: "PATCH",
@@ -629,7 +621,6 @@ export function PropertyDetailsClient({
   async function confirmDeleteUnit() {
     if (!deletingUnit) return;
     setDeletingUnitId(deletingUnit.id);
-    setError(null);
     try {
       const res = await fetch(`/api/properties/${property.id}/units/${deletingUnit.id}`, {
         method: "DELETE",
@@ -651,18 +642,6 @@ export function PropertyDetailsClient({
 
   return (
     <div className="space-y-6">
-      {/* Toasts */}
-      {message && (
-        <div className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
-          {message}
-        </div>
-      )}
-      {error && (
-        <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
-          {error}
-        </div>
-      )}
-
       {/* Property header */}
       <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
         <div className="flex flex-col gap-6 p-6 sm:flex-row sm:items-start">
@@ -802,7 +781,7 @@ export function PropertyDetailsClient({
             {/* Add unit */}
             {canManageUnits ? (
               <button
-                onClick={() => { setAddingUnit(true); setNewUnitForm(emptyUnitForm); setError(null); }}
+                onClick={() => { setAddingUnit(true); setNewUnitForm(emptyUnitForm); }}
                 className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-blue-600 px-3 text-sm font-semibold text-white hover:bg-blue-700 transition-colors"
               >
                 <PlusIcon className="h-4 w-4" />
@@ -827,7 +806,7 @@ export function PropertyDetailsClient({
                 <UnitCard
                   key={unit.id}
                   unit={unit}
-                  onEdit={(u) => { setEditingUnit(u); setUnitForm(unitFormFromUnit(u)); setError(null); }}
+                  onEdit={(u) => { setEditingUnit(u); setUnitForm(unitFormFromUnit(u)); }}
                   onDelete={(u) => setDeletingUnit(u)}
                   onInviteRenter={(u) => { setInvitingUnit(u); setInviteForm({ firstName: "", lastName: "", email: "", phone: "" }); setInviteError(null); }}
                   deleting={deletingUnitId === unit.id}

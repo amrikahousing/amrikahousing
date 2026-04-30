@@ -2,6 +2,7 @@
 
 import { startTransition, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useToast } from "./ToastProvider";
 
 type RentCollectionAccountRadioProps = {
   connectedAccountId: string;
@@ -15,9 +16,9 @@ export function RentCollectionAccountRadio({
   disabled,
 }: RentCollectionAccountRadioProps) {
   const router = useRouter();
+  const toast = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isAwaitingServerState, setIsAwaitingServerState] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const [optimisticChecked, setOptimisticChecked] = useState(checked);
 
   useEffect(() => {
@@ -30,6 +31,26 @@ export function RentCollectionAccountRadio({
     }
   }, [checked, isSubmitting, isAwaitingServerState, optimisticChecked]);
 
+  async function readErrorMessage(response: Response) {
+    const contentType = response.headers.get("content-type") ?? "";
+
+    if (contentType.includes("application/json")) {
+      const data = (await response.json().catch(() => null)) as { error?: string } | null;
+      if (data?.error?.trim()) {
+        return data.error.trim();
+      }
+    }
+
+    const text = (await response.text().catch(() => "")).trim();
+    if (!text) {
+      return "Unable to update the rent collection account.";
+    }
+
+    // If the server returned HTML, strip tags so we can still show a useful message.
+    const plainText = text.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+    return plainText || "Unable to update the rent collection account.";
+  }
+
   async function handleChange() {
     if (disabled) {
       return;
@@ -38,7 +59,6 @@ export function RentCollectionAccountRadio({
     const nextChecked = !optimisticChecked;
     setIsSubmitting(true);
     setIsAwaitingServerState(false);
-    setError(null);
     setOptimisticChecked(nextChecked);
 
     try {
@@ -47,14 +67,20 @@ export function RentCollectionAccountRadio({
         headers: nextChecked ? { "Content-Type": "application/json" } : undefined,
         body: nextChecked ? JSON.stringify({ connectedAccountId }) : undefined,
       });
-      const data = (await response.json().catch(() => ({}))) as { error?: string };
 
       if (!response.ok) {
         setOptimisticChecked(checked);
         setIsAwaitingServerState(false);
-        setError(data.error ?? "Unable to update the rent collection account.");
+        toast.error(await readErrorMessage(response), { title: "Rent Collection" });
         return;
       }
+
+      toast.success(
+        nextChecked
+          ? "This account is now set to collect rent."
+          : "Rent collection was turned off for this account.",
+        { title: "Rent Collection" },
+      );
 
       setIsAwaitingServerState(true);
       startTransition(() => {
@@ -63,10 +89,11 @@ export function RentCollectionAccountRadio({
     } catch (requestError) {
       setOptimisticChecked(checked);
       setIsAwaitingServerState(false);
-      setError(
+      toast.error(
         requestError instanceof Error
           ? requestError.message
           : "Unable to update the rent collection account.",
+        { title: "Rent Collection" },
       );
     } finally {
       setIsSubmitting(false);
@@ -74,13 +101,13 @@ export function RentCollectionAccountRadio({
   }
 
   return (
-    <div className="flex min-w-[88px] flex-col items-end gap-1">
+    <div className="flex min-w-[56px] flex-col items-end gap-1 sm:min-w-[88px]">
       <label
         className={`flex items-center gap-2 text-xs sm:text-sm ${
           disabled ? "cursor-not-allowed text-slate-400" : "cursor-pointer text-slate-700"
         }`}
       >
-        <span>Rent</span>
+        <span className="hidden sm:inline">Rent</span>
         <input
           type="checkbox"
           checked={optimisticChecked}
@@ -108,7 +135,6 @@ export function RentCollectionAccountRadio({
       <p className="text-[11px] text-slate-500 sm:text-xs">
         {isSubmitting ? "Connecting..." : optimisticChecked ? "On" : disabled ? "Off" : "Off"}
       </p>
-      {error ? <p className="max-w-[220px] text-right text-xs text-red-600">{error}</p> : null}
     </div>
   );
 }
