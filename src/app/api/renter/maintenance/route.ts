@@ -20,6 +20,7 @@ export async function GET() {
       updated_at: true,
       scheduled_date: true,
       resolved_at: true,
+      status_change_note: true,
       units: {
         select: {
           unit_number: true,

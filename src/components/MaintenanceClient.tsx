@@ -37,6 +37,7 @@ export type MaintenanceRequest = {
   assignmentNote: string | null;
   aiAnalysis: string | null;
   createdAt: string;
+  statusChangeNote: string | null;
 };
 
 type MaintenanceClientProps = {
@@ -363,11 +364,29 @@ export function MaintenanceClient({
   }
 
   function updateStatus(id: string, status: RequestStatus) {
+    // Optimistic update
     setRequests((current) =>
       current.map((request) =>
         request.id === id ? { ...request, status } : request,
       ),
     );
+
+    void fetch(`/api/maintenance/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ status, actorName: "Manager" }),
+    }).then(async (res) => {
+      if (res.ok) {
+        const data = (await res.json()) as { request: { status_change_note: string } };
+        setRequests((current) =>
+          current.map((request) =>
+            request.id === id
+              ? { ...request, statusChangeNote: data.request.status_change_note }
+              : request,
+          ),
+        );
+      }
+    });
   }
 
   function analyzeRequest(id: string) {
@@ -409,6 +428,7 @@ export function MaintenanceClient({
       assignmentNote: "Your property team has been notified.",
       aiAnalysis: null,
       createdAt: new Date().toISOString(),
+      statusChangeNote: null,
     };
 
     if (!nextRequest.propertyId) return;
@@ -800,6 +820,12 @@ export function MaintenanceClient({
                       </Badge>
                     ) : null}
                   </div>
+
+                  {request.statusChangeNote ? (
+                    <div className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-500">
+                      {request.statusChangeNote}
+                    </div>
+                  ) : null}
 
                   {request.aiAnalysis ? (
                     <div className="flex gap-3 rounded-lg border border-sky-100 bg-sky-50 p-3 text-sm text-sky-800">

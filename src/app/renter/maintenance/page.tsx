@@ -56,6 +56,7 @@ export default async function RenterMaintenancePage() {
                 properties: { select: { name: true, address: true } },
               },
             },
+            status_change_note: true,
           },
         },
       },

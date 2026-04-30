@@ -94,6 +94,7 @@ export default async function MaintenancePage() {
       assignmentNote: request.vendors?.name ? "Vendor assigned." : null,
       aiAnalysis: null,
       createdAt: request.created_at.toISOString(),
+      statusChangeNote: request.status_change_note ?? null,
     };
   });
 

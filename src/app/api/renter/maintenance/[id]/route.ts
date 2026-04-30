@@ -28,8 +28,14 @@ export async function PATCH(
 
   const updated = await prisma.maintenance_requests.update({
     where: { id },
-    data: { status: "completed", updated_at: new Date() },
-    select: { id: true, status: true },
+    data: {
+      status: "completed",
+      updated_at: new Date(),
+      status_changed_by: "tenant",
+      status_changed_at: new Date(),
+      status_change_note: "Cancelled by tenant",
+    },
+    select: { id: true, status: true, status_change_note: true },
   });
 
   return Response.json({ request: updated });

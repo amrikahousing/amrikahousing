@@ -13,6 +13,7 @@ type MaintenanceRequest = {
   updated_at: Date;
   scheduled_date: Date | null;
   resolved_at: Date | null;
+  status_change_note: string | null;
   units: {
     unit_number: string;
     properties: { name: string; address: string };
@@ -386,6 +387,9 @@ export function MaintenanceClient({ requests, hasActiveLease, unitLabel }: Props
                   </div>
                   {req.description && (
                     <p className="mt-1.5 text-sm text-slate-500 line-clamp-2">{req.description}</p>
+                  )}
+                  {req.status_change_note && (
+                    <p className="mt-2 text-xs text-slate-400 italic">{req.status_change_note}</p>
                   )}
                   <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-slate-500">
                     <div>
