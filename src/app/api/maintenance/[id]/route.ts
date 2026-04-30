@@ -27,7 +27,7 @@ export async function PATCH(
     return Response.json({ error: "Invalid request body." }, { status: 400 });
   }
 
-  const { status, actorName } = body as Record<string, unknown>;
+  const { status, actorName, resolutionNote } = body as Record<string, unknown>;
 
   if (!status || typeof status !== "string" || !VALID_STATUSES.includes(status)) {
     return Response.json({ error: "Invalid status." }, { status: 400 });
@@ -43,9 +43,11 @@ export async function PATCH(
   }
 
   const actor = typeof actorName === "string" && actorName.trim() ? actorName.trim() : "Manager";
+  const note = typeof resolutionNote === "string" && resolutionNote.trim() ? resolutionNote.trim() : null;
+
   const noteMap: Record<string, string> = {
-    completed: `Marked as completed by ${actor}`,
-    rejected: `Rejected by ${actor}`,
+    completed: note ? `Resolved by ${actor}: ${note}` : `Marked as completed by ${actor}`,
+    rejected: note ? `Rejected by ${actor}: ${note}` : `Rejected by ${actor}`,
     in_progress: `Marked in progress by ${actor}`,
     open: `Reopened by ${actor}`,
   };

@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 
 export type UserRole = "manager" | "tenant";
 export type RequestPriority = "low" | "medium" | "high" | "emergency";
-export type RequestStatus = "open" | "in_progress" | "completed" | "rejected";
+export type RequestStatus = "open" | "in_progress" | "completed" | "rejected" | "cancelled";
 export type RequestCategory =
   | "plumbing"
   | "electrical"
@@ -35,7 +35,6 @@ export type MaintenanceRequest = {
   escalatedAt: string | null;
   assignedVendor: string | null;
   assignmentNote: string | null;
-  aiAnalysis: string | null;
   createdAt: string;
   statusChangeNote: string | null;
 };
@@ -270,9 +269,11 @@ export function MaintenanceClient({
   const [autoEscalationEnabled, setAutoEscalationEnabled] = useState(true);
   const [autoVendorAssignmentEnabled, setAutoVendorAssignmentEnabled] =
     useState(true);
-  const [analyzingRequestId, setAnalyzingRequestId] = useState<string | null>(
-    null,
-  );
+  const [pendingStatusChange, setPendingStatusChange] = useState<{
+    id: string;
+    status: RequestStatus;
+  } | null>(null);
+  const [resolutionNote, setResolutionNote] = useState("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
 
@@ -363,18 +364,28 @@ export function MaintenanceClient({
     setSelectedPriority("all");
   }
 
-  function updateStatus(id: string, status: RequestStatus) {
-    // Optimistic update
+  function handleStatusChange(id: string, status: RequestStatus) {
+    if (status === "completed" || status === "rejected") {
+      setPendingStatusChange({ id, status });
+      setResolutionNote("");
+    } else {
+      commitStatusChange(id, status, "");
+    }
+  }
+
+  function commitStatusChange(id: string, status: RequestStatus, note: string) {
     setRequests((current) =>
       current.map((request) =>
         request.id === id ? { ...request, status } : request,
       ),
     );
+    setPendingStatusChange(null);
+    setResolutionNote("");
 
     void fetch(`/api/maintenance/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ status, actorName: "Manager" }),
+      body: JSON.stringify({ status, actorName: "Manager", resolutionNote: note }),
     }).then(async (res) => {
       if (res.ok) {
         const data = (await res.json()) as { request: { status_change_note: string } };
@@ -387,26 +398,6 @@ export function MaintenanceClient({
         );
       }
     });
-  }
-
-  function analyzeRequest(id: string) {
-    setAnalyzingRequestId(id);
-    window.setTimeout(() => {
-      setRequests((current) =>
-        current.map((request) => {
-          if (request.id !== id) return request;
-          return {
-            ...request,
-            category:
-              request.category === "general" ? "plumbing" : request.category,
-            priority:
-              request.priority === "low" ? "medium" : request.priority,
-            aiAnalysis: `Suggested triage: ${request.category} issue with ${request.priority} priority. Confirm access, photos, and vendor availability before dispatch.`,
-          };
-        }),
-      );
-      setAnalyzingRequestId(null);
-    }, 450);
   }
 
   function submitTenantRequest(event: React.FormEvent<HTMLFormElement>) {
@@ -426,7 +417,6 @@ export function MaintenanceClient({
       escalatedAt: null,
       assignedVendor: null,
       assignmentNote: "Your property team has been notified.",
-      aiAnalysis: null,
       createdAt: new Date().toISOString(),
       statusChangeNote: null,
     };
@@ -760,6 +750,58 @@ export function MaintenanceClient({
         )}
       </section>
 
+      {pendingStatusChange ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-md rounded-xl border border-slate-200 bg-white p-6 shadow-2xl">
+            <h2 className="mb-1 text-lg font-semibold text-slate-900">
+              {pendingStatusChange.status === "completed" ? "Resolve request" : "Reject request"}
+            </h2>
+            <p className="mb-4 text-sm text-slate-500">
+              {pendingStatusChange.status === "completed"
+                ? "Briefly describe how this was resolved."
+                : "Briefly explain why this request is being rejected."}
+            </p>
+            <textarea
+              autoFocus
+              value={resolutionNote}
+              onChange={(e) => setResolutionNote(e.target.value)}
+              placeholder={
+                pendingStatusChange.status === "completed"
+                  ? "e.g. Replaced the faulty valve. Issue resolved."
+                  : "e.g. Duplicate request — already addressed in ticket #123."
+              }
+              className="min-h-[100px] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/15"
+            />
+            <div className="mt-4 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setPendingStatusChange(null)}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() =>
+                  commitStatusChange(
+                    pendingStatusChange.id,
+                    pendingStatusChange.status,
+                    resolutionNote.trim(),
+                  )
+                }
+                className={`rounded-lg px-4 py-2 text-sm font-semibold text-white ${
+                  pendingStatusChange.status === "completed"
+                    ? "bg-emerald-600 hover:bg-emerald-700"
+                    : "bg-rose-600 hover:bg-rose-700"
+                }`}
+              >
+                {pendingStatusChange.status === "completed" ? "Mark as resolved" : "Reject"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <section className="grid gap-4">
         {visibleRequests.length === 0 ? (
           <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 py-20 text-center">
@@ -827,15 +869,6 @@ export function MaintenanceClient({
                     </div>
                   ) : null}
 
-                  {request.aiAnalysis ? (
-                    <div className="flex gap-3 rounded-lg border border-sky-100 bg-sky-50 p-3 text-sm text-sky-800">
-                      <Icon name="bot" className="h-5 w-5 flex-shrink-0" />
-                      <div>
-                        <span className="font-semibold">AI Analysis:</span>{" "}
-                        {request.aiAnalysis}
-                      </div>
-                    </div>
-                  ) : null}
                 </div>
 
                 <div className="flex flex-col gap-3 md:min-w-[200px]">
@@ -844,33 +877,24 @@ export function MaintenanceClient({
                     <select
                       value={request.status}
                       onChange={(event) =>
-                        updateStatus(
+                        handleStatusChange(
                           request.id,
                           event.target.value as RequestStatus,
                         )
                       }
-                      className="h-9 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/15"
+                      disabled={request.status === "cancelled"}
+                      className="h-9 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/15 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       <option value="open">Open</option>
                       <option value="in_progress">In Progress</option>
                       <option value="completed">Completed</option>
                       <option value="rejected">Rejected</option>
+                      {request.status === "cancelled" ? (
+                        <option value="cancelled">Cancelled</option>
+                      ) : null}
                     </select>
                   </label>
 
-                  {!request.aiAnalysis ? (
-                    <button
-                      type="button"
-                      className="inline-flex w-full items-center justify-center gap-2 rounded-lg border border-sky-200 px-3 py-2 text-sm font-semibold text-sky-700 transition-colors hover:bg-sky-50 disabled:cursor-not-allowed disabled:opacity-60"
-                      onClick={() => analyzeRequest(request.id)}
-                      disabled={analyzingRequestId === request.id}
-                    >
-                      <Icon name="bot" className="h-4 w-4" />
-                      {analyzingRequestId === request.id
-                        ? "Analyzing..."
-                        : "Analyze with AI"}
-                    </button>
-                  ) : null}
                 </div>
               </div>
             </article>
