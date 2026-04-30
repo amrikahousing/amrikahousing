@@ -411,7 +411,7 @@ export default async function AccountsPage({
           </div>
           <Link
             href="/accounts/transactions"
-            className="inline-flex h-10 items-center justify-center rounded-lg bg-slate-950 px-4 text-sm font-semibold text-white hover:bg-slate-800"
+            className="inline-flex h-10 items-center justify-center rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white hover:bg-emerald-700"
           >
             View all transactions
           </Link>
@@ -733,10 +733,10 @@ export default async function AccountsPage({
                             )}
                           </div>
                           <div className="min-w-0 flex-1">
-                            <p className="truncate text-[15px] font-semibold tracking-tight text-slate-950 sm:text-base">
+                            <p className="text-[15px] font-semibold tracking-tight text-slate-950 sm:truncate sm:text-base">
                               {account.name}
                             </p>
-                            <p className="mt-0.5 truncate text-sm text-slate-500">
+                            <p className="mt-0.5 text-sm text-slate-500 sm:truncate">
                               {account.provider}
                               <span className="mx-2 text-slate-300">•</span>
                               <span>

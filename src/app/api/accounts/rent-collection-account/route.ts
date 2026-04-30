@@ -42,6 +42,13 @@ export async function POST(request: Request) {
 
     return NextResponse.json({ destination });
   } catch (error) {
+    console.error("[rent-collection-account]", {
+      organizationId: access.orgDbId,
+      clerkOrgId: access.orgId,
+      connectedAccountId: body.connectedAccountId.trim(),
+      error,
+    });
+
     return NextResponse.json(
       {
         error:

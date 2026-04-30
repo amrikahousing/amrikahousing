@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useToast } from "./ToastProvider";
 
 type PlaidInstitution = {
   institution_id?: string | null;
@@ -62,25 +63,22 @@ function loadPlaidScript() {
 }
 
 export function PlaidLinkButton() {
+  const toast = useToast();
   const [isConnecting, setIsConnecting] = useState(false);
-  const [message, setMessage] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     void loadPlaidScript().catch(() => {
-      setError("Plaid Link could not be loaded.");
+      toast.error("Plaid Link could not be loaded.", { title: "Connected Accounts" });
     });
-  }, []);
+  }, [toast]);
 
   async function connectAccount() {
     setIsConnecting(true);
-    setMessage(null);
-    setError(null);
 
     try {
       await loadPlaidScript();
       if (!window.Plaid) {
-        setError("Plaid Link is unavailable.");
+        toast.error("Plaid Link is unavailable.", { title: "Connected Accounts" });
         return;
       }
 
@@ -93,14 +91,19 @@ export function PlaidLinkButton() {
       };
 
       if (!tokenResponse.ok || !tokenData.linkToken) {
-        setError(tokenData.error ?? "Could not start Plaid Link.");
+        toast.error(tokenData.error ?? "Could not start Plaid Link.", {
+          title: "Connected Accounts",
+        });
         return;
       }
 
       const handler = window.Plaid.create({
         token: tokenData.linkToken,
         onSuccess: async (publicToken, metadata) => {
-          setMessage("Finishing secure connection...");
+          toast.info("Finishing secure connection...", {
+            title: "Connected Accounts",
+            durationMs: 2000,
+          });
           const exchangeResponse = await fetch("/api/plaid/exchange", {
             method: "POST",
             headers: { "Content-Type": "application/json" },
@@ -112,31 +115,36 @@ export function PlaidLinkButton() {
           };
 
           if (!exchangeResponse.ok) {
-            setError(exchangeData.error ?? "Could not save the Plaid connection.");
-            setMessage(null);
+            toast.error(exchangeData.error ?? "Could not save the Plaid connection.", {
+              title: "Connected Accounts",
+            });
             return;
           }
 
-          setMessage(
+          toast.success(
             exchangeData.item?.institutionName
               ? `${exchangeData.item.institutionName} connected.`
               : "Bank account connected.",
+            { title: "Connected Accounts" },
           );
           window.location.reload();
         },
         onExit: (plaidError) => {
           if (plaidError) {
-            setError("Plaid Link was closed before the account connected.");
+            toast.error("Plaid Link was closed before the account connected.", {
+              title: "Connected Accounts",
+            });
           }
         },
       });
 
       handler.open();
     } catch (connectError) {
-      setError(
+      toast.error(
         connectError instanceof Error
           ? connectError.message
           : "Could not connect Plaid.",
+        { title: "Connected Accounts" },
       );
     } finally {
       setIsConnecting(false);
@@ -188,16 +196,6 @@ export function PlaidLinkButton() {
           {isConnecting ? "Opening Plaid" : "Add bank account with Plaid"}
         </span>
       </button>
-      {message ? (
-        <p className="absolute right-0 top-full mt-1 whitespace-nowrap text-sm text-emerald-700">
-          {message}
-        </p>
-      ) : null}
-      {error ? (
-        <p className="absolute right-0 top-full mt-1 whitespace-nowrap text-sm text-red-600">
-          {error}
-        </p>
-      ) : null}
     </div>
   );
 }

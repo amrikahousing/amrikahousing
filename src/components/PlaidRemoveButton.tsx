@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useToast } from "./ToastProvider";
 
 type RemoveStatus = "idle" | "confirming" | "submitting" | "success" | "error";
 type DisconnectMode = "disconnect" | "disconnect_hide" | "disconnect_delete";
@@ -15,10 +16,10 @@ export function PlaidRemoveButton({
   plaidAccountId?: string | null;
   accountName?: string | null;
 }) {
+  const toast = useToast();
   const containerRef = useRef<HTMLDivElement | null>(null);
   const buttonRef = useRef<HTMLButtonElement | null>(null);
   const [status, setStatus] = useState<RemoveStatus>("idle");
-  const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [menuPosition, setMenuPosition] = useState({ top: 0, left: 0 });
 
@@ -68,10 +69,23 @@ export function PlaidRemoveButton({
     };
   }, [status]);
 
+  async function readErrorMessage(response: Response) {
+    const contentType = response.headers.get("content-type") ?? "";
+
+    if (contentType.includes("application/json")) {
+      const data = (await response.json().catch(() => null)) as { error?: string } | null;
+      if (data?.error?.trim()) {
+        return data.error.trim();
+      }
+    }
+
+    const text = (await response.text().catch(() => "")).trim();
+    return text || "Failed to remove account.";
+  }
+
   async function handleRemove(mode: DisconnectMode, scope: DisconnectScope = "item") {
     const scopedPlaidAccountId = scope === "account" ? plaidAccountId : null;
     setStatus("submitting");
-    setError(null);
     setMessage(
       scope === "account" && mode === "disconnect"
         ? "Disconnecting..."
@@ -90,18 +104,25 @@ export function PlaidRemoveButton({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ mode, plaidAccountId: scopedPlaidAccountId }),
       });
-      const result = (await response.json()) as { error?: string };
 
       if (!response.ok) {
-        throw new Error(result.error ?? "Failed to remove account.");
+        throw new Error(await readErrorMessage(response));
       }
 
       setStatus("idle");
       setMessage(null);
+      toast.success(
+        scope === "account"
+          ? "The connected account was removed."
+          : "The bank connection was removed.",
+        { title: "Connected Accounts" },
+      );
       window.location.reload();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Failed to remove account.");
       setStatus("error");
+      toast.error(err instanceof Error ? err.message : "Failed to remove account.", {
+        title: "Connected Accounts",
+      });
     }
   }
 
@@ -212,9 +233,6 @@ export function PlaidRemoveButton({
         <p className="max-w-[160px] text-right text-xs text-slate-500">
           {message}
         </p>
-      ) : null}
-      {status === "error" && error ? (
-        <p className="text-xs text-red-600">{error}</p>
       ) : null}
     </div>
   );

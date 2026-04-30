@@ -113,7 +113,7 @@ function SidebarContent({
             className="flex items-center gap-2"
             onClick={onNavClick}
           >
-            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-sky-500">
+            <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-sky-600">
               <Icon name="home" className="h-5 w-5 text-white" />
             </div>
             <span className="text-xl font-bold tracking-tight">Renter Portal</span>
