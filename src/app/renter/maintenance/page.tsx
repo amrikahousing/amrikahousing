@@ -53,7 +53,7 @@ export default async function RenterMaintenancePage() {
             units: {
               select: {
                 unit_number: true,
-                properties: { select: { name: true } },
+                properties: { select: { name: true, address: true } },
               },
             },
           },
