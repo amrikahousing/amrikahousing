@@ -1,9 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { isTenantAccessError, requireTenantAccess } from "@/lib/renter-auth";
-import { isStripeConfigured } from "@/lib/stripe";
 import { ensureStripeCustomerForTenant } from "@/lib/renter-payments";
-import { getStripeServer } from "@/lib/stripe";
+import { getStripeServer, isStripeConfigured } from "@/lib/stripe";
 
 const requestSchema = z.object({
   paymentMethodType: z.enum(["card", "us_bank_account"]).default("card"),

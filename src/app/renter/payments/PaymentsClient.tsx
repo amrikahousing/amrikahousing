@@ -348,9 +348,6 @@ export function PaymentsClient({
 
   const selectedCharge =
     pendingPayments.find((payment) => payment.id === selectedChargeId) ?? pendingPayments[0] ?? null;
-  const cardMethods = savedPaymentMethods.filter(
-    (method) => method.paymentProvider === "stripe" && method.paymentType === "card",
-  );
   const achMethods = savedPaymentMethods.filter(
     (method) => method.paymentType === "us_bank_account",
   );
@@ -984,8 +981,6 @@ export function PaymentsClient({
                   )}
                 </div>
               </div>
-
-              {cardMethods.length > 0 ? null : null}
             </div>
 
             <div className="mt-6 rounded-xl bg-slate-50 p-4">
@@ -1037,13 +1032,29 @@ export function PaymentsClient({
               <div>
                 <h2 className="font-semibold text-slate-900">Payment Methods</h2>
                 <p className="mt-1 text-sm text-slate-500">
-                  ACH bank accounts are linked through Plaid Transfer for rent payments that settle to the landlord organization&apos;s receiving bank account.
+                  Save cards and ACH bank accounts with Stripe, or keep using Plaid ACH where available.
                 </p>
                 <p className="mt-3 text-sm text-slate-500">
-                  Link a bank account to pay rent online.
+                  Stripe payment details are collected by Stripe and stored as reusable payment methods.
                 </p>
               </div>
               <div className="flex flex-wrap gap-3">
+                <button
+                  type="button"
+                  onClick={() => void handleAddStripeMethod("card")}
+                  disabled={isPreparingStripeSetup !== null || !canUseStripe}
+                  className="rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                >
+                  {isPreparingStripeSetup === "card" ? "Preparing..." : "Add Card"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleAddStripeMethod("us_bank_account")}
+                  disabled={isPreparingStripeSetup !== null || !canUseStripe}
+                  className="rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                >
+                  {isPreparingStripeSetup === "us_bank_account" ? "Preparing..." : "Add ACH"}
+                </button>
                 <button
                   type="button"
                   onClick={() => void handleConnectPlaidBankAccount()}
@@ -1057,14 +1068,42 @@ export function PaymentsClient({
                 </button>
               </div>
             </div>
-            <p className="mt-4 text-sm text-slate-500">
-              `Link Bank Account` starts the Plaid ACH flow.
-            </p>
+
+            {!canUseStripe ? (
+              <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                Add `NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY`, `STRIPE_SECRET_KEY`, and `STRIPE_WEBHOOK_SECRET` to enable Stripe payment methods.
+              </div>
+            ) : null}
 
             {!plaidConfigured ? (
               <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
                 Add `PLAID_CLIENT_ID`, `PLAID_SECRET`, and `PLAID_ENV` to enable ACH rent payments.
               </div>
+            ) : null}
+
+            {stripeSetup && stripePublishableKey ? (
+              <Elements
+                key={stripeSetup.clientSecret}
+                stripe={getStripePromise(stripePublishableKey)}
+                options={{ clientSecret: stripeSetup.clientSecret }}
+              >
+                <StripeSetupForm
+                  methodType={stripeSetup.methodType}
+                  onCancel={() => setStripeSetup(null)}
+                  onError={(message) => setScopedFeedback("methods", "error", message)}
+                  onSuccess={() => {
+                    setStripeSetup(null);
+                    setScopedFeedback(
+                      "methods",
+                      "success",
+                      stripeSetup.methodType === "us_bank_account"
+                        ? "ACH bank account saved with Stripe."
+                        : "Card saved with Stripe.",
+                    );
+                    router.refresh();
+                  }}
+                />
+              </Elements>
             ) : null}
 
             {feedback?.scope === "methods" ? (
@@ -1089,7 +1128,9 @@ export function PaymentsClient({
                       <p className="text-sm text-slate-500">
                         {method.paymentProvider === "plaid"
                           ? "Plaid Transfer ACH"
-                          : formatMethodMeta(method)}
+                          : method.paymentType === "us_bank_account"
+                            ? `Stripe ACH${formatMethodMeta(method) ? ` · ${formatMethodMeta(method)}` : ""}`
+                            : formatMethodMeta(method)}
                       </p>
                     </div>
                     <div className="flex flex-wrap items-center gap-2">
