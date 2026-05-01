@@ -315,9 +315,9 @@ export async function setDefaultPaymentMethodForTenant(ctx: TenantContext, metho
     throw new Error("Payment method not found.");
   }
 
-  if (method.payment_provider !== "plaid" || method.payment_type !== "us_bank_account") {
+  if (method.payment_provider !== "stripe" && method.payment_provider !== "plaid") {
     throw new Error(
-      "Only ACH bank accounts can be used for rent collection. Link a bank account to receive rent in the organization's bank account.",
+      "This payment method cannot be used for rent collection.",
     );
   }
 
@@ -347,10 +347,6 @@ export async function setDefaultPaymentMethodForTenant(ctx: TenantContext, metho
         user_id: ctx.sharedUserId,
         organization_id: ctx.organizationId,
         default_payment_method_id: method.id,
-        autopay_enabled:
-          method.payment_provider === "stripe" && method.payment_type === "card"
-            ? undefined
-            : false,
         updated_at: new Date(),
       },
       create: {
@@ -522,6 +518,7 @@ export async function createPaymentAttempt(
       payment_provider: true,
       stripe_customer_id: true,
       stripe_payment_method_id: true,
+      payment_type: true,
     },
   });
 
@@ -537,9 +534,85 @@ export async function createPaymentAttempt(
     throw new Error("Use the Plaid ACH flow for this payment method.");
   }
 
-  throw new Error(
-    "Card payments are unavailable for rent collection. Pay with a linked bank account so funds settle to the organization's receiving account.",
+  const normalizedAmount = payment.amount.toFixed(2);
+  if (normalizedAmount !== args.amount) {
+    throw new Error("Payment amount does not match the current charge.");
+  }
+
+  const stripe = getStripeServer();
+  const idempotencyKey = `${payment.id}:${method.id}:stripe`;
+  const existingAttempt = await prisma.payment_attempts.findUnique({
+    where: { idempotency_key: idempotencyKey },
+    select: {
+      id: true,
+      stripe_payment_intent_id: true,
+      status: true,
+    },
+  });
+
+  if (existingAttempt?.stripe_payment_intent_id) {
+    const existingIntent = await stripe.paymentIntents.retrieve(existingAttempt.stripe_payment_intent_id);
+    return {
+      id: existingAttempt.id,
+      paymentIntentId: existingIntent.id,
+      clientSecret: existingIntent.client_secret,
+      status: existingIntent.status,
+    };
+  }
+
+  const paymentIntent = await stripe.paymentIntents.create(
+    {
+      amount: toStripeAmountInMinorUnits(payment.amount),
+      currency: payment.currency.toLowerCase(),
+      customer: method.stripe_customer_id,
+      payment_method: method.stripe_payment_method_id,
+      payment_method_types: [method.payment_type === "us_bank_account" ? "us_bank_account" : "card"],
+      confirm: true,
+      off_session: false,
+      description: `${payment.type} payment`,
+      metadata: {
+        paymentId: payment.id,
+        tenantId: ctx.tenantId,
+        organizationId: ctx.organizationId,
+        renterPaymentMethodId: method.id,
+      },
+    },
+    { idempotencyKey },
   );
+
+  const attempt = await prisma.payment_attempts.create({
+    data: {
+      payment_id: payment.id,
+      tenant_id: ctx.tenantId,
+      user_id: ctx.sharedUserId,
+      organization_id: ctx.organizationId,
+      renter_payment_method_id: method.id,
+      payment_provider: "stripe",
+      stripe_payment_intent_id: paymentIntent.id,
+      idempotency_key: idempotencyKey,
+      amount: payment.amount,
+      currency: payment.currency,
+      status: paymentIntent.status,
+      failure_code: paymentIntent.last_payment_error?.code ?? null,
+      failure_message: paymentIntent.last_payment_error?.message ?? null,
+    },
+    select: {
+      id: true,
+      stripe_payment_intent_id: true,
+      status: true,
+    },
+  });
+
+  if (paymentIntent.status === "succeeded") {
+    await markPaymentIntentSucceeded(paymentIntent);
+  }
+
+  return {
+    id: attempt.id,
+    paymentIntentId: paymentIntent.id,
+    clientSecret: paymentIntent.client_secret,
+    status: paymentIntent.status,
+  };
 }
 
 export async function createPlaidLinkTokenForTenant(ctx: TenantContext) {

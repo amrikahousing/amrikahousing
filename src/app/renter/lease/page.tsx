@@ -103,6 +103,7 @@ export default async function RenterLeasePage() {
                 end_date: true,
                 rent_amount: true,
                 security_deposit: true,
+                document_url: true,
                 status: true,
                 units: {
                   select: {
@@ -154,8 +155,6 @@ export default async function RenterLeasePage() {
   const support = await getRenterSupportContact(tenant.organization_id);
   const unit = lease.units;
   const property = unit.properties;
-  const renewalEligible = Boolean(lease.end_date && lease.status === "active");
-
   return (
     <RenterShell user={shellUser}>
       <div className="space-y-8">
@@ -205,7 +204,7 @@ export default async function RenterLeasePage() {
               <h2 className="text-lg font-semibold text-slate-900">Current Lease Agreement</h2>
               <p className="mt-1 text-sm text-slate-500">Your active rental agreement and key details.</p>
             </div>
-            <LeaseActions />
+            <LeaseActions hasDocument={Boolean(lease.document_url)} />
           </div>
 
           <div className="mt-5 grid gap-6 lg:grid-cols-[1.35fr_1fr]">
@@ -277,22 +276,6 @@ export default async function RenterLeasePage() {
           </div>
         </section>
 
-        <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-lg font-semibold text-slate-900">Ready to renew?</h2>
-          <p className="mt-2 max-w-2xl text-sm text-slate-500">
-            {renewalEligible
-              ? "Your lease is within the renewal window. Reach out to your manager to confirm next steps."
-              : "Renewal usually opens about 60 days before the lease expires. We’ll keep the current terms visible here in the meantime."}
-          </p>
-          <div className="mt-4 flex flex-wrap gap-3">
-            <a
-              href={`mailto:${support.managerEmail ?? support.organizationEmail ?? ""}?subject=${encodeURIComponent("Lease renewal question")}`}
-              className="inline-flex items-center justify-center rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-700"
-            >
-              Contact About Renewal
-            </a>
-          </div>
-        </section>
       </div>
     </RenterShell>
   );

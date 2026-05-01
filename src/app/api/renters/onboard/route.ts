@@ -229,7 +229,8 @@ export async function POST(request: NextRequest) {
     if (ALLOWED_MIME.has(leaseFile.type) && leaseFile.size <= MAX_BYTES) {
       try {
         const ext = leaseFile.name.split(".").pop() ?? "pdf";
-        const path = `leases/${ctx.orgDbId}/${result.tenantId}/${Date.now()}.${ext}`;
+        const dateStamp = new Date().toISOString().slice(0, 10);
+        const path = `leases/${ctx.orgDbId}/${propertyId}/${unitId}/${result.tenantId}/lease-${dateStamp}.${ext}`;
         const blobToken =
           process.env.VERCEL_ENV === "production"
             ? process.env.BLOB_READ_WRITE_TOKEN

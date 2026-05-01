@@ -1,5 +1,6 @@
 "use client";
 
+import { useUser } from "@clerk/nextjs";
 import { useEffect, useRef, useState } from "react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -146,6 +147,11 @@ function BedIcon({ className = "" }: { className?: string }) {
 const inputClass =
   "w-full rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20";
 
+const allowLeaseMismatchOverride =
+  process.env.NODE_ENV !== "production" ||
+  process.env.NEXT_PUBLIC_VERCEL_ENV === "preview" ||
+  process.env.NEXT_PUBLIC_VERCEL_ENV === "development";
+
 function fmt(n: number) {
   return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
 }
@@ -252,6 +258,7 @@ export function OnboardRenterWizard({
   onClose: () => void;
   onSuccess: (unitId: string) => void;
 }) {
+  const { user: currentUser } = useUser();
   const [step, setStep] = useState<Step>(initialUnitId ? "upload-lease" : "select-unit");
   const [selectedUnitId, setSelectedUnitId] = useState<string>(initialUnitId ?? vacantUnits[0]?.id ?? "");
 
@@ -290,6 +297,8 @@ export function OnboardRenterWizard({
   const [completedActions, setCompletedActions] = useState(0);
   const [accountLookup, setAccountLookup] = useState<AccountLookup>({ status: "idle" });
   const [testMode, setTestMode] = useState(false);
+  const [skipLeaseMismatchValidation, setSkipLeaseMismatchValidation] = useState(false);
+  const preMismatchOverrideFormRef = useRef<FormData | null>(null);
 
   const selectedUnit = vacantUnits.find((u) => u.id === selectedUnitId) ?? null;
 
@@ -506,6 +515,8 @@ export function OnboardRenterWizard({
       setExtractedUnitNumber(null);
       setScanError(null);
       setScanNotice(null);
+      setSkipLeaseMismatchValidation(false);
+      preMismatchOverrideFormRef.current = null;
       startScan(picked);
     }
     e.target.value = "";
@@ -513,6 +524,31 @@ export function OnboardRenterWizard({
 
   function patchForm(partial: Partial<FormData>) {
     setForm((f) => ({ ...f, ...partial }));
+  }
+
+  function setLeaseMismatchOverride(enabled: boolean) {
+    setSkipLeaseMismatchValidation(enabled);
+
+    if (enabled) {
+      preMismatchOverrideFormRef.current = form;
+      const email = currentUser?.primaryEmailAddress?.emailAddress ?? "";
+      const firstName = currentUser?.firstName ?? "";
+      const lastName = currentUser?.lastName ?? "";
+      const nameParts = !firstName && !lastName ? (currentUser?.fullName ?? "").trim().split(/\s+/) : [];
+
+      patchForm({
+        firstName: firstName || nameParts[0] || form.firstName,
+        lastName: lastName || nameParts.slice(1).join(" ") || form.lastName,
+        email: email || form.email,
+        phone: "",
+      });
+      return;
+    }
+
+    if (preMismatchOverrideFormRef.current) {
+      setForm(preMismatchOverrideFormRef.current);
+      preMismatchOverrideFormRef.current = null;
+    }
   }
 
   function submitPdfPassword() {
@@ -803,6 +839,8 @@ export function OnboardRenterWizard({
     );
     const leaseValidationBlocked =
       missingExtractedAddress || missingExtractedUnit || addressMismatch || unitMismatch;
+    const canSkipLeaseValidation = allowLeaseMismatchOverride && leaseValidationBlocked;
+    const blockContinueForLeaseValidation = leaseValidationBlocked && !skipLeaseMismatchValidation;
     const accountNotice =
       accountLookup.status === "loading"
         ? {
@@ -872,10 +910,31 @@ export function OnboardRenterWizard({
                     <br />Expected: <span className="font-medium">Unit {selectedUnit?.unitNumber}</span>
                   </p>
                 )}
-                <p className="mt-1.5 text-red-700">You cannot continue until the uploaded lease matches the selected property and unit.</p>
+                <p className="mt-1.5 text-red-700">
+                  {canSkipLeaseValidation
+                    ? "Non-production override is available below for testing only."
+                    : "You cannot continue until the uploaded lease matches the selected property and unit."}
+                </p>
               </div>
             </div>
           </div>
+        )}
+
+        {canSkipLeaseValidation && (
+          <label className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            <input
+              type="checkbox"
+              checked={skipLeaseMismatchValidation}
+              onChange={(e) => setLeaseMismatchOverride(e.target.checked)}
+              className="mt-0.5 h-4 w-4 rounded border-amber-300 text-amber-600 focus:ring-amber-500"
+            />
+            <span>
+              <span className="font-semibold">Skip lease mismatch validation</span>
+              <span className="block text-amber-700">
+                Non-production testing only. This replaces tenant contact fields with your signed-in account and production users will still be blocked.
+              </span>
+            </span>
+          </label>
         )}
 
         {accountNotice && (
@@ -953,7 +1012,7 @@ export function OnboardRenterWizard({
           <button
             type="button"
             disabled={
-              leaseValidationBlocked ||
+              blockContinueForLeaseValidation ||
               !form.firstName.trim() ||
               !form.lastName.trim() ||
               !form.email.trim() ||

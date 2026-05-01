@@ -147,6 +147,7 @@ export default async function RenterPaymentsPage() {
         }))}
         savedPaymentMethods={savedPaymentMethods}
         plaidConfigured={plaidConfigured}
+        stripePublishableKey={process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? null}
       />
     </RenterShell>
   );
