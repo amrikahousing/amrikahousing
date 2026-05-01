@@ -3,7 +3,7 @@
 import { useClerk } from "@clerk/nextjs";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type RenterShellProps = {
   children: React.ReactNode;
@@ -25,7 +25,6 @@ const navigation: Array<{ name: string; href: string; icon: IconName }> = [
   { name: "Payments", href: "/renter/payments", icon: "wallet" },
   { name: "Lease", href: "/renter/lease", icon: "lease" },
   { name: "Maintenance", href: "/renter/maintenance", icon: "wrench" },
-  { name: "Messages", href: "/renter/messages", icon: "messages" },
 ];
 
 function Icon({ name, className = "" }: { name: IconName; className?: string }) {
@@ -94,11 +93,13 @@ function SidebarContent({
   user,
   pathname,
   onNavClick,
+  onNavHover,
   onSignOut,
 }: {
   user: RenterShellProps["user"];
   pathname: string;
   onNavClick: () => void;
+  onNavHover: (href: string) => void;
   onSignOut: () => void;
 }) {
   const displayName = user.firstName ?? user.email ?? "Account";
@@ -111,17 +112,18 @@ function SidebarContent({
           <Link
             href="/renter"
             className="flex items-center gap-2"
+            onPointerEnter={() => onNavHover("/renter")}
             onClick={onNavClick}
           >
             <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-sky-600">
               <Icon name="home" className="h-5 w-5 text-white" />
             </div>
-            <span className="text-xl font-bold tracking-tight">Renter Portal</span>
+            <span className="text-xl font-bold tracking-tight">Tenant Portal</span>
           </Link>
           <p className="mt-2 text-xs text-slate-500">Amrika Housing</p>
         </div>
 
-        <nav aria-label="Renter navigation" className="space-y-1">
+        <nav aria-label="Tenant navigation" className="space-y-1">
           {navigation.map((item) => {
             const isActive =
               item.href === "/renter"
@@ -138,6 +140,7 @@ function SidebarContent({
                     ? "bg-sky-600 text-white shadow-lg shadow-sky-950/20"
                     : "text-slate-400 hover:bg-slate-800 hover:text-white",
                 )}
+                onPointerEnter={() => onNavHover(item.href)}
                 onClick={onNavClick}
               >
                 <Icon name={item.icon} className="h-5 w-5" />
@@ -155,6 +158,7 @@ function SidebarContent({
             "mb-4 flex items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-slate-800",
             pathname === "/profile" && "bg-slate-800",
           )}
+          onPointerEnter={() => onNavHover("/profile")}
           onClick={onNavClick}
         >
           <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full bg-slate-700">
@@ -167,7 +171,7 @@ function SidebarContent({
           </div>
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium">{displayName}</p>
-            <p className="truncate text-xs text-slate-500">Renter</p>
+            <p className="truncate text-xs text-slate-500">Tenant</p>
           </div>
         </Link>
 
@@ -175,6 +179,7 @@ function SidebarContent({
           <Link
             href="/dashboard"
             className="mb-4 flex w-full items-center justify-center rounded-lg border border-emerald-700/60 bg-emerald-500/10 px-3 py-2 text-sm font-medium text-emerald-200 transition-colors hover:bg-emerald-500/20 hover:text-white"
+            onPointerEnter={() => onNavHover("/dashboard")}
             onClick={onNavClick}
           >
             Switch to Manager Portal
@@ -200,6 +205,15 @@ export function RenterShell({ children, user }: RenterShellProps) {
   const [isOpen, setIsOpen] = useState(false);
 
   const handleSignOut = () => signOut(() => router.push("/login"));
+  const prefetchHrefs = useMemo(() => [
+    ...navigation.map((item) => item.href),
+    "/profile",
+    ...(user.hasBothPortals ? ["/dashboard"] : []),
+  ], [user.hasBothPortals]);
+
+  useEffect(() => {
+    prefetchHrefs.forEach((href) => router.prefetch(href));
+  }, [router, prefetchHrefs]);
 
   return (
     <div className="min-h-dvh overflow-x-hidden bg-slate-50 text-slate-950">
@@ -229,6 +243,7 @@ export function RenterShell({ children, user }: RenterShellProps) {
               user={user}
               pathname={pathname}
               onNavClick={() => setIsOpen(false)}
+              onNavHover={(href) => router.prefetch(href)}
               onSignOut={handleSignOut}
             />
           </aside>
@@ -241,6 +256,7 @@ export function RenterShell({ children, user }: RenterShellProps) {
           user={user}
           pathname={pathname}
           onNavClick={() => {}}
+          onNavHover={(href) => router.prefetch(href)}
           onSignOut={handleSignOut}
         />
       </aside>

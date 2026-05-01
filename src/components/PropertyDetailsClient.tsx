@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { PROPERTY_TYPE_OPTIONS, getPropertyTypeLabel, normalizePropertyType } from "@/lib/property-types";
 import { useToast } from "./ToastProvider";
+import { OnboardRenterWizard, type WizardUnit } from "./OnboardRenterWizard";
 
 type PropertyDetails = {
   id: string;
@@ -76,14 +77,6 @@ function PlusIcon({ className = "" }: { className?: string }) {
   return (
     <svg aria-hidden="true" className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
       <path d="M12 5v14M5 12h14" />
-    </svg>
-  );
-}
-
-function UserIcon({ className = "" }: { className?: string }) {
-  return (
-    <svg aria-hidden="true" className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" />
     </svg>
   );
 }
@@ -185,16 +178,12 @@ function UnitCardMenu({
   unit,
   onEdit,
   onDelete,
-  onInviteRenter,
   canManageUnits,
-  canInviteRenters,
 }: {
   unit: UnitDetails;
   onEdit: (unit: UnitDetails) => void;
   onDelete: (unit: UnitDetails) => void;
-  onInviteRenter: (unit: UnitDetails) => void;
   canManageUnits: boolean;
-  canInviteRenters: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -210,14 +199,14 @@ function UnitCardMenu({
     return () => document.removeEventListener("mousedown", handleClick);
   }, [open]);
 
-  if (!canManageUnits && !canInviteRenters) {
+  if (!canManageUnits) {
     return null;
   }
 
   return (
-    <div ref={ref} className="relative">
+    <div ref={ref} className="relative" onClick={(e) => e.stopPropagation()}>
       <button
-        onClick={() => setOpen((v) => !v)}
+        onClick={(e) => { e.stopPropagation(); setOpen((v) => !v); }}
         className="flex h-7 w-7 items-center justify-center rounded-full hover:bg-gray-100 transition-colors"
         aria-label="Unit options"
       >
@@ -225,24 +214,20 @@ function UnitCardMenu({
       </button>
       {open && (
         <div className="absolute right-0 top-8 z-20 w-44 overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg">
-          {canManageUnits ? (
-            <button
-              onClick={() => { setOpen(false); onEdit(unit); }}
-              className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50"
-            >
-              <EditIcon className="h-4 w-4" />
-              Edit unit
-            </button>
-          ) : null}
-          {canManageUnits ? (
-            <button
-              onClick={() => { setOpen(false); onDelete(unit); }}
-              className="flex w-full items-center gap-2 border-t border-gray-100 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50"
-            >
-              <TrashIcon className="h-4 w-4" />
-              Delete
-            </button>
-          ) : null}
+          <button
+            onClick={(e) => { e.stopPropagation(); setOpen(false); onEdit(unit); }}
+            className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50"
+          >
+            <EditIcon className="h-4 w-4" />
+            Edit unit
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); setOpen(false); onDelete(unit); }}
+            className="flex w-full items-center gap-2 border-t border-gray-100 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50"
+          >
+            <TrashIcon className="h-4 w-4" />
+            Delete
+          </button>
         </div>
       )}
     </div>
@@ -255,20 +240,20 @@ function UnitCard({
   unit,
   onEdit,
   onDelete,
-  onInviteRenter,
+  onOnboardRenter,
   deleting,
   canManageUnits,
   canInviteRenters,
-  inviteSent,
+  onboarded,
 }: {
   unit: UnitDetails;
   onEdit: (unit: UnitDetails) => void;
   onDelete: (unit: UnitDetails) => void;
-  onInviteRenter: (unit: UnitDetails) => void;
+  onOnboardRenter: (unit: UnitDetails) => void;
   deleting: boolean;
   canManageUnits: boolean;
   canInviteRenters: boolean;
-  inviteSent: boolean;
+  onboarded: boolean;
 }) {
   const accentColor =
     unit.status === "occupied"
@@ -279,8 +264,27 @@ function UnitCard({
       ? "bg-amber-400"
       : "bg-gray-300";
 
+  function openEditUnit() {
+    if (canManageUnits) onEdit(unit);
+  }
+
   return (
-    <div className="group rounded-2xl border border-slate-200 bg-slate-50 shadow-sm transition-all hover:shadow-md overflow-hidden">
+    <div
+      role={canManageUnits ? "button" : undefined}
+      tabIndex={canManageUnits ? 0 : undefined}
+      onClick={openEditUnit}
+      onKeyDown={(e) => {
+        if (!canManageUnits) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          openEditUnit();
+        }
+      }}
+      className={[
+        "group overflow-hidden rounded-2xl border border-slate-200 bg-slate-50 shadow-sm transition-all hover:shadow-md",
+        canManageUnits ? "cursor-pointer hover:-translate-y-0.5 hover:border-emerald-300 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/30" : "",
+      ].join(" ")}
+    >
       {/* Status accent bar */}
       <div className={`h-1 w-full ${accentColor}`} />
 
@@ -303,9 +307,7 @@ function UnitCard({
             unit={unit}
             onEdit={onEdit}
             onDelete={onDelete}
-            onInviteRenter={onInviteRenter}
             canManageUnits={canManageUnits}
-            canInviteRenters={canInviteRenters}
           />
         </div>
       </div>
@@ -345,22 +347,21 @@ function UnitCard({
           </div>
         ) : (
           <div className="flex flex-col items-center gap-2 py-1 text-center">
-            <div className="flex h-9 w-9 items-center justify-center rounded-full bg-gray-100">
-              <UserIcon className="h-4 w-4 text-gray-300" />
-            </div>
-            <p className="text-xs text-gray-400">No tenant assigned</p>
             {canInviteRenters && (
               <button
-                onClick={() => !inviteSent && onInviteRenter(unit)}
-                disabled={inviteSent}
+                onClick={(e) => {
+                  e.stopPropagation();
+                  if (!onboarded) onOnboardRenter(unit);
+                }}
+                disabled={onboarded}
                 className={`inline-flex items-center gap-1.5 rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
-                  inviteSent
+                  onboarded
                     ? "border-emerald-200 bg-emerald-50 text-emerald-600 cursor-default"
                     : "border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100"
                 }`}
               >
                 <SendIcon className="h-3.5 w-3.5" />
-                {inviteSent ? "Invite sent" : "Invite renter"}
+                {onboarded ? "Onboarded" : "Onboard New Tenant"}
               </button>
             )}
           </div>
@@ -424,12 +425,9 @@ export function PropertyDetailsClient({
   // Delete unit confirmation
   const [deletingUnit, setDeletingUnit] = useState<UnitDetails | null>(null);
 
-  // Invite renter state
-  const [invitingUnit, setInvitingUnit] = useState<UnitDetails | null>(null);
-  const [inviteForm, setInviteForm] = useState({ firstName: "", lastName: "", email: "", phone: "" });
-  const [sendingInvite, setSendingInvite] = useState(false);
-  const [inviteError, setInviteError] = useState<string | null>(null);
-  const [invitedUnitIds, setInvitedUnitIds] = useState<Set<string>>(new Set());
+  // Onboard tenant state
+  const [onboardingUnitId, setOnboardingUnitId] = useState<string | null>(null);
+  const [onboardedUnitIds, setOnboardedUnitIds] = useState<Set<string>>(new Set());
 
   // ── Stats ──────────────────────────────────────────────────────────────────
 
@@ -573,46 +571,14 @@ export function PropertyDetailsClient({
     }
   }
 
-  async function sendRenterInvite(e: React.FormEvent) {
-    e.preventDefault();
-    setInviteError(null);
-    setSendingInvite(true);
-    try {
-      const res = await fetch("/api/renters/invite", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          email: inviteForm.email.trim(),
-          firstName: inviteForm.firstName.trim(),
-          lastName: inviteForm.lastName.trim(),
-          phone: inviteForm.phone.trim() || undefined,
-          propertyId: property.id,
-        }),
-      });
-      const data = await res.json() as { error?: string; invited?: string; linked?: string };
-      if (!res.ok && res.status !== 207) {
-        setInviteError(data.error ?? "Could not send invite.");
-        return;
-      }
-      const unitId = invitingUnit?.id;
-      setInvitingUnit(null);
-      setInviteForm({ firstName: "", lastName: "", email: "", phone: "" });
-      if (unitId && res.status !== 207) {
-        setInvitedUnitIds((prev) => new Set(prev).add(unitId));
-      }
-      notify(
-        res.status === 207
-          ? `Renter record created but email delivery failed. Check your Clerk config.`
-          : data.linked
-            ? `${data.linked} already has an account — renter portal access granted, no email needed.`
-            : `Invite sent to ${data.invited}.`,
-      );
-      router.refresh();
-    } catch {
-      setInviteError("Network error. Please try again.");
-    } finally {
-      setSendingInvite(false);
-    }
+  function handleOnboardSuccess(unitId: string) {
+    setOnboardedUnitIds((prev) => new Set(prev).add(unitId));
+    setProperty((p) => ({
+      ...p,
+      units: p.units.map((u) => u.id === unitId ? { ...u, status: "occupied" } : u),
+    }));
+    notify("Tenant onboarded successfully.");
+    router.refresh();
   }
 
   async function confirmDeleteUnit() {
@@ -805,11 +771,11 @@ export function PropertyDetailsClient({
                   unit={unit}
                   onEdit={(u) => { setEditingUnit(u); setUnitForm(unitFormFromUnit(u)); }}
                   onDelete={(u) => setDeletingUnit(u)}
-                  onInviteRenter={(u) => { setInvitingUnit(u); setInviteForm({ firstName: "", lastName: "", email: "", phone: "" }); setInviteError(null); }}
+                  onOnboardRenter={(u) => setOnboardingUnitId(u.id)}
                   deleting={deletingUnitId === unit.id}
                   canManageUnits={canManageUnits}
                   canInviteRenters={canInviteRenters}
-                  inviteSent={invitedUnitIds.has(unit.id)}
+                  onboarded={onboardedUnitIds.has(unit.id)}
                 />
               ))}
             </div>
@@ -872,72 +838,27 @@ export function PropertyDetailsClient({
         </Modal>
       )}
 
-      {/* Invite renter */}
-      {invitingUnit && (
-        <Modal
-          title={`Invite renter — Unit ${invitingUnit.unitNumber}`}
-          onClose={() => { setInvitingUnit(null); setInviteError(null); }}
-        >
-          <p className="mb-4 text-sm text-gray-500">
-            We&apos;ll send the renter an email with a link to create their account. They&apos;ll
-            have access to the Renter Portal once they sign up.
-          </p>
-          <form onSubmit={sendRenterInvite} className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
-              <label className="block space-y-1.5 text-sm font-medium text-gray-700">
-                First name <span className="text-red-500">*</span>
-                <input
-                  className={inputClass}
-                  value={inviteForm.firstName}
-                  onChange={(e) => setInviteForm((f) => ({ ...f, firstName: e.target.value }))}
-                  placeholder="Jane"
-                  required
-                />
-              </label>
-              <label className="block space-y-1.5 text-sm font-medium text-gray-700">
-                Last name <span className="text-red-500">*</span>
-                <input
-                  className={inputClass}
-                  value={inviteForm.lastName}
-                  onChange={(e) => setInviteForm((f) => ({ ...f, lastName: e.target.value }))}
-                  placeholder="Doe"
-                  required
-                />
-              </label>
-            </div>
-            <label className="block space-y-1.5 text-sm font-medium text-gray-700">
-              Email <span className="text-red-500">*</span>
-              <input
-                className={inputClass}
-                type="email"
-                value={inviteForm.email}
-                onChange={(e) => setInviteForm((f) => ({ ...f, email: e.target.value }))}
-                placeholder="jane@example.com"
-                required
-              />
-            </label>
-            <label className="block space-y-1.5 text-sm font-medium text-gray-700">
-              Phone <span className="text-gray-400 font-normal">(optional)</span>
-              <input
-                className={inputClass}
-                type="tel"
-                value={inviteForm.phone}
-                onChange={(e) => setInviteForm((f) => ({ ...f, phone: e.target.value }))}
-                placeholder="+1 555 000 0000"
-              />
-            </label>
-            {inviteError && (
-              <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                {inviteError}
-              </p>
-            )}
-            <ModalActions
-              onCancel={() => { setInvitingUnit(null); setInviteError(null); }}
-              submitLabel={sendingInvite ? "Sending invite…" : "Send invite"}
-              disabled={sendingInvite}
-            />
-          </form>
-        </Modal>
+      {/* Onboard tenant wizard */}
+      {onboardingUnitId !== null && (
+        <OnboardRenterWizard
+          propertyId={property.id}
+          propertyName={property.name}
+          propertyAddress={`${property.address}, ${property.city}, ${property.state} ${property.zip}`}
+          vacantUnits={property.units
+            .filter((u) => u.status === "vacant")
+            .map<WizardUnit>((u) => ({
+              id: u.id,
+              unitNumber: u.unitNumber,
+              bedrooms: u.bedrooms,
+              bathrooms: u.bathrooms,
+              rentAmount: u.rentAmount,
+            }))}
+          initialUnitId={onboardingUnitId}
+          onClose={() => setOnboardingUnitId(null)}
+          onSuccess={(unitId) => {
+            handleOnboardSuccess(unitId);
+          }}
+        />
       )}
     </div>
   );

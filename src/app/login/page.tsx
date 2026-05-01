@@ -817,7 +817,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
               Your home base starts here.
             </p>
             <p className="mt-3.5 max-w-md text-[14px] leading-[1.55] text-slate-400">
-              Fast property operations for managers, renters, and investors in
+              Fast property operations for managers, tenants, and investors in
               one secure workspace.
             </p>
           </div>
@@ -871,7 +871,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
 
                 {mode === "signin" ? (
                   <p className="text-xs text-slate-400">
-                    Renters: use the invite link sent to your email to set up your account.
+                    Tenants: use the invite link sent to your email to set up your account.
                   </p>
                 ) : null}
 

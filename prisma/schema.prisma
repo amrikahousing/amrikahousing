@@ -30,6 +30,7 @@ model leases {
   rent_amount      Decimal        @db.Decimal(10, 2)
   security_deposit Decimal?       @db.Decimal(10, 2)
   status           String         @default("active")
+  document_url     String?
   created_at       DateTime       @default(now()) @db.Timestamptz(6)
   updated_at       DateTime       @default(now()) @db.Timestamptz(6)
   deleted_at       DateTime?      @db.Timestamptz(6)

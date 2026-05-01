@@ -21,7 +21,7 @@ export async function PATCH(
   const note =
     typeof body.note === "string" && body.note.trim()
       ? body.note.trim()
-      : "Renter cancelled the request";
+      : "Tenant cancelled the request";
 
   const req = await prisma.maintenance_requests.findFirst({
     where: { id, submitted_by_tenant: ctx.tenantId },

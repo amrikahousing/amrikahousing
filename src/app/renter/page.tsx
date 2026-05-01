@@ -329,7 +329,7 @@ export default async function RenterPage() {
             {/* Quick actions */}
             <article className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm sm:col-span-1 lg:col-span-2">
               <h2 className="mb-4 text-sm font-medium text-slate-500">Quick Actions</h2>
-              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
                 <Link
                   href="/renter/payments"
                   className="flex items-center gap-2 rounded-lg border border-slate-200 px-4 py-3 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
@@ -350,13 +350,6 @@ export default async function RenterPage() {
                 >
                   <Icon name="wrench" className="h-4 w-4 text-sky-500" />
                   View Requests
-                </Link>
-                <Link
-                  href="/renter/messages"
-                  className="flex items-center gap-2 rounded-lg border border-slate-200 px-4 py-3 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
-                >
-                  <Icon name="calendar" className="h-4 w-4 text-sky-500" />
-                  Contact Manager
                 </Link>
               </div>
             </article>
@@ -483,48 +476,11 @@ export default async function RenterPage() {
                   {recentPayments.find((payment) => payment.payment_method)?.payment_method ?? "No card on file"}
                 </p>
               </div>
-              <div className="flex flex-wrap gap-3">
-                <Link
-                  href="/renter/messages"
-                  className="rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-700"
-                >
-                  Open messages
-                </Link>
-                <Link
-                  href="/renter/lease"
-                  className="rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
-                >
-                  Lease details
-                </Link>
-              </div>
-            </div>
-          </section>
-
-          <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
-            <div className="flex items-center justify-between border-b border-slate-100 p-5">
-              <h2 className="font-semibold text-slate-900">Messages Preview</h2>
-              <Link href="/renter/messages" className="text-sm text-sky-600 hover:text-sky-700">
-                View thread
-              </Link>
-            </div>
-            <div className="space-y-4 p-5">
-              <div className="rounded-xl bg-slate-50 p-4">
-                <p className="text-sm font-medium text-slate-900">
-                  {support.managerName ?? support.organizationName ?? "Property Manager"}
-                </p>
-                <p className="mt-1 text-sm text-slate-500">
-                  {recentMaintenance[0]
-                    ? `Update on "${recentMaintenance[0].title}": ${recentMaintenance[0].status.replace("_", " ")}`
-                    : nextPayment
-                      ? `Friendly reminder: your next payment is due ${formatDate(nextPayment.due_date)}.`
-                      : "Reach out any time with lease, maintenance, or billing questions."}
-                </p>
-              </div>
               <Link
-                href="/renter/messages"
-                className="inline-flex items-center rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
+                href="/renter/lease"
+                className="inline-flex rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
               >
-                Continue conversation
+                Lease details
               </Link>
             </div>
           </section>

@@ -331,6 +331,7 @@ function PropertyCard({
   ).length;
   const total = property.apartments.length;
   const rentRange = getRentRange(property.apartments);
+  const propertyHref = `/properties/${property.id}`;
 
   const statusBadge = (
     <span
@@ -382,17 +383,25 @@ function PropertyCard({
 
   if (viewMode === "list") {
     return (
-      <div className="flex overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow-md transition-shadow">
+      <div
+        role="link"
+        tabIndex={0}
+        onClick={() => router.push(propertyHref)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            router.push(propertyHref);
+          }
+        }}
+        className="flex cursor-pointer overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:border-emerald-300 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+      >
         {/* Color strip */}
         <div className="w-2 shrink-0 bg-gradient-to-b from-emerald-400 to-sky-500" />
         {/* Image placeholder */}
         <div className="relative hidden w-40 shrink-0 sm:flex items-center justify-center bg-gradient-to-br from-slate-700 to-slate-900">
           <BuildingIcon className="h-10 w-10 text-slate-500" />
         </div>
-        <Link
-          href={`/properties/${property.id}`}
-          className="flex flex-1 flex-col justify-between gap-4 p-4 sm:flex-row sm:items-center"
-        >
+        <div className="flex flex-1 flex-col justify-between gap-4 p-4 sm:flex-row sm:items-center">
           <div className="min-w-0 flex-1">
             <div className="mb-1 flex items-center gap-2">
               {statusBadge}
@@ -412,15 +421,13 @@ function PropertyCard({
             {meta}
             {occupancy}
           </div>
-        </Link>
+        </div>
         <div className="flex shrink-0 items-center pr-4" onClick={(e) => e.stopPropagation()}>
           <PropertyCardMenu propertyId={property.id} propertyName={property.name} unitCount={total} property={property} />
         </div>
       </div>
     );
   }
-
-  const propertyHref = `/properties/${property.id}`;
 
   return (
     <div
@@ -433,7 +440,7 @@ function PropertyCard({
           router.push(propertyHref);
         }
       }}
-      className="group block overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow-md transition-shadow"
+      className="group block cursor-pointer overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:border-emerald-300 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
     >
       {/* Image / hero */}
       <div className="relative h-48 bg-gradient-to-br from-slate-700 to-slate-900">
