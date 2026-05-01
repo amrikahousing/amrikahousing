@@ -291,12 +291,6 @@ export default async function RenterLeasePage() {
             >
               Contact About Renewal
             </a>
-            <a
-              href="/renter/messages"
-              className="inline-flex items-center justify-center rounded-lg border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-50"
-            >
-              Open Messages
-            </a>
           </div>
         </section>
       </div>

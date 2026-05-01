@@ -3,7 +3,7 @@
 import { useClerk } from "@clerk/nextjs";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 type AppSidebarProps = {
   user: {
@@ -49,8 +49,8 @@ const roleLabels: Record<string, string> = {
   admin: "Admin",
   property_manager: "Property Manager",
   manager: "Property Manager",
-  renter: "Renter",
-  tenant: "Renter",
+  renter: "Tenant",
+  tenant: "Tenant",
   investor: "Investor",
 };
 
@@ -124,7 +124,7 @@ export function AppSidebar({ user }: AppSidebarProps) {
   const roleLabel = user.isOrgAdmin ? "Admin" : roleLabels[user.role] ?? "Workspace";
   const displayName = user.firstName ?? user.email ?? "Account";
   const initial = (user.firstName?.[0] ?? user.email?.[0] ?? "U").toUpperCase();
-  const visibleNavigation = [
+  const visibleNavigation = useMemo(() => [
     { name: "Dashboard", href: "/dashboard", icon: "dashboard" as const },
     ...(user.permissions.view_properties || user.permissions.create_properties
       ? [{ name: "Properties", href: "/properties", icon: "building" as const }]
@@ -138,7 +138,23 @@ export function AppSidebar({ user }: AppSidebarProps) {
     ...(user.permissions.manage_team
       ? [{ name: "Team", href: "/team", icon: "users" as const }]
       : []),
-  ];
+  ], [
+    user.permissions.create_properties,
+    user.permissions.manage_accounting,
+    user.permissions.manage_bank_accounts,
+    user.permissions.manage_maintenance,
+    user.permissions.manage_team,
+    user.permissions.view_properties,
+  ]);
+  const prefetchHrefs = useMemo(() => [
+    ...visibleNavigation.map((item) => item.href),
+    "/profile",
+    ...(user.hasBothPortals ? ["/renter"] : []),
+  ], [user.hasBothPortals, visibleNavigation]);
+
+  useEffect(() => {
+    prefetchHrefs.forEach((href) => router.prefetch(href));
+  }, [router, prefetchHrefs]);
 
   const content = (
     <div className="flex h-full flex-col bg-slate-950 text-white">
@@ -183,6 +199,7 @@ export function AppSidebar({ user }: AppSidebarProps) {
                     ? "bg-emerald-600 text-white shadow-lg shadow-emerald-950/20"
                     : "text-slate-400 hover:bg-slate-800 hover:text-white",
                 )}
+                onPointerEnter={() => router.prefetch(item.href)}
                 onClick={() => setIsOpen(false)}
               >
                 <Icon name={item.icon} className="h-5 w-5" />
@@ -200,6 +217,7 @@ export function AppSidebar({ user }: AppSidebarProps) {
             "mb-4 flex items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-slate-800",
             pathname === "/profile" && "bg-slate-800",
           )}
+          onPointerEnter={() => router.prefetch("/profile")}
           onClick={() => setIsOpen(false)}
         >
           <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full bg-slate-700">
@@ -224,9 +242,10 @@ export function AppSidebar({ user }: AppSidebarProps) {
           <Link
             href="/renter"
             className="mb-4 flex w-full items-center justify-center rounded-lg border border-sky-700/60 bg-sky-500/10 px-3 py-2 text-sm font-medium text-sky-200 transition-colors hover:bg-sky-500/20 hover:text-white"
+            onPointerEnter={() => router.prefetch("/renter")}
             onClick={() => setIsOpen(false)}
           >
-            Switch to Renter Portal
+            Switch to Tenant Portal
           </Link>
         ) : null}
 

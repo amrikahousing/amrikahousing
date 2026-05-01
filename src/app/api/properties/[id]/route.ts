@@ -14,6 +14,7 @@ type PropertyUpdateInput = {
   state?: string;
   zip?: string;
   description?: string;
+  isActive?: boolean;
 };
 
 async function findScopedProperty(propertyId: string, organizationId: string) {
@@ -50,6 +51,22 @@ export async function PATCH(request: Request, context: RouteContext) {
     return Response.json({ error: "Invalid JSON." }, { status: 400 });
   }
 
+  if (typeof body.isActive === "boolean" && body.name === undefined) {
+    const updatedProperty = await prisma.properties.update({
+      where: { id },
+      data: {
+        is_active: body.isActive,
+        updated_at: new Date(),
+      },
+      select: {
+        id: true,
+        is_active: true,
+      },
+    });
+
+    return Response.json({ property: updatedProperty });
+  }
+
   const name = body.name?.trim();
   const type = body.type?.trim();
   const address = body.address?.trim();
@@ -76,6 +93,7 @@ export async function PATCH(request: Request, context: RouteContext) {
       state,
       zip,
       description: body.description?.trim() || null,
+      ...(typeof body.isActive === "boolean" ? { is_active: body.isActive } : {}),
       updated_at: new Date(),
     },
     select: {
@@ -109,21 +127,13 @@ export async function DELETE(_request: Request, context: RouteContext) {
     return Response.json({ error: "Property not found." }, { status: 404 });
   }
 
-  const deletedAt = new Date();
-  await prisma.$transaction([
-    prisma.units.updateMany({
-      where: { property_id: id, deleted_at: null },
-      data: { deleted_at: deletedAt, updated_at: deletedAt },
-    }),
-    prisma.properties.update({
-      where: { id },
-      data: {
-        deleted_at: deletedAt,
-        updated_at: deletedAt,
-        is_active: false,
-      },
-    }),
-  ]);
+  await prisma.properties.update({
+    where: { id },
+    data: {
+      is_active: false,
+      updated_at: new Date(),
+    },
+  });
 
   return Response.json({ ok: true });
 }

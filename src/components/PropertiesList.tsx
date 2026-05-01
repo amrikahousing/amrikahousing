@@ -116,14 +116,6 @@ function MoreVerticalIcon({ className = "" }: { className?: string }) {
 
 
 
-function SparklesIcon({ className = "" }: { className?: string }) {
-  return (
-    <svg aria-hidden="true" className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8">
-      <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
-    </svg>
-  );
-}
-
 function EditIcon({ className = "" }: { className?: string }) {
   return (
     <svg aria-hidden="true" className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
@@ -133,28 +125,41 @@ function EditIcon({ className = "" }: { className?: string }) {
   );
 }
 
-function TrashIcon({ className = "" }: { className?: string }) {
+function DeactivateIcon({ className = "" }: { className?: string }) {
   return (
     <svg aria-hidden="true" className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M3 6h18M8 6V4h8v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-      <path d="M10 11v6M14 11v6" />
+      <circle cx="12" cy="12" r="9" />
+      <path d="M8 12h8" />
     </svg>
   );
 }
 
-function DeleteConfirmDialog({
+function ActivateIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg aria-hidden="true" className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="9" />
+      <path d="m9 12 2 2 4-4" />
+    </svg>
+  );
+}
+
+function StatusConfirmDialog({
+  action,
   propertyName,
   unitCount,
   onConfirm,
   onCancel,
-  isDeleting,
+  isSaving,
 }: {
+  action: "activate" | "deactivate";
   propertyName: string;
   unitCount: number;
   onConfirm: () => void;
   onCancel: () => void;
-  isDeleting: boolean;
+  isSaving: boolean;
 }) {
+  const activating = action === "activate";
+
   return (
     <div
       className="fixed inset-0 z-50 flex items-center justify-center p-4"
@@ -162,32 +167,44 @@ function DeleteConfirmDialog({
     >
       <div className="absolute inset-0 bg-black/40" onClick={onCancel} />
       <div className="relative w-full max-w-sm rounded-xl border border-gray-200 bg-white p-6 shadow-xl">
-        <div className="mb-4 flex h-12 w-12 items-center justify-center rounded-full bg-red-100">
-          <TrashIcon className="h-6 w-6 text-red-600" />
+        <div className={`mb-4 flex h-12 w-12 items-center justify-center rounded-full ${activating ? "bg-emerald-100" : "bg-amber-100"}`}>
+          {activating ? (
+            <ActivateIcon className="h-6 w-6 text-emerald-700" />
+          ) : (
+            <DeactivateIcon className="h-6 w-6 text-amber-700" />
+          )}
         </div>
-        <h2 className="mb-1 text-lg font-semibold text-gray-900">Delete property?</h2>
+        <h2 className="mb-1 text-lg font-semibold text-gray-900">
+          {activating ? "Activate property?" : "Deactivate property?"}
+        </h2>
         <p className="mb-1 text-sm text-gray-600">
           <span className="font-medium text-gray-900">{propertyName}</span> and{" "}
           {unitCount === 0
             ? "all its data"
             : `${unitCount} unit${unitCount !== 1 ? "s" : ""}`}{" "}
-          will be permanently removed.
+          will stay on file.
         </p>
-        <p className="mb-6 text-sm text-gray-500">This action cannot be undone.</p>
+        <p className="mb-6 text-sm text-gray-500">
+          {activating
+            ? "The property will be marked active again."
+            : "The property will be marked inactive instead of removed."}
+        </p>
         <div className="flex gap-3">
           <button
             onClick={onCancel}
-            disabled={isDeleting}
+            disabled={isSaving}
             className="flex-1 rounded-lg border border-gray-200 bg-white py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 transition-colors"
           >
             Cancel
           </button>
           <button
             onClick={onConfirm}
-            disabled={isDeleting}
-            className="flex-1 rounded-lg bg-red-600 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-60 transition-colors"
+            disabled={isSaving}
+            className={`flex-1 rounded-lg py-2 text-sm font-medium text-white disabled:opacity-60 transition-colors ${
+              activating ? "bg-emerald-600 hover:bg-emerald-700" : "bg-amber-600 hover:bg-amber-700"
+            }`}
           >
-            {isDeleting ? "Deleting…" : "Delete"}
+            {isSaving ? (activating ? "Activating..." : "Deactivating...") : activating ? "Activate" : "Deactivate"}
           </button>
         </div>
       </div>
@@ -221,20 +238,20 @@ function OccupancyBar({ occupied, total }: { occupied: number; total: number }) 
 }
 
 function PropertyCardMenu({
+  property,
   propertyId,
   propertyName,
   unitCount,
-  property,
 }: {
+  property: PropertyGroup;
   propertyId: string;
   propertyName: string;
   unitCount: number;
-  property: PropertyGroup;
 }) {
   const router = useRouter();
   const [open, setOpen] = useState(false);
-  const [confirmDelete, setConfirmDelete] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
+  const [pendingAction, setPendingAction] = useState<"activate" | "deactivate" | null>(null);
+  const [isSavingStatus, setIsSavingStatus] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -248,17 +265,25 @@ function PropertyCardMenu({
     return () => document.removeEventListener("mousedown", handleClick);
   }, [open]);
 
-  const handleDelete = useCallback(async () => {
-    setIsDeleting(true);
+  const handleStatusChange = useCallback(async () => {
+    if (!pendingAction) return;
+    setIsSavingStatus(true);
     try {
-      const res = await fetch(`/api/properties/${propertyId}`, { method: "DELETE" });
-      if (!res.ok) throw new Error("Delete failed");
+      const res =
+        pendingAction === "activate"
+          ? await fetch(`/api/properties/${propertyId}`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ isActive: true }),
+            })
+          : await fetch(`/api/properties/${propertyId}`, { method: "DELETE" });
+      if (!res.ok) throw new Error("Status update failed");
       router.refresh();
     } catch {
-      setIsDeleting(false);
-      setConfirmDelete(false);
+      setIsSavingStatus(false);
+      setPendingAction(null);
     }
-  }, [propertyId, router]);
+  }, [pendingAction, propertyId, router]);
 
   return (
     <>
@@ -273,19 +298,8 @@ function PropertyCardMenu({
         {open && (
           <div className="absolute right-0 mt-1 w-44 rounded-lg border border-gray-200 bg-white shadow-lg z-20 overflow-hidden">
             <Link
-              href={`/ai-import?propertyId=${propertyId}&name=${encodeURIComponent(property.name)}&type=${encodeURIComponent(property.type)}&address=${encodeURIComponent(property.address)}&city=${encodeURIComponent(property.city)}&state=${encodeURIComponent(property.state)}&zip=${encodeURIComponent(property.zip)}`}
-              className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50"
-              onClick={(e) => {
-                e.stopPropagation();
-                setOpen(false);
-              }}
-            >
-              <SparklesIcon className="h-4 w-4" />
-              Add with AI
-            </Link>
-            <Link
               href={`/properties/${propertyId}`}
-              className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50 border-t border-gray-100"
+              className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50"
               onClick={(e) => {
                 e.stopPropagation();
                 setOpen(false);
@@ -294,24 +308,35 @@ function PropertyCardMenu({
               <EditIcon className="h-4 w-4" />
               Edit
             </Link>
-            <button
-              onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpen(false); setConfirmDelete(true); }}
-              className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50 border-t border-gray-100"
-            >
-              <TrashIcon className="h-4 w-4" />
-              Delete
-            </button>
+            {property.isActive ? (
+              <button
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpen(false); setPendingAction("deactivate"); }}
+                className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-amber-700 hover:bg-amber-50 border-t border-gray-100"
+              >
+                <DeactivateIcon className="h-4 w-4" />
+                Deactivate
+              </button>
+            ) : (
+              <button
+                onClick={(e) => { e.preventDefault(); e.stopPropagation(); setOpen(false); setPendingAction("activate"); }}
+                className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-emerald-700 hover:bg-emerald-50 border-t border-gray-100"
+              >
+                <ActivateIcon className="h-4 w-4" />
+                Activate
+              </button>
+            )}
           </div>
         )}
       </div>
 
-      {confirmDelete && (
-        <DeleteConfirmDialog
+      {pendingAction && (
+        <StatusConfirmDialog
+          action={pendingAction}
           propertyName={propertyName}
           unitCount={unitCount}
-          onConfirm={handleDelete}
-          onCancel={() => setConfirmDelete(false)}
-          isDeleting={isDeleting}
+          onConfirm={handleStatusChange}
+          onCancel={() => setPendingAction(null)}
+          isSaving={isSavingStatus}
         />
       )}
     </>
@@ -331,6 +356,7 @@ function PropertyCard({
   ).length;
   const total = property.apartments.length;
   const rentRange = getRentRange(property.apartments);
+  const propertyHref = `/properties/${property.id}`;
 
   const statusBadge = (
     <span
@@ -382,17 +408,25 @@ function PropertyCard({
 
   if (viewMode === "list") {
     return (
-      <div className="flex overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow-md transition-shadow">
+      <div
+        role="link"
+        tabIndex={0}
+        onClick={() => router.push(propertyHref)}
+        onKeyDown={(e) => {
+          if (e.key === "Enter" || e.key === " ") {
+            e.preventDefault();
+            router.push(propertyHref);
+          }
+        }}
+        className="flex cursor-pointer overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:border-emerald-300 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
+      >
         {/* Color strip */}
         <div className="w-2 shrink-0 bg-gradient-to-b from-emerald-400 to-sky-500" />
         {/* Image placeholder */}
         <div className="relative hidden w-40 shrink-0 sm:flex items-center justify-center bg-gradient-to-br from-slate-700 to-slate-900">
           <BuildingIcon className="h-10 w-10 text-slate-500" />
         </div>
-        <Link
-          href={`/properties/${property.id}`}
-          className="flex flex-1 flex-col justify-between gap-4 p-4 sm:flex-row sm:items-center"
-        >
+        <div className="flex flex-1 flex-col justify-between gap-4 p-4 sm:flex-row sm:items-center">
           <div className="min-w-0 flex-1">
             <div className="mb-1 flex items-center gap-2">
               {statusBadge}
@@ -412,15 +446,13 @@ function PropertyCard({
             {meta}
             {occupancy}
           </div>
-        </Link>
+        </div>
         <div className="flex shrink-0 items-center pr-4" onClick={(e) => e.stopPropagation()}>
-          <PropertyCardMenu propertyId={property.id} propertyName={property.name} unitCount={total} property={property} />
+          <PropertyCardMenu property={property} propertyId={property.id} propertyName={property.name} unitCount={total} />
         </div>
       </div>
     );
   }
-
-  const propertyHref = `/properties/${property.id}`;
 
   return (
     <div
@@ -433,14 +465,14 @@ function PropertyCard({
           router.push(propertyHref);
         }
       }}
-      className="group block overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm hover:shadow-md transition-shadow"
+      className="group block cursor-pointer overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm transition-all hover:-translate-y-0.5 hover:border-emerald-300 hover:shadow-lg focus:outline-none focus:ring-2 focus:ring-emerald-500/30"
     >
       {/* Image / hero */}
       <div className="relative h-48 bg-gradient-to-br from-slate-700 to-slate-900">
         <BuildingIcon className="absolute inset-0 m-auto h-14 w-14 text-slate-500" />
         <div className="absolute left-3 top-3">{statusBadge}</div>
         <div className="absolute right-3 top-3">
-          <PropertyCardMenu propertyId={property.id} propertyName={property.name} unitCount={total} property={property} />
+          <PropertyCardMenu property={property} propertyId={property.id} propertyName={property.name} unitCount={total} />
         </div>
       </div>
 

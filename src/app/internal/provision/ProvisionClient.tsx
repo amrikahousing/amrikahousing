@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useRef, useState } from "react";
 
 type PageState = "form" | "success";
 
@@ -63,10 +63,45 @@ function ProvisionForm({
   );
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState({
+    orgName: "",
+    adminEmail: "",
+    appUrl: "",
+  });
+  const orgNameRef = useRef<HTMLInputElement | null>(null);
+  const adminEmailRef = useRef<HTMLInputElement | null>(null);
+  const appUrlRef = useRef<HTMLInputElement | null>(null);
+
+  const inputClass =
+    "h-10 w-full rounded-lg border border-slate-600 bg-slate-900/80 px-3 text-sm text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20";
+  const invalidInputClass = "border-red-400 bg-red-950/30 focus:border-red-400 focus:ring-red-400/20";
+
+  function fieldClass(errorMessage: string) {
+    return `${inputClass} ${errorMessage ? invalidInputClass : ""}`;
+  }
+
+  function clearField(field: keyof typeof fieldErrors) {
+    if (!fieldErrors[field]) return;
+    setFieldErrors((current) => ({ ...current, [field]: "" }));
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
+    const nextFieldErrors = {
+      orgName: orgName.trim() ? "" : "Organization name is required.",
+      adminEmail: adminEmail.trim() ? "" : "Admin email is required.",
+      appUrl: appUrl.trim() ? "" : "App URL is required.",
+    };
+
+    setFieldErrors(nextFieldErrors);
+    if (nextFieldErrors.orgName || nextFieldErrors.adminEmail || nextFieldErrors.appUrl) {
+      if (nextFieldErrors.orgName) orgNameRef.current?.focus();
+      else if (nextFieldErrors.adminEmail) adminEmailRef.current?.focus();
+      else appUrlRef.current?.focus();
+      return;
+    }
+
     setSubmitting(true);
 
     try {
@@ -94,19 +129,25 @@ function ProvisionForm({
   }
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-4">
+    <form onSubmit={handleSubmit} noValidate className="space-y-4">
       <div className="space-y-1.5">
         <label className="text-sm font-medium text-slate-300">
           Organization name
         </label>
         <input
+          ref={orgNameRef}
           type="text"
           placeholder="Avon Management LLC"
           required
           value={orgName}
-          onChange={(e) => setOrgName(e.target.value)}
-          className="h-10 w-full rounded-lg border border-slate-600 bg-slate-900/80 px-3 text-sm text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+          onChange={(e) => {
+            setOrgName(e.target.value);
+            clearField("orgName");
+          }}
+          className={fieldClass(fieldErrors.orgName)}
+          aria-invalid={!!fieldErrors.orgName}
         />
+        {fieldErrors.orgName ? <p className="text-xs font-medium text-red-300">{fieldErrors.orgName}</p> : null}
       </div>
 
       <div className="space-y-1.5">
@@ -114,13 +155,19 @@ function ProvisionForm({
           Admin email
         </label>
         <input
+          ref={adminEmailRef}
           type="email"
           placeholder="admin@avon.com"
           required
           value={adminEmail}
-          onChange={(e) => setAdminEmail(e.target.value)}
-          className="h-10 w-full rounded-lg border border-slate-600 bg-slate-900/80 px-3 text-sm text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+          onChange={(e) => {
+            setAdminEmail(e.target.value);
+            clearField("adminEmail");
+          }}
+          className={fieldClass(fieldErrors.adminEmail)}
+          aria-invalid={!!fieldErrors.adminEmail}
         />
+        {fieldErrors.adminEmail ? <p className="text-xs font-medium text-red-300">{fieldErrors.adminEmail}</p> : null}
         <p className="text-xs text-slate-500">
           Clerk will send an invite to this address.
         </p>
@@ -131,13 +178,19 @@ function ProvisionForm({
           App URL <span className="font-normal text-slate-500">(for invite redirect)</span>
         </label>
         <input
+          ref={appUrlRef}
           type="url"
           placeholder="https://app.amrikahousing.com"
           required
           value={appUrl}
-          onChange={(e) => setAppUrl(e.target.value)}
-          className="h-10 w-full rounded-lg border border-slate-600 bg-slate-900/80 px-3 text-sm text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+          onChange={(e) => {
+            setAppUrl(e.target.value);
+            clearField("appUrl");
+          }}
+          className={fieldClass(fieldErrors.appUrl)}
+          aria-invalid={!!fieldErrors.appUrl}
         />
+        {fieldErrors.appUrl ? <p className="text-xs font-medium text-red-300">{fieldErrors.appUrl}</p> : null}
       </div>
 
       {error && (

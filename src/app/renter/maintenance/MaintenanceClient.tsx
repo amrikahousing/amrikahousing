@@ -13,6 +13,7 @@ type MaintenanceRequest = {
   updated_at: Date;
   scheduled_date: Date | null;
   resolved_at: Date | null;
+  status_change_note: string | null;
   units: {
     unit_number: string;
     properties: { name: string; address: string };
@@ -63,7 +64,7 @@ const statusColors: Record<string, string> = {
   in_progress: "bg-sky-50 text-sky-700",
   completed: "bg-emerald-50 text-emerald-700",
   rejected: "bg-slate-100 text-slate-500",
-  closed: "bg-slate-100 text-slate-500",
+  cancelled: "bg-rose-50 text-rose-500",
 };
 
 const statusLabels: Record<string, string> = {
@@ -71,7 +72,7 @@ const statusLabels: Record<string, string> = {
   in_progress: "In Progress",
   completed: "Completed",
   rejected: "Rejected",
-  closed: "Closed",
+  cancelled: "Cancelled",
 };
 
 function Icon({ name, className = "" }: { name: string; className?: string }) {
@@ -108,20 +109,46 @@ export function MaintenanceClient({ requests, hasActiveLease, unitLabel }: Props
   const [isPrefilledSubmitting, setIsPrefilledSubmitting] = useState(false);
   const [prefilledError, setPrefilledError] = useState<string | null>(null);
 
-  const [closingId, setClosingId] = useState<string | null>(null);
+  const CANCEL_REASONS = [
+    "Issue resolved on my own",
+    "Made a mistake",
+    "No longer urgent",
+    "Other",
+  ] as const;
 
-  async function handleClose(id: string) {
-    setClosingId(id);
+  const [pendingCancelId, setPendingCancelId] = useState<string | null>(null);
+  const [cancelReason, setCancelReason] = useState<string | null>(null);
+  const [cancelOther, setCancelOther] = useState("");
+  const [isClosing, setIsClosing] = useState(false);
+
+  function openCancelPrompt(id: string) {
+    setPendingCancelId(id);
+    setCancelReason(null);
+    setCancelOther("");
+  }
+
+  async function confirmCancel() {
+    if (!pendingCancelId || !cancelReason) return;
+    const note =
+      cancelReason === "Other"
+        ? cancelOther.trim() || "Other"
+        : cancelReason;
+    setIsClosing(true);
     try {
-      const res = await fetch(`/api/renter/maintenance/${id}`, { method: "PATCH" });
+      const res = await fetch(`/api/renter/maintenance/${pendingCancelId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ note }),
+      });
       if (!res.ok) {
         const data = (await res.json()) as { error?: string };
-        alert(data.error ?? "Could not close the request.");
+        alert(data.error ?? "Could not cancel the request.");
         return;
       }
+      setPendingCancelId(null);
       router.refresh();
     } finally {
-      setClosingId(null);
+      setIsClosing(false);
     }
   }
 
@@ -207,6 +234,61 @@ export function MaintenanceClient({ requests, hasActiveLease, unitLabel }: Props
 
   return (
     <div className="space-y-6">
+      {pendingCancelId ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-sm rounded-xl border border-slate-200 bg-white p-6 shadow-2xl">
+            <h2 className="mb-1 text-lg font-semibold text-slate-900">Why are you cancelling?</h2>
+            <p className="mb-4 text-sm text-slate-500">Your property team will see this reason.</p>
+            <div className="flex flex-col gap-2">
+              {CANCEL_REASONS.map((reason) => (
+                <button
+                  key={reason}
+                  type="button"
+                  disabled={isClosing}
+                  onClick={() => setCancelReason(reason)}
+                  className={`rounded-lg border px-4 py-2.5 text-left text-sm font-medium transition-colors disabled:opacity-60 ${
+                    cancelReason === reason
+                      ? "border-rose-400 bg-rose-50 text-rose-700"
+                      : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                  }`}
+                >
+                  {reason}
+                </button>
+              ))}
+            </div>
+            {cancelReason === "Other" && (
+              <textarea
+                autoFocus
+                value={cancelOther}
+                onChange={(e) => setCancelOther(e.target.value)}
+                placeholder="Briefly describe your reason…"
+                rows={2}
+                disabled={isClosing}
+                className="mt-3 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20 disabled:opacity-60"
+              />
+            )}
+            <div className="mt-5 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setPendingCancelId(null)}
+                disabled={isClosing}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+              >
+                Keep request
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmCancel()}
+                disabled={!cancelReason || isClosing}
+                className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isClosing ? "Cancelling…" : "Confirm cancel"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <header>
         <h1 className="text-3xl font-bold tracking-tight text-slate-900">Maintenance</h1>
         <p className="mt-1 text-slate-500">Submit a request and track updates from your property team.</p>
@@ -387,6 +469,9 @@ export function MaintenanceClient({ requests, hasActiveLease, unitLabel }: Props
                   {req.description && (
                     <p className="mt-1.5 text-sm text-slate-500 line-clamp-2">{req.description}</p>
                   )}
+                  {req.status_change_note && (
+                    <p className="mt-2 text-xs text-slate-400 italic">{req.status_change_note}</p>
+                  )}
                   <div className="mt-3 grid grid-cols-2 gap-3 text-xs text-slate-500">
                     <div>
                       <p className="font-semibold uppercase tracking-wider text-slate-400">Submitted</p>
@@ -413,11 +498,10 @@ export function MaintenanceClient({ requests, hasActiveLease, unitLabel }: Props
                     <div className="mt-3 flex justify-end">
                       <button
                         type="button"
-                        onClick={() => void handleClose(req.id)}
-                        disabled={closingId === req.id}
-                        className="text-xs font-medium text-slate-400 hover:text-rose-600 transition-colors disabled:opacity-50"
+                        onClick={() => openCancelPrompt(req.id)}
+                        className="text-xs font-medium text-slate-400 hover:text-rose-600 transition-colors"
                       >
-                        {closingId === req.id ? "Closing…" : "Cancel request"}
+                        Cancel request
                       </button>
                     </div>
                   )}

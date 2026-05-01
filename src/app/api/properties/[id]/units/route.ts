@@ -5,6 +5,10 @@ type RouteContext = {
   params: Promise<{ id: string }>;
 };
 
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
 export async function POST(request: Request, context: RouteContext) {
   try {
     const ctx = await getOrgPermissionContext();
@@ -46,8 +50,21 @@ export async function POST(request: Request, context: RouteContext) {
     }
 
     const status = body.status?.trim() || "vacant";
-    if (!["vacant", "occupied", "maintenance"].includes(status)) {
-      return Response.json({ error: "Status must be vacant, occupied, or maintenance." }, { status: 400 });
+    if (!["vacant", "occupied", "maintenance", "inactive"].includes(status)) {
+      return Response.json({ error: "Status must be vacant, occupied, maintenance, or inactive." }, { status: 400 });
+    }
+
+    if (!isFiniteNumber(body.bedrooms) || body.bedrooms < 0) {
+      return Response.json({ error: "Bedrooms is required." }, { status: 400 });
+    }
+    if (!isFiniteNumber(body.bathrooms) || body.bathrooms <= 0) {
+      return Response.json({ error: "Bathrooms is required." }, { status: 400 });
+    }
+    if (!isFiniteNumber(body.squareFeet) || body.squareFeet <= 0) {
+      return Response.json({ error: "Square feet is required." }, { status: 400 });
+    }
+    if (!isFiniteNumber(body.rentAmount) || body.rentAmount <= 0) {
+      return Response.json({ error: "Monthly rent is required." }, { status: 400 });
     }
 
     const existing = await prisma.units.findFirst({
@@ -60,10 +77,10 @@ export async function POST(request: Request, context: RouteContext) {
 
     const unitData = {
       unit_number: unitNumber,
-      bedrooms: body.bedrooms ?? 0,
-      bathrooms: body.bathrooms ?? 0,
-      square_feet: body.squareFeet ?? null,
-      rent_amount: body.rentAmount ?? null,
+      bedrooms: body.bedrooms,
+      bathrooms: body.bathrooms,
+      square_feet: body.squareFeet,
+      rent_amount: body.rentAmount,
       status,
       updated_at: new Date(),
     };

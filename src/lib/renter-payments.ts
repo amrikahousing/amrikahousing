@@ -766,7 +766,7 @@ export async function authorizePlaidPaymentAttempt(
     .trim();
 
   if (!legalName) {
-    throw new Error("The renter record is missing the legal name required for ACH authorization.");
+    throw new Error("The tenant record is missing the legal name required for ACH authorization.");
   }
 
   const authorization = await createPlaidTransferAuthorization({

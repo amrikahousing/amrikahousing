@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 type PropertyOption = {
   id: string;
@@ -238,6 +238,8 @@ export function PropertyManagersClient({ canInvite }: { canInvite: boolean }) {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState({ email: "", propertyIds: "" });
+  const emailRef = useRef<HTMLInputElement | null>(null);
 
   async function loadData() {
     setLoading(true);
@@ -270,9 +272,22 @@ export function PropertyManagersClient({ canInvite }: { canInvite: boolean }) {
 
   async function inviteManager(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    setSubmitting(true);
     setError(null);
     setNotice(null);
+    const nextFieldErrors = {
+      email: form.email.trim() ? "" : "Email is required.",
+      propertyIds:
+        properties.length > 1 && form.propertyIds.length === 0
+          ? "Choose at least one property."
+          : "",
+    };
+    setFieldErrors(nextFieldErrors);
+    if (nextFieldErrors.email || nextFieldErrors.propertyIds) {
+      if (nextFieldErrors.email) emailRef.current?.focus();
+      return;
+    }
+
+    setSubmitting(true);
     try {
       const response = await fetch("/api/property-managers", {
         method: "POST",
@@ -326,6 +341,7 @@ export function PropertyManagersClient({ canInvite }: { canInvite: boolean }) {
     <div className="space-y-6">
       <form
         onSubmit={inviteManager}
+        noValidate
         className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
       >
         <div>
@@ -339,11 +355,17 @@ export function PropertyManagersClient({ canInvite }: { canInvite: boolean }) {
             <input
               type="email"
               value={form.email}
-              onChange={(event) => setForm((current) => ({ ...current, email: event.target.value }))}
+              ref={emailRef}
+              onChange={(event) => {
+                setForm((current) => ({ ...current, email: event.target.value }));
+                if (fieldErrors.email) setFieldErrors((current) => ({ ...current, email: "" }));
+              }}
               placeholder="manager@company.com"
-              className="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+              className={`h-10 w-full rounded-lg border border-slate-300 px-3 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 ${fieldErrors.email ? "border-red-300 bg-red-50/40 focus:border-red-500 focus:ring-red-500/20" : ""}`}
               required
+              aria-invalid={!!fieldErrors.email}
             />
+            {fieldErrors.email ? <p className="mt-1 text-xs font-medium text-red-600">{fieldErrors.email}</p> : null}
           </label>
 
           <label className="block text-sm">
@@ -368,9 +390,13 @@ export function PropertyManagersClient({ canInvite }: { canInvite: boolean }) {
           <PropertyChecklist
             properties={properties}
             selected={form.propertyIds}
-            onChange={(propertyIds) => setForm((current) => ({ ...current, propertyIds }))}
+            onChange={(propertyIds) => {
+              setForm((current) => ({ ...current, propertyIds }));
+              if (fieldErrors.propertyIds) setFieldErrors((current) => ({ ...current, propertyIds: "" }));
+            }}
             required={properties.length > 1}
           />
+          {fieldErrors.propertyIds ? <p className="mt-2 text-xs font-medium text-red-600">{fieldErrors.propertyIds}</p> : null}
         </div>
 
         {error ? (

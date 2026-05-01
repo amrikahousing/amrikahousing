@@ -73,9 +73,10 @@ export default async function MaintenancePage() {
       request.status === "open" ||
       request.status === "in_progress" ||
       request.status === "completed" ||
-      request.status === "rejected"
+      request.status === "rejected" ||
+      request.status === "cancelled"
         ? request.status
-        : request.status === "resolved"
+        : request.status === "resolved" || request.status === "closed"
           ? "completed"
           : "open";
 
@@ -92,8 +93,8 @@ export default async function MaintenancePage() {
       escalatedAt: request.priority === "emergency" ? request.updated_at.toISOString() : null,
       assignedVendor: request.vendors?.name ?? null,
       assignmentNote: request.vendors?.name ? "Vendor assigned." : null,
-      aiAnalysis: null,
       createdAt: request.created_at.toISOString(),
+      statusChangeNote: request.status_change_note ?? null,
     };
   });
 
