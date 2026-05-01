@@ -1,8 +1,9 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { PROPERTY_TYPE_OPTIONS, getPropertyTypeLabel, normalizePropertyType } from "@/lib/property-types";
+import { getPropertyTypeLabel } from "@/lib/property-types";
 import { useToast } from "./ToastProvider";
 import { OnboardRenterWizard, type WizardUnit } from "./OnboardRenterWizard";
 
@@ -15,6 +16,7 @@ type PropertyDetails = {
   state: string;
   zip: string;
   description: string;
+  isActive: boolean;
   units: UnitDetails[];
 };
 
@@ -34,6 +36,8 @@ type UnitDetails = {
   squareFeet: number | null;
   rentAmount: number | null;
   status: string;
+  hasActiveLease: boolean;
+  futurePaymentCount: number;
   tenant: UnitTenant | null;
 };
 
@@ -81,18 +85,10 @@ function PlusIcon({ className = "" }: { className?: string }) {
   );
 }
 
-function MailIcon({ className = "" }: { className?: string }) {
+function SparklesIcon({ className = "" }: { className?: string }) {
   return (
-    <svg aria-hidden="true" className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <rect width="20" height="16" x="2" y="4" rx="2" /><path d="m22 7-8.97 5.7a1.94 1.94 0 0 1-2.06 0L2 7" />
-    </svg>
-  );
-}
-
-function PhoneIcon({ className = "" }: { className?: string }) {
-  return (
-    <svg aria-hidden="true" className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M22 16.92v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07A19.5 19.5 0 0 1 4.14 12a19.79 19.79 0 0 1-3.07-8.67A2 2 0 0 1 3.05 2h3a2 2 0 0 1 2 1.72c.127.96.361 1.903.7 2.81a2 2 0 0 1-.45 2.11L7.09 9.91a16 16 0 0 0 6 6l1.27-1.27a2 2 0 0 1 2.11-.45c.907.339 1.85.573 2.81.7A2 2 0 0 1 21 17v-.08Z" />
+    <svg aria-hidden="true" className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeLinecap="round" strokeLinejoin="round" strokeWidth="1.8">
+      <path d="M9.937 15.5A2 2 0 0 0 8.5 14.063l-6.135-1.582a.5.5 0 0 1 0-.962L8.5 9.936A2 2 0 0 0 9.937 8.5l1.582-6.135a.5.5 0 0 1 .963 0L14.063 8.5A2 2 0 0 0 15.5 9.937l6.135 1.581a.5.5 0 0 1 0 .964L15.5 14.063a2 2 0 0 0-1.437 1.437l-1.582 6.135a.5.5 0 0 1-.963 0z" />
     </svg>
   );
 }
@@ -105,11 +101,20 @@ function EditIcon({ className = "" }: { className?: string }) {
   );
 }
 
-function TrashIcon({ className = "" }: { className?: string }) {
+function DeactivateIcon({ className = "" }: { className?: string }) {
   return (
     <svg aria-hidden="true" className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-      <path d="M3 6h18M8 6V4h8v2M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" />
-      <path d="M10 11v6M14 11v6" />
+      <circle cx="12" cy="12" r="9" />
+      <path d="M8 12h8" />
+    </svg>
+  );
+}
+
+function ActivateIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg aria-hidden="true" className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="9" />
+      <path d="m9 12 2 2 4-4" />
     </svg>
   );
 }
@@ -132,17 +137,14 @@ function MoreVerticalIcon({ className = "" }: { className?: string }) {
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
 
-const inputClass =
-  "h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 outline-none transition placeholder:text-gray-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20";
-
-const labelClass = "block space-y-1.5 text-sm font-medium text-gray-700";
-
 function statusBadge(status: string) {
   switch (status) {
     case "occupied":
       return "bg-green-100 text-green-700 border-green-200";
     case "maintenance":
       return "bg-red-100 text-red-600 border-red-200";
+    case "inactive":
+      return "bg-gray-100 text-gray-600 border-gray-200";
     default:
       return "bg-yellow-100 text-yellow-700 border-yellow-200";
   }
@@ -177,12 +179,14 @@ const emptyUnitForm = {
 function UnitCardMenu({
   unit,
   onEdit,
-  onDelete,
+  onActivate,
+  onDeactivate,
   canManageUnits,
 }: {
   unit: UnitDetails;
   onEdit: (unit: UnitDetails) => void;
-  onDelete: (unit: UnitDetails) => void;
+  onActivate: (unit: UnitDetails) => void;
+  onDeactivate: (unit: UnitDetails) => void;
   canManageUnits: boolean;
 }) {
   const [open, setOpen] = useState(false);
@@ -221,13 +225,23 @@ function UnitCardMenu({
             <EditIcon className="h-4 w-4" />
             Edit unit
           </button>
-          <button
-            onClick={(e) => { e.stopPropagation(); setOpen(false); onDelete(unit); }}
-            className="flex w-full items-center gap-2 border-t border-gray-100 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50"
-          >
-            <TrashIcon className="h-4 w-4" />
-            Delete
-          </button>
+          {unit.status === "inactive" ? (
+            <button
+              onClick={(e) => { e.stopPropagation(); setOpen(false); onActivate(unit); }}
+              className="flex w-full items-center gap-2 border-t border-gray-100 px-4 py-2.5 text-sm text-emerald-700 hover:bg-emerald-50"
+            >
+              <ActivateIcon className="h-4 w-4" />
+              Activate
+            </button>
+          ) : (
+            <button
+              onClick={(e) => { e.stopPropagation(); setOpen(false); onDeactivate(unit); }}
+              className="flex w-full items-center gap-2 border-t border-gray-100 px-4 py-2.5 text-sm text-amber-700 hover:bg-amber-50"
+            >
+              <DeactivateIcon className="h-4 w-4" />
+              Deactivate
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -239,18 +253,20 @@ function UnitCardMenu({
 function UnitCard({
   unit,
   onEdit,
-  onDelete,
+  onActivate,
+  onDeactivate,
   onOnboardRenter,
-  deleting,
+  savingStatus,
   canManageUnits,
   canInviteRenters,
   onboarded,
 }: {
   unit: UnitDetails;
   onEdit: (unit: UnitDetails) => void;
-  onDelete: (unit: UnitDetails) => void;
+  onActivate: (unit: UnitDetails) => void;
+  onDeactivate: (unit: UnitDetails) => void;
   onOnboardRenter: (unit: UnitDetails) => void;
-  deleting: boolean;
+  savingStatus: boolean;
   canManageUnits: boolean;
   canInviteRenters: boolean;
   onboarded: boolean;
@@ -262,6 +278,8 @@ function UnitCard({
       ? "bg-blue-400"
       : unit.status === "maintenance"
       ? "bg-amber-400"
+      : unit.status === "inactive"
+      ? "bg-gray-300"
       : "bg-gray-300";
 
   function openEditUnit() {
@@ -306,7 +324,8 @@ function UnitCard({
           <UnitCardMenu
             unit={unit}
             onEdit={onEdit}
-            onDelete={onDelete}
+            onActivate={onActivate}
+            onDeactivate={onDeactivate}
             canManageUnits={canManageUnits}
           />
         </div>
@@ -347,7 +366,7 @@ function UnitCard({
           </div>
         ) : (
           <div className="flex flex-col items-center gap-2 py-1 text-center">
-            {canInviteRenters && (
+            {canInviteRenters && unit.status !== "inactive" && (
               <button
                 onClick={(e) => {
                   e.stopPropagation();
@@ -368,9 +387,9 @@ function UnitCard({
         )}
       </div>
 
-      {deleting && (
+      {savingStatus && (
         <div className="border-t border-gray-100 px-5 py-2 text-center text-xs text-gray-400">
-          Deleting…
+          Updating...
         </div>
       )}
     </div>
@@ -381,12 +400,10 @@ function UnitCard({
 
 export function PropertyDetailsClient({
   initialProperty,
-  canManageProperty = false,
   canManageUnits = false,
   canInviteRenters = false,
 }: {
   initialProperty: PropertyDetails;
-  canManageProperty?: boolean;
   canManageUnits?: boolean;
   canInviteRenters?: boolean;
 }) {
@@ -394,36 +411,26 @@ export function PropertyDetailsClient({
   const toast = useToast();
   const [property, setProperty] = useState(initialProperty);
 
-  // Property edit state
-  const [editingProperty, setEditingProperty] = useState(false);
-  const [propForm, setPropForm] = useState({
-    name: initialProperty.name,
-    type: normalizePropertyType(initialProperty.type),
-    address: initialProperty.address,
-    city: initialProperty.city,
-    state: initialProperty.state,
-    zip: initialProperty.zip,
-    description: initialProperty.description,
-  });
-  const [savingProperty, setSavingProperty] = useState(false);
-
   // Unit state
   const [unitSearch, setUnitSearch] = useState("");
   const [unitStatusFilter, setUnitStatusFilter] = useState("all");
-  const [deletingUnitId, setDeletingUnitId] = useState<string | null>(null);
+  const [savingUnitStatusId, setSavingUnitStatusId] = useState<string | null>(null);
 
   // Edit unit modal
   const [editingUnit, setEditingUnit] = useState<UnitDetails | null>(null);
   const [unitForm, setUnitForm] = useState(emptyUnitForm);
+  const [unitFieldErrors, setUnitFieldErrors] = useState<UnitFieldErrors>({});
   const [savingUnit, setSavingUnit] = useState(false);
 
   // Add unit modal
   const [addingUnit, setAddingUnit] = useState(false);
   const [newUnitForm, setNewUnitForm] = useState(emptyUnitForm);
+  const [newUnitFieldErrors, setNewUnitFieldErrors] = useState<UnitFieldErrors>({});
   const [savingNewUnit, setSavingNewUnit] = useState(false);
+  const unitFieldRefs = useRef<Partial<Record<keyof UnitFormState, HTMLInputElement | HTMLSelectElement | null>>>({});
 
-  // Delete unit confirmation
-  const [deletingUnit, setDeletingUnit] = useState<UnitDetails | null>(null);
+  // Deactivate unit confirmation
+  const [deactivatingUnit, setDeactivatingUnit] = useState<UnitDetails | null>(null);
 
   // Onboard tenant state
   const [onboardingUnitId, setOnboardingUnitId] = useState<string | null>(null);
@@ -449,6 +456,8 @@ export function PropertyDetailsClient({
     });
   }, [property.units, unitSearch, unitStatusFilter]);
 
+  const addWithAiHref = `/ai-import?propertyId=${property.id}&name=${encodeURIComponent(property.name)}&type=${encodeURIComponent(property.type)}&address=${encodeURIComponent(property.address)}&city=${encodeURIComponent(property.city)}&state=${encodeURIComponent(property.state)}&zip=${encodeURIComponent(property.zip)}`;
+
   // ── Handlers ───────────────────────────────────────────────────────────────
 
   function notify(msg: string) {
@@ -459,30 +468,56 @@ export function PropertyDetailsClient({
     toast.error(msg, { title: "Property" });
   }
 
-  async function saveProperty(e: React.FormEvent) {
-    e.preventDefault();
-    setSavingProperty(true);
-    try {
-      const res = await fetch(`/api/properties/${property.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(propForm),
+  function validateUnitForm(form: UnitFormState) {
+    const errors: UnitFieldErrors = {};
+    if (!form.unitNumber.trim()) errors.unitNumber = "Unit number is required.";
+    if (form.bedrooms.trim() === "" || Number(form.bedrooms) < 0) errors.bedrooms = "Bedrooms is required.";
+    if (form.bathrooms.trim() === "" || Number(form.bathrooms) <= 0) errors.bathrooms = "Bathrooms is required.";
+    if (form.squareFeet.trim() === "" || Number(form.squareFeet) <= 0) errors.squareFeet = "Sq ft is required.";
+    if (form.rentAmount.trim() === "" || Number(form.rentAmount) <= 0) errors.rentAmount = "Monthly rent is required.";
+    return errors;
+  }
+
+  function focusFirstUnitError(errors: UnitFieldErrors) {
+    const firstInvalidField = requiredUnitFields.find(({ field }) => errors[field])?.field;
+    if (firstInvalidField) unitFieldRefs.current[firstInvalidField]?.focus();
+  }
+
+  function setUnitFieldRef(field: keyof UnitFormState, node: HTMLInputElement | HTMLSelectElement | null) {
+    unitFieldRefs.current[field] = node;
+  }
+
+  function setNewUnitField(field: keyof UnitFormState, value: string) {
+    setNewUnitForm((form) => ({ ...form, [field]: value }));
+    if (newUnitFieldErrors[field]) {
+      setNewUnitFieldErrors((current) => {
+        const next = { ...current };
+        delete next[field];
+        return next;
       });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Could not update property.");
-      setProperty((p) => ({ ...p, ...data.property, description: data.property.description ?? "" }));
-      setEditingProperty(false);
-      notify("Property updated.");
-      router.refresh();
-    } catch (err) {
-      fail(err instanceof Error ? err.message : "Could not update property.");
-    } finally {
-      setSavingProperty(false);
+    }
+  }
+
+  function setEditingUnitField(field: keyof UnitFormState, value: string) {
+    setUnitForm((form) => ({ ...form, [field]: value }));
+    if (unitFieldErrors[field]) {
+      setUnitFieldErrors((current) => {
+        const next = { ...current };
+        delete next[field];
+        return next;
+      });
     }
   }
 
   async function createUnit(e: React.FormEvent) {
     e.preventDefault();
+    const validationErrors = validateUnitForm(newUnitForm);
+    if (Object.keys(validationErrors).length > 0) {
+      setNewUnitFieldErrors(validationErrors);
+      focusFirstUnitError(validationErrors);
+      return;
+    }
+    setNewUnitFieldErrors({});
     setSavingNewUnit(true);
     try {
       const res = await fetch(`/api/properties/${property.id}/units`, {
@@ -490,10 +525,10 @@ export function PropertyDetailsClient({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           unitNumber: newUnitForm.unitNumber,
-          bedrooms: Number(newUnitForm.bedrooms) || 0,
-          bathrooms: Number(newUnitForm.bathrooms) || 0,
-          squareFeet: newUnitForm.squareFeet ? Number(newUnitForm.squareFeet) : null,
-          rentAmount: newUnitForm.rentAmount ? Number(newUnitForm.rentAmount) : null,
+          bedrooms: Number(newUnitForm.bedrooms),
+          bathrooms: Number(newUnitForm.bathrooms),
+          squareFeet: Number(newUnitForm.squareFeet),
+          rentAmount: Number(newUnitForm.rentAmount),
           status: newUnitForm.status,
         }),
       });
@@ -507,6 +542,8 @@ export function PropertyDetailsClient({
         squareFeet: data.unit.square_feet,
         rentAmount: data.unit.rent_amount === null ? null : Number(data.unit.rent_amount),
         status: data.unit.status,
+        hasActiveLease: false,
+        futurePaymentCount: 0,
         tenant: null,
       };
       setProperty((p) => ({
@@ -517,6 +554,7 @@ export function PropertyDetailsClient({
       }));
       setAddingUnit(false);
       setNewUnitForm(emptyUnitForm);
+      setNewUnitFieldErrors({});
       notify(`Unit ${created.unitNumber} added.`);
       router.refresh();
     } catch (err) {
@@ -529,6 +567,13 @@ export function PropertyDetailsClient({
   async function saveUnit(e: React.FormEvent) {
     e.preventDefault();
     if (!editingUnit) return;
+    const validationErrors = validateUnitForm(unitForm);
+    if (Object.keys(validationErrors).length > 0) {
+      setUnitFieldErrors(validationErrors);
+      focusFirstUnitError(validationErrors);
+      return;
+    }
+    setUnitFieldErrors({});
     setSavingUnit(true);
     try {
       const res = await fetch(`/api/properties/${property.id}/units/${editingUnit.id}`, {
@@ -536,10 +581,10 @@ export function PropertyDetailsClient({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           unitNumber: unitForm.unitNumber,
-          bedrooms: Number(unitForm.bedrooms) || 0,
-          bathrooms: Number(unitForm.bathrooms) || 0,
-          squareFeet: unitForm.squareFeet ? Number(unitForm.squareFeet) : null,
-          rentAmount: unitForm.rentAmount ? Number(unitForm.rentAmount) : null,
+          bedrooms: Number(unitForm.bedrooms),
+          bathrooms: Number(unitForm.bathrooms),
+          squareFeet: Number(unitForm.squareFeet),
+          rentAmount: Number(unitForm.rentAmount),
           status: unitForm.status,
         }),
       });
@@ -553,6 +598,8 @@ export function PropertyDetailsClient({
         squareFeet: data.unit.square_feet,
         rentAmount: data.unit.rent_amount === null ? null : Number(data.unit.rent_amount),
         status: data.unit.status,
+        hasActiveLease: editingUnit.hasActiveLease,
+        futurePaymentCount: editingUnit.futurePaymentCount,
         tenant: editingUnit?.tenant ?? null,
       };
       setProperty((p) => ({
@@ -562,6 +609,7 @@ export function PropertyDetailsClient({
           .sort((a, b) => a.unitNumber.localeCompare(b.unitNumber, undefined, { numeric: true })),
       }));
       setEditingUnit(null);
+      setUnitFieldErrors({});
       notify(`Unit ${updated.unitNumber} updated.`);
       router.refresh();
     } catch (err) {
@@ -581,23 +629,65 @@ export function PropertyDetailsClient({
     router.refresh();
   }
 
-  async function confirmDeleteUnit() {
-    if (!deletingUnit) return;
-    setDeletingUnitId(deletingUnit.id);
+  async function confirmDeactivateUnit() {
+    if (!deactivatingUnit) return;
+    setSavingUnitStatusId(deactivatingUnit.id);
     try {
-      const res = await fetch(`/api/properties/${property.id}/units/${deletingUnit.id}`, {
+      const res = await fetch(`/api/properties/${property.id}/units/${deactivatingUnit.id}`, {
         method: "DELETE",
       });
       const data = await res.json();
-      if (!res.ok) throw new Error(data.error ?? "Could not delete unit.");
-      setProperty((p) => ({ ...p, units: p.units.filter((u) => u.id !== deletingUnit.id) }));
-      notify(`Unit ${deletingUnit.unitNumber} deleted.`);
+      if (!res.ok) throw new Error(data.error ?? "Could not deactivate unit.");
+      setProperty((p) => ({
+        ...p,
+        units: p.units.map((u) =>
+          u.id === deactivatingUnit.id
+            ? { ...u, status: "inactive", futurePaymentCount: 0 }
+            : u,
+        ),
+      }));
+      const cancelledCount = Number(data.cancelledFuturePaymentCount ?? 0);
+      notify(
+        cancelledCount > 0
+          ? `Unit ${deactivatingUnit.unitNumber} deactivated. ${cancelledCount} future payment${cancelledCount === 1 ? "" : "s"} cancelled.`
+          : `Unit ${deactivatingUnit.unitNumber} deactivated.`,
+      );
       router.refresh();
     } catch (err) {
-      fail(err instanceof Error ? err.message : "Could not delete unit.");
+      fail(err instanceof Error ? err.message : "Could not deactivate unit.");
     } finally {
-      setDeletingUnitId(null);
-      setDeletingUnit(null);
+      setSavingUnitStatusId(null);
+      setDeactivatingUnit(null);
+    }
+  }
+
+  async function activateUnit(unit: UnitDetails) {
+    setSavingUnitStatusId(unit.id);
+    try {
+      const res = await fetch(`/api/properties/${property.id}/units/${unit.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          unitNumber: unit.unitNumber,
+          bedrooms: unit.bedrooms,
+          bathrooms: unit.bathrooms,
+          squareFeet: unit.squareFeet,
+          rentAmount: unit.rentAmount,
+          status: "vacant",
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Could not activate unit.");
+      setProperty((p) => ({
+        ...p,
+        units: p.units.map((u) => (u.id === unit.id ? { ...u, status: "vacant" } : u)),
+      }));
+      notify(`Unit ${unit.unitNumber} activated.`);
+      router.refresh();
+    } catch (err) {
+      fail(err instanceof Error ? err.message : "Could not activate unit.");
+    } finally {
+      setSavingUnitStatusId(null);
     }
   }
 
@@ -617,7 +707,16 @@ export function PropertyDetailsClient({
           <div className="flex-1 min-w-0">
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div>
-                <h1 className="text-2xl font-bold text-gray-900">{property.name}</h1>
+                <div className="flex flex-wrap items-center gap-2">
+                  <h1 className="text-2xl font-bold text-gray-900">{property.name}</h1>
+                  <span
+                    className={`inline-flex rounded-full px-2.5 py-1 text-xs font-medium ${
+                      property.isActive ? "bg-green-100 text-green-700" : "bg-gray-100 text-gray-600"
+                    }`}
+                  >
+                    {property.isActive ? "Active" : "Inactive"}
+                  </span>
+                </div>
                 <div className="mt-1 flex items-center gap-1.5 text-sm text-gray-600">
                   <MapPinIcon className="h-4 w-4 shrink-0 text-gray-400" />
                   <span>{property.address}, {property.city}, {property.state} {property.zip}</span>
@@ -627,15 +726,6 @@ export function PropertyDetailsClient({
                   <span>{getPropertyTypeLabel(property.type)}</span>
                 </div>
               </div>
-              {canManageProperty ? (
-                <button
-                  onClick={() => setEditingProperty((v) => !v)}
-                  className="inline-flex items-center gap-1.5 rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-                >
-                  <EditIcon className="h-4 w-4" />
-                  {editingProperty ? "Cancel" : "Edit"}
-                </button>
-              ) : null}
             </div>
 
             {/* Stats */}
@@ -661,56 +751,6 @@ export function PropertyDetailsClient({
             </div>
           </div>
         </div>
-
-        {/* Inline property edit form */}
-        {canManageProperty && editingProperty && (
-          <form onSubmit={saveProperty} className="border-t border-gray-100 bg-gray-50 p-6 space-y-4">
-            <div className="grid gap-4 sm:grid-cols-2">
-              <label className={labelClass}>
-                Property name
-                <input className={inputClass} value={propForm.name} onChange={(e) => setPropForm((f) => ({ ...f, name: e.target.value }))} required />
-              </label>
-              <label className={labelClass}>
-                Type
-                <select className={inputClass} value={propForm.type} onChange={(e) => setPropForm((f) => ({ ...f, type: normalizePropertyType(e.target.value) }))}>
-                  {PROPERTY_TYPE_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                  ))}
-                </select>
-              </label>
-              <label className={`${labelClass} sm:col-span-2`}>
-                Street address
-                <input className={inputClass} value={propForm.address} onChange={(e) => setPropForm((f) => ({ ...f, address: e.target.value }))} required />
-              </label>
-              <label className={labelClass}>
-                City
-                <input className={inputClass} value={propForm.city} onChange={(e) => setPropForm((f) => ({ ...f, city: e.target.value }))} required />
-              </label>
-              <div className="grid grid-cols-2 gap-3">
-                <label className={labelClass}>
-                  State
-                  <input className={inputClass} value={propForm.state} maxLength={2} onChange={(e) => setPropForm((f) => ({ ...f, state: e.target.value.toUpperCase() }))} required />
-                </label>
-                <label className={labelClass}>
-                  Zip
-                  <input className={inputClass} value={propForm.zip} onChange={(e) => setPropForm((f) => ({ ...f, zip: e.target.value }))} required />
-                </label>
-              </div>
-              <label className={`${labelClass} sm:col-span-2`}>
-                Description
-                <textarea className={`${inputClass} h-auto min-h-20 py-2`} value={propForm.description} onChange={(e) => setPropForm((f) => ({ ...f, description: e.target.value }))} />
-              </label>
-            </div>
-            <div className="flex gap-3">
-              <button type="submit" disabled={savingProperty} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-60 transition-colors">
-                {savingProperty ? "Saving…" : "Save changes"}
-              </button>
-              <button type="button" onClick={() => setEditingProperty(false)} className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-semibold text-gray-700 hover:bg-gray-50 transition-colors">
-                Cancel
-              </button>
-            </div>
-          </form>
-        )}
       </div>
 
       {/* Apartments section */}
@@ -740,16 +780,26 @@ export function PropertyDetailsClient({
               <option value="vacant">Vacant</option>
               <option value="occupied">Occupied</option>
               <option value="maintenance">Maintenance</option>
+              <option value="inactive">Inactive</option>
             </select>
-            {/* Add unit */}
+            {/* Add units */}
             {canManageUnits ? (
-              <button
-                onClick={() => { setAddingUnit(true); setNewUnitForm(emptyUnitForm); }}
-                className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-emerald-600 px-3 text-sm font-semibold text-white hover:bg-emerald-700 transition-colors"
-              >
-                <PlusIcon className="h-4 w-4" />
-                Add Unit
-              </button>
+              <>
+                <Link
+                  href={addWithAiHref}
+                  className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50"
+                >
+                  <SparklesIcon className="h-4 w-4" />
+                  Add with AI
+                </Link>
+                <button
+                onClick={() => { setAddingUnit(true); setNewUnitForm(emptyUnitForm); setNewUnitFieldErrors({}); }}
+                  className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-emerald-600 px-3 text-sm font-semibold text-white hover:bg-emerald-700 transition-colors"
+                >
+                  <PlusIcon className="h-4 w-4" />
+                  Add Unit
+                </button>
+              </>
             ) : null}
           </div>
         </div>
@@ -769,10 +819,11 @@ export function PropertyDetailsClient({
                 <UnitCard
                   key={unit.id}
                   unit={unit}
-                  onEdit={(u) => { setEditingUnit(u); setUnitForm(unitFormFromUnit(u)); }}
-                  onDelete={(u) => setDeletingUnit(u)}
+                  onEdit={(u) => { setEditingUnit(u); setUnitForm(unitFormFromUnit(u)); setUnitFieldErrors({}); }}
+                  onActivate={activateUnit}
+                  onDeactivate={(u) => setDeactivatingUnit(u)}
                   onOnboardRenter={(u) => setOnboardingUnitId(u.id)}
-                  deleting={deletingUnitId === unit.id}
+                  savingStatus={savingUnitStatusId === unit.id}
                   canManageUnits={canManageUnits}
                   canInviteRenters={canInviteRenters}
                   onboarded={onboardedUnitIds.has(unit.id)}
@@ -787,11 +838,16 @@ export function PropertyDetailsClient({
 
       {/* Add unit */}
       {canManageUnits && addingUnit && (
-        <Modal title="Add Unit" onClose={() => setAddingUnit(false)}>
-          <form onSubmit={createUnit} className="space-y-4">
-            <UnitFormFields form={newUnitForm} onChange={(f) => setNewUnitForm(f)} />
+        <Modal title="Add Unit" onClose={() => { setAddingUnit(false); setNewUnitFieldErrors({}); }}>
+          <form onSubmit={createUnit} noValidate className="space-y-4">
+            <UnitFormFields
+              form={newUnitForm}
+              fieldErrors={newUnitFieldErrors}
+              setFieldRef={setUnitFieldRef}
+              onChange={setNewUnitField}
+            />
             <ModalActions
-              onCancel={() => setAddingUnit(false)}
+              onCancel={() => { setAddingUnit(false); setNewUnitFieldErrors({}); }}
               submitLabel={savingNewUnit ? "Adding…" : "Add Unit"}
               disabled={savingNewUnit}
             />
@@ -801,11 +857,16 @@ export function PropertyDetailsClient({
 
       {/* Edit unit */}
       {canManageUnits && editingUnit && (
-        <Modal title={`Edit Unit ${editingUnit.unitNumber}`} onClose={() => setEditingUnit(null)}>
-          <form onSubmit={saveUnit} className="space-y-4">
-            <UnitFormFields form={unitForm} onChange={(f) => setUnitForm(f)} />
+        <Modal title={`Edit Unit ${editingUnit.unitNumber}`} onClose={() => { setEditingUnit(null); setUnitFieldErrors({}); }}>
+          <form onSubmit={saveUnit} noValidate className="space-y-4">
+            <UnitFormFields
+              form={unitForm}
+              fieldErrors={unitFieldErrors}
+              setFieldRef={setUnitFieldRef}
+              onChange={setEditingUnitField}
+            />
             <ModalActions
-              onCancel={() => setEditingUnit(null)}
+              onCancel={() => { setEditingUnit(null); setUnitFieldErrors({}); }}
               submitLabel={savingUnit ? "Saving…" : "Save Unit"}
               disabled={savingUnit}
             />
@@ -813,26 +874,42 @@ export function PropertyDetailsClient({
         </Modal>
       )}
 
-      {/* Delete unit confirmation */}
-      {canManageUnits && deletingUnit && (
-        <Modal title="Delete unit?" onClose={() => setDeletingUnit(null)}>
+      {/* Deactivate unit confirmation */}
+      {canManageUnits && deactivatingUnit && (
+        <Modal title="Deactivate unit?" onClose={() => setDeactivatingUnit(null)}>
           <p className="text-sm text-gray-600">
-            Unit <span className="font-semibold text-gray-900">{deletingUnit.unitNumber}</span> will
-            be permanently removed. This cannot be undone.
+            Unit <span className="font-semibold text-gray-900">{deactivatingUnit.unitNumber}</span> will
+            be marked inactive and kept on file.
           </p>
+          {deactivatingUnit.hasActiveLease || deactivatingUnit.tenant ? (
+            <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+              <p className="font-semibold">Active lease warning</p>
+              <p className="mt-1">
+                This unit has an active lease
+                {deactivatingUnit.tenant
+                  ? ` for ${deactivatingUnit.tenant.firstName} ${deactivatingUnit.tenant.lastName}`
+                  : ""}
+                . Deactivating it will cancel all future pending payments
+                for the active lease
+                {deactivatingUnit.futurePaymentCount > 0
+                  ? ` (${deactivatingUnit.futurePaymentCount} payment${deactivatingUnit.futurePaymentCount === 1 ? "" : "s"}).`
+                  : "."}
+              </p>
+            </div>
+          ) : null}
           <div className="mt-6 flex gap-3">
             <button
-              onClick={() => setDeletingUnit(null)}
+              onClick={() => setDeactivatingUnit(null)}
               className="flex-1 rounded-lg border border-gray-200 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 transition-colors"
             >
               Cancel
             </button>
             <button
-              onClick={confirmDeleteUnit}
-              disabled={!!deletingUnitId}
-              className="flex-1 rounded-lg bg-red-600 py-2 text-sm font-medium text-white hover:bg-red-700 disabled:opacity-60 transition-colors"
+              onClick={confirmDeactivateUnit}
+              disabled={!!savingUnitStatusId}
+              className="flex-1 rounded-lg bg-amber-600 py-2 text-sm font-medium text-white hover:bg-amber-700 disabled:opacity-60 transition-colors"
             >
-              {deletingUnitId ? "Deleting…" : "Delete"}
+              {savingUnitStatusId ? "Deactivating..." : "Deactivate"}
             </button>
           </div>
         </Modal>
@@ -895,45 +972,124 @@ type UnitFormState = {
   status: string;
 };
 
+type UnitFieldErrors = Partial<Record<keyof UnitFormState, string>>;
+
+const requiredUnitFields: Array<{ field: keyof UnitFormState; label: string }> = [
+  { field: "unitNumber", label: "Unit number" },
+  { field: "bedrooms", label: "Bedrooms" },
+  { field: "bathrooms", label: "Bathrooms" },
+  { field: "squareFeet", label: "Sq ft" },
+  { field: "rentAmount", label: "Monthly rent" },
+];
+
 function UnitFormFields({
   form,
+  fieldErrors,
+  setFieldRef,
   onChange,
 }: {
   form: UnitFormState;
-  onChange: (f: UnitFormState) => void;
+  fieldErrors: UnitFieldErrors;
+  setFieldRef: (field: keyof UnitFormState, node: HTMLInputElement | HTMLSelectElement | null) => void;
+  onChange: (field: keyof UnitFormState, value: string) => void;
 }) {
-  const set = (field: keyof UnitFormState, value: string) =>
-    onChange({ ...form, [field]: value });
+  const inputClass =
+    "h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20";
+  const invalidInputClass = "border-red-300 bg-red-50/40 focus:border-red-500 focus:ring-red-500/20";
+  const fieldClass = (field: keyof UnitFormState) =>
+    `${inputClass} ${fieldErrors[field] ? invalidInputClass : ""}`;
+  const fieldError = (field: keyof UnitFormState) =>
+    fieldErrors[field] ? (
+      <p className="mt-1 text-xs font-medium text-red-600">{fieldErrors[field]}</p>
+    ) : null;
 
   return (
     <div className="grid gap-4 sm:grid-cols-2">
       <label className="block space-y-1.5 text-sm font-medium text-gray-700">
         Unit number
-        <input className="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20" value={form.unitNumber} onChange={(e) => set("unitNumber", e.target.value)} required />
+        <input
+          ref={(node) => setFieldRef("unitNumber", node)}
+          className={fieldClass("unitNumber")}
+          value={form.unitNumber}
+          onChange={(e) => onChange("unitNumber", e.target.value)}
+          required
+          aria-invalid={!!fieldErrors.unitNumber}
+        />
+        {fieldError("unitNumber")}
       </label>
       <label className="block space-y-1.5 text-sm font-medium text-gray-700">
         Status
-        <select className="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20" value={form.status} onChange={(e) => set("status", e.target.value)}>
+        <select
+          ref={(node) => setFieldRef("status", node)}
+          className={fieldClass("status")}
+          value={form.status}
+          onChange={(e) => onChange("status", e.target.value)}
+          required
+        >
           <option value="vacant">Vacant</option>
           <option value="occupied">Occupied</option>
           <option value="maintenance">Maintenance</option>
+          <option value="inactive">Inactive</option>
         </select>
+        {fieldError("status")}
       </label>
       <label className="block space-y-1.5 text-sm font-medium text-gray-700">
         Bedrooms
-        <input type="number" min="0" className="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20" value={form.bedrooms} onChange={(e) => set("bedrooms", e.target.value)} />
+        <input
+          ref={(node) => setFieldRef("bedrooms", node)}
+          type="number"
+          min="0"
+          required
+          className={fieldClass("bedrooms")}
+          value={form.bedrooms}
+          onChange={(e) => onChange("bedrooms", e.target.value)}
+          aria-invalid={!!fieldErrors.bedrooms}
+        />
+        {fieldError("bedrooms")}
       </label>
       <label className="block space-y-1.5 text-sm font-medium text-gray-700">
         Bathrooms
-        <input type="number" min="0" step="0.5" className="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20" value={form.bathrooms} onChange={(e) => set("bathrooms", e.target.value)} />
+        <input
+          ref={(node) => setFieldRef("bathrooms", node)}
+          type="number"
+          min="0.5"
+          step="0.5"
+          required
+          className={fieldClass("bathrooms")}
+          value={form.bathrooms}
+          onChange={(e) => onChange("bathrooms", e.target.value)}
+          aria-invalid={!!fieldErrors.bathrooms}
+        />
+        {fieldError("bathrooms")}
       </label>
       <label className="block space-y-1.5 text-sm font-medium text-gray-700">
-        Sq ft <span className="text-gray-400 font-normal">(optional)</span>
-        <input type="number" min="0" className="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20" value={form.squareFeet} onChange={(e) => set("squareFeet", e.target.value)} placeholder="—" />
+        Sq ft
+        <input
+          ref={(node) => setFieldRef("squareFeet", node)}
+          type="number"
+          min="1"
+          required
+          className={fieldClass("squareFeet")}
+          value={form.squareFeet}
+          onChange={(e) => onChange("squareFeet", e.target.value)}
+          aria-invalid={!!fieldErrors.squareFeet}
+        />
+        {fieldError("squareFeet")}
       </label>
       <label className="block space-y-1.5 text-sm font-medium text-gray-700">
-        Monthly rent <span className="text-gray-400 font-normal">(optional)</span>
-        <input type="number" min="0" step="50" className="h-10 w-full rounded-lg border border-gray-300 bg-white px-3 text-sm text-gray-900 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20" value={form.rentAmount} onChange={(e) => set("rentAmount", e.target.value)} placeholder="—" />
+        Monthly rent
+        <input
+          ref={(node) => setFieldRef("rentAmount", node)}
+          type="number"
+          min="1"
+          step="50"
+          required
+          className={fieldClass("rentAmount")}
+          value={form.rentAmount}
+          onChange={(e) => onChange("rentAmount", e.target.value)}
+          aria-invalid={!!fieldErrors.rentAmount}
+        />
+        {fieldError("rentAmount")}
       </label>
     </div>
   );

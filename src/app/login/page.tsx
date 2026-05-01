@@ -6,6 +6,12 @@ import { isClerkAPIResponseError } from "@clerk/nextjs/errors";
 
 type LoginRole = "property_manager" | "renter";
 type AuthMode = "signin" | "signup" | "verify" | "forgot" | "reset" | "signin_mfa";
+type AuthFieldErrors = Partial<
+  Record<
+    "email" | "password" | "confirmPassword" | "firstName" | "organizationName" | "verificationCode",
+    string
+  >
+>;
 
 function BuildingIcon({ className = "" }: { className?: string }) {
   return (
@@ -80,7 +86,6 @@ function getErrorMessage(error: unknown, fallback: string) {
     const traceId = error.clerkTraceId
       ? ` Trace ID: ${error.clerkTraceId}.`
       : "";
-    const code = clerkError?.code ? ` (${clerkError.code})` : "";
 
     return (
       `${
@@ -88,7 +93,7 @@ function getErrorMessage(error: unknown, fallback: string) {
         clerkError?.message ??
         error.message ??
         fallback
-      }${code}.${traceId}`
+      }.${traceId}`
     ).trim();
   }
 
@@ -156,6 +161,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
   const [verificationCode, setVerificationCode] = useState("");
   const [clientError, setClientError] = useState<string | null>(null);
   const [clientNotice, setClientNotice] = useState<string | null>(null);
+  const [fieldErrors, setFieldErrors] = useState<AuthFieldErrors>({});
 
   const { signIn, errors: signInErrors, fetchStatus: signInFetchStatus } =
     useSignIn();
@@ -177,6 +183,30 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
       ] as const,
     [],
   );
+
+  function fieldClass(baseClass: string, field: keyof AuthFieldErrors) {
+    return `${baseClass} ${fieldErrors[field] ? "border-red-400 bg-red-950/45 focus:border-red-400 focus:ring-red-400/20" : ""}`;
+  }
+
+  function fieldError(field: keyof AuthFieldErrors) {
+    return fieldErrors[field] ? (
+      <p className="text-xs font-medium text-red-200">{fieldErrors[field]}</p>
+    ) : null;
+  }
+
+  function clearFieldError(field: keyof AuthFieldErrors) {
+    if (!fieldErrors[field]) return;
+    setFieldErrors((current) => {
+      const next = { ...current };
+      delete next[field];
+      return next;
+    });
+  }
+
+  function setAuthFieldErrors(errors: AuthFieldErrors) {
+    setFieldErrors(errors);
+    return Object.keys(errors).length > 0;
+  }
 
   useEffect(() => {
     const url = new URL(window.location.href);
@@ -272,6 +302,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     setMode(nextMode);
     setClientError(null);
     setClientNotice(null);
+    setFieldErrors({});
   }
 
   async function resolvePostSignInDestination() {
@@ -383,6 +414,10 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     e.preventDefault();
     setClientError(null);
     setClientNotice(null);
+    const errors: AuthFieldErrors = {};
+    if (!email.trim()) errors.email = "Email is required.";
+    if (!password) errors.password = "Password is required.";
+    if (setAuthFieldErrors(errors)) return;
     setIsSubmitting(true);
 
     const redirectToCleanSignIn = async () => {
@@ -479,9 +514,10 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
 
     const identifier = email.trim();
     if (!identifier) {
-      setClientError("Enter your email so we can send a reset code.");
+      setAuthFieldErrors({ email: "Email is required." });
       return;
     }
+    setFieldErrors({});
 
     setIsSubmitting(true);
 
@@ -532,8 +568,14 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     setClientError(null);
     setClientNotice(null);
 
+    const errors: AuthFieldErrors = {};
+    if (!verificationCode.trim()) errors.verificationCode = "Reset code is required.";
+    if (!password) errors.password = "New password is required.";
+    if (!confirmPassword) errors.confirmPassword = "Please confirm your password.";
+    if (setAuthFieldErrors(errors)) return;
+
     if (password !== confirmPassword) {
-      setClientError("Passwords do not match.");
+      setFieldErrors({ confirmPassword: "Passwords do not match." });
       return;
     }
 
@@ -580,28 +622,17 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     e.preventDefault();
     setClientError(null);
 
-    if (!firstName.trim()) {
-      setClientError("First name is required.");
-      return;
-    }
-    if (!inviteTicket && !email.trim()) {
-      setClientError("Email is required.");
-      return;
-    }
+    const errors: AuthFieldErrors = {};
+    if (!firstName.trim()) errors.firstName = "First name is required.";
+    if (!inviteTicket && !email.trim()) errors.email = "Email is required.";
     if (role === "property_manager" && !inviteTicket && !organizationName.trim()) {
-      setClientError("Organization name is required.");
-      return;
+      errors.organizationName = "Organization name is required.";
     }
-    if (!password) {
-      setClientError("Password is required.");
-      return;
-    }
-    if (!confirmPassword) {
-      setClientError("Please confirm your password.");
-      return;
-    }
+    if (!password) errors.password = "Password is required.";
+    if (!confirmPassword) errors.confirmPassword = "Please confirm your password.";
+    if (setAuthFieldErrors(errors)) return;
     if (password !== confirmPassword) {
-      setClientError("Passwords do not match.");
+      setFieldErrors({ confirmPassword: "Passwords do not match." });
       return;
     }
 
@@ -689,6 +720,11 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
   async function handleVerify(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setClientError(null);
+    if (!verificationCode.trim()) {
+      setAuthFieldErrors({ verificationCode: "Verification code is required." });
+      return;
+    }
+    setFieldErrors({});
     setIsSubmitting(true);
 
     try {
@@ -711,6 +747,11 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
   async function handleSignInMfa(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setClientError(null);
+    if (!verificationCode.trim()) {
+      setAuthFieldErrors({ verificationCode: "Verification code is required." });
+      return;
+    }
+    setFieldErrors({});
     setIsSubmitting(true);
 
     try {
@@ -890,6 +931,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                     className="space-y-2.5"
                     onSubmit={handleSignIn}
                     autoComplete="on"
+                    noValidate
                   >
                     <div className="space-y-2">
                       <label htmlFor={emailId} className="text-sm text-slate-200">
@@ -897,15 +939,20 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                       </label>
                       <input
                         id={emailId}
-                        className="h-12 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 text-base text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                        className={fieldClass("h-12 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 text-base text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20", "email")}
                         type="email"
                         name="email"
                         placeholder="you@company.com"
                         autoComplete="email"
                         required
                         value={email}
-                        onChange={(e) => setEmail(e.target.value)}
+                        onChange={(e) => {
+                          setEmail(e.target.value);
+                          clearFieldError("email");
+                        }}
+                        aria-invalid={!!fieldErrors.email}
                       />
+                      {fieldError("email")}
                     </div>
 
                     <div className="space-y-2">
@@ -918,14 +965,18 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                       <div className="relative">
                         <input
                           id={passwordId}
-                          className="h-12 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 pr-12 text-base text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                          className={fieldClass("h-12 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 pr-12 text-base text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20", "password")}
                           type={showPassword ? "text" : "password"}
                           name="password"
                           placeholder="Enter your password"
                           autoComplete="current-password"
                           required
                           value={password}
-                          onChange={(e) => setPassword(e.target.value)}
+                          onChange={(e) => {
+                            setPassword(e.target.value);
+                            clearFieldError("password");
+                          }}
+                          aria-invalid={!!fieldErrors.password}
                         />
                         <button
                           type="button"
@@ -936,6 +987,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                           <EyeIcon className="h-4 w-4" hidden={showPassword} />
                         </button>
                       </div>
+                      {fieldError("password")}
                     </div>
 
                     {displayError && (
@@ -979,6 +1031,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                     className="space-y-3"
                     onSubmit={handleForgotPassword}
                     autoComplete="on"
+                    noValidate
                   >
                     <div className="space-y-2">
                       <label htmlFor={emailId} className="text-sm text-slate-200">
@@ -986,15 +1039,20 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                       </label>
                       <input
                         id={emailId}
-                        className="h-12 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 text-base text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                        className={fieldClass("h-12 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 text-base text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20", "email")}
                         type="email"
                         name="email"
                         placeholder="you@company.com"
                         autoComplete="email"
                         required
                         value={email}
-                        onChange={(e) => setEmail(e.target.value)}
+                        onChange={(e) => {
+                          setEmail(e.target.value);
+                          clearFieldError("email");
+                        }}
+                        aria-invalid={!!fieldErrors.email}
                       />
+                      {fieldError("email")}
                     </div>
 
                     {displayError && (
@@ -1035,6 +1093,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                     className="space-y-3"
                     onSubmit={handleResetPassword}
                     autoComplete="off"
+                    noValidate
                   >
                     <div className="space-y-2">
                       <label htmlFor={codeId} className="text-sm text-slate-200">
@@ -1042,17 +1101,20 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                       </label>
                       <input
                         id={codeId}
-                        className="h-12 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 text-center text-lg font-semibold tracking-[0.25em] text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                        className={fieldClass("h-12 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 text-center text-lg font-semibold tracking-[0.25em] text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20", "verificationCode")}
                         type="text"
                         inputMode="numeric"
                         maxLength={6}
                         placeholder="------"
                         required
                         value={verificationCode}
-                        onChange={(e) =>
-                          setVerificationCode(e.target.value.replace(/\D/g, ""))
-                        }
+                        onChange={(e) => {
+                          setVerificationCode(e.target.value.replace(/\D/g, ""));
+                          clearFieldError("verificationCode");
+                        }}
+                        aria-invalid={!!fieldErrors.verificationCode}
                       />
+                      {fieldError("verificationCode")}
                     </div>
 
                     <div className="space-y-2">
@@ -1065,14 +1127,18 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                       <div className="relative">
                         <input
                           id={passwordId}
-                          className="h-12 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 pr-12 text-base text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                          className={fieldClass("h-12 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 pr-12 text-base text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20", "password")}
                           type={showPassword ? "text" : "password"}
                           name="newPassword"
                           placeholder="Create a new password"
                           autoComplete="new-password"
                           required
                           value={password}
-                          onChange={(e) => setPassword(e.target.value)}
+                          onChange={(e) => {
+                            setPassword(e.target.value);
+                            clearFieldError("password");
+                          }}
+                          aria-invalid={!!fieldErrors.password}
                         />
                         <button
                           type="button"
@@ -1083,6 +1149,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                           <EyeIcon className="h-4 w-4" hidden={showPassword} />
                         </button>
                       </div>
+                      {fieldError("password")}
                     </div>
 
                     <div className="space-y-2">
@@ -1095,14 +1162,18 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                       <div className="relative">
                         <input
                           id={confirmPasswordId}
-                          className="h-12 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 pr-12 text-base text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                          className={fieldClass("h-12 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 pr-12 text-base text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20", "confirmPassword")}
                           type={showConfirmPassword ? "text" : "password"}
                           name="confirmNewPassword"
                           placeholder="Repeat your new password"
                           autoComplete="new-password"
                           required
                           value={confirmPassword}
-                          onChange={(e) => setConfirmPassword(e.target.value)}
+                          onChange={(e) => {
+                            setConfirmPassword(e.target.value);
+                            clearFieldError("confirmPassword");
+                          }}
+                          aria-invalid={!!fieldErrors.confirmPassword}
                         />
                         <button
                           type="button"
@@ -1118,6 +1189,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                           />
                         </button>
                       </div>
+                      {fieldError("confirmPassword")}
                     </div>
 
                     {displayError && (
@@ -1170,15 +1242,20 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                         </label>
                         <input
                           id={firstNameId}
-                          className="h-9 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 text-sm text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                          className={fieldClass("h-9 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 text-sm text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20", "firstName")}
                           type="text"
                           name="firstName"
                           placeholder="Jane"
                           autoComplete="given-name"
                           required
                           value={firstName}
-                          onChange={(e) => setFirstName(e.target.value)}
+                          onChange={(e) => {
+                            setFirstName(e.target.value);
+                            clearFieldError("firstName");
+                          }}
+                          aria-invalid={!!fieldErrors.firstName}
                         />
+                        {fieldError("firstName")}
                       </div>
                       <div className="space-y-1">
                         <label
@@ -1210,15 +1287,20 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                         </label>
                         <input
                           id={organizationId}
-                          className="h-9 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 text-sm text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                          className={fieldClass("h-9 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 text-sm text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20", "organizationName")}
                           type="text"
                           name="organizationName"
                           placeholder="Avon Management"
                           autoComplete="organization"
                           required
                           value={organizationName}
-                          onChange={(e) => setOrganizationName(e.target.value)}
+                          onChange={(e) => {
+                            setOrganizationName(e.target.value);
+                            clearFieldError("organizationName");
+                          }}
+                          aria-invalid={!!fieldErrors.organizationName}
                         />
+                        {fieldError("organizationName")}
                       </div>
                     ) : null}
 
@@ -1229,15 +1311,20 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                         </label>
                         <input
                           id={emailId}
-                          className="h-9 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 text-sm text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                          className={fieldClass("h-9 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 text-sm text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20", "email")}
                           type="email"
                           name="email"
                           placeholder="you@company.com"
                           autoComplete="email"
                           required
                           value={email}
-                          onChange={(e) => setEmail(e.target.value)}
+                          onChange={(e) => {
+                            setEmail(e.target.value);
+                            clearFieldError("email");
+                          }}
+                          aria-invalid={!!fieldErrors.email}
                         />
+                        {fieldError("email")}
                       </div>
                     ) : null}
 
@@ -1251,14 +1338,18 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                       <div className="relative">
                         <input
                           id={passwordId}
-                          className="h-9 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 pr-12 text-sm text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                          className={fieldClass("h-9 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 pr-12 text-sm text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20", "password")}
                           type={showPassword ? "text" : "password"}
                           name="password"
                           placeholder="Create a secure password"
                           autoComplete="new-password"
                           required
                           value={password}
-                          onChange={(e) => setPassword(e.target.value)}
+                          onChange={(e) => {
+                            setPassword(e.target.value);
+                            clearFieldError("password");
+                          }}
+                          aria-invalid={!!fieldErrors.password}
                         />
                         <button
                           type="button"
@@ -1269,6 +1360,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                           <EyeIcon className="h-4 w-4" hidden={showPassword} />
                         </button>
                       </div>
+                      {fieldError("password")}
                     </div>
 
                     <div className="space-y-1">
@@ -1281,14 +1373,18 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                       <div className="relative">
                         <input
                           id={confirmPasswordId}
-                          className="h-9 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 pr-12 text-sm text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                          className={fieldClass("h-9 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 pr-12 text-sm text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20", "confirmPassword")}
                           type={showConfirmPassword ? "text" : "password"}
                           name="confirmPassword"
                           placeholder="Repeat your password"
                           autoComplete="new-password"
                           required
                           value={confirmPassword}
-                          onChange={(e) => setConfirmPassword(e.target.value)}
+                          onChange={(e) => {
+                            setConfirmPassword(e.target.value);
+                            clearFieldError("confirmPassword");
+                          }}
+                          aria-invalid={!!fieldErrors.confirmPassword}
                         />
                         <button
                           type="button"
@@ -1304,6 +1400,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                           />
                         </button>
                       </div>
+                      {fieldError("confirmPassword")}
                     </div>
 
                     {displayError && (
@@ -1350,6 +1447,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                     className="space-y-5"
                     onSubmit={handleVerify}
                     autoComplete="off"
+                    noValidate
                   >
                     <div className="space-y-2">
                       <label htmlFor={codeId} className="text-sm text-slate-200">
@@ -1357,17 +1455,20 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                       </label>
                       <input
                         id={codeId}
-                        className="h-12 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 text-center text-lg font-semibold tracking-[0.25em] text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                        className={fieldClass("h-12 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 text-center text-lg font-semibold tracking-[0.25em] text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20", "verificationCode")}
                         type="text"
                         inputMode="numeric"
                         maxLength={6}
                         placeholder="------"
                         required
                         value={verificationCode}
-                        onChange={(e) =>
-                          setVerificationCode(e.target.value.replace(/\D/g, ""))
-                        }
+                        onChange={(e) => {
+                          setVerificationCode(e.target.value.replace(/\D/g, ""));
+                          clearFieldError("verificationCode");
+                        }}
+                        aria-invalid={!!fieldErrors.verificationCode}
                       />
+                      {fieldError("verificationCode")}
                     </div>
 
                     {displayError && (
@@ -1402,6 +1503,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                     className="space-y-5"
                     onSubmit={handleSignInMfa}
                     autoComplete="off"
+                    noValidate
                   >
                     <div className="space-y-2">
                       <label htmlFor={codeId} className="text-sm text-slate-200">
@@ -1409,17 +1511,20 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                       </label>
                       <input
                         id={codeId}
-                        className="h-12 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 text-center text-lg font-semibold tracking-[0.25em] text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+                        className={fieldClass("h-12 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 text-center text-lg font-semibold tracking-[0.25em] text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20", "verificationCode")}
                         type="text"
                         inputMode="numeric"
                         maxLength={6}
                         placeholder="------"
                         required
                         value={verificationCode}
-                        onChange={(e) =>
-                          setVerificationCode(e.target.value.replace(/\D/g, ""))
-                        }
+                        onChange={(e) => {
+                          setVerificationCode(e.target.value.replace(/\D/g, ""));
+                          clearFieldError("verificationCode");
+                        }}
+                        aria-invalid={!!fieldErrors.verificationCode}
                       />
+                      {fieldError("verificationCode")}
                     </div>
 
                     {displayError && (

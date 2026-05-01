@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 export type UserRole = "manager" | "tenant";
 export type RequestPriority = "low" | "medium" | "high" | "emergency";
@@ -48,6 +48,8 @@ type MaintenanceClientProps = {
 
 const inputClass =
   "h-11 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/15";
+const invalidInputClass =
+  "border-red-300 bg-red-50/40 focus:border-red-500 focus:ring-red-500/15";
 
 function priorityRank(priority: RequestPriority) {
   const ranks: Record<RequestPriority, number> = {
@@ -276,6 +278,9 @@ export function MaintenanceClient({
   const [resolutionNote, setResolutionNote] = useState("");
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [requestErrors, setRequestErrors] = useState({ title: "", description: "" });
+  const titleRef = useRef<HTMLInputElement | null>(null);
+  const descriptionRef = useRef<HTMLTextAreaElement | null>(null);
 
   const propertyById = useMemo(() => {
     return new Map(initialProperties.map((property) => [property.id, property]));
@@ -402,7 +407,16 @@ export function MaintenanceClient({
 
   function submitTenantRequest(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (!title.trim() || !description.trim()) return;
+    const nextErrors = {
+      title: title.trim() ? "" : "Title is required.",
+      description: description.trim() ? "" : "Description is required.",
+    };
+    setRequestErrors(nextErrors);
+    if (nextErrors.title || nextErrors.description) {
+      if (nextErrors.title) titleRef.current?.focus();
+      else descriptionRef.current?.focus();
+      return;
+    }
 
     const nextRequest: MaintenanceRequest = {
       id: crypto.randomUUID(),
@@ -425,6 +439,7 @@ export function MaintenanceClient({
     setRequests((current) => [nextRequest, ...current]);
     setTitle("");
     setDescription("");
+    setRequestErrors({ title: "", description: "" });
   }
 
   if (role === "tenant") {
@@ -448,7 +463,7 @@ export function MaintenanceClient({
                 Submit Request
               </h2>
             </div>
-            <form className="space-y-4 p-6" onSubmit={submitTenantRequest}>
+            <form className="space-y-4 p-6" onSubmit={submitTenantRequest} noValidate>
               <div className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm">
                 <p className="text-xs uppercase tracking-[0.2em] text-slate-500">
                   Property
@@ -463,12 +478,18 @@ export function MaintenanceClient({
                   Title
                 </span>
                 <input
-                  className={inputClass}
+                  ref={titleRef}
+                  className={`${inputClass} ${requestErrors.title ? invalidInputClass : ""}`}
                   value={title}
-                  onChange={(event) => setTitle(event.target.value)}
+                  onChange={(event) => {
+                    setTitle(event.target.value);
+                    if (requestErrors.title) setRequestErrors((current) => ({ ...current, title: "" }));
+                  }}
                   placeholder="Leaky faucet"
                   required
+                  aria-invalid={!!requestErrors.title}
                 />
+                {requestErrors.title ? <p className="text-xs font-medium text-red-600">{requestErrors.title}</p> : null}
               </label>
 
               <label className="block space-y-2">
@@ -476,12 +497,18 @@ export function MaintenanceClient({
                   Description
                 </span>
                 <textarea
-                  className="min-h-28 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/15"
+                  ref={descriptionRef}
+                  className={`min-h-28 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/15 ${requestErrors.description ? invalidInputClass : ""}`}
                   value={description}
-                  onChange={(event) => setDescription(event.target.value)}
+                  onChange={(event) => {
+                    setDescription(event.target.value);
+                    if (requestErrors.description) setRequestErrors((current) => ({ ...current, description: "" }));
+                  }}
                   placeholder="Describe the issue, location, and urgency"
                   required
+                  aria-invalid={!!requestErrors.description}
                 />
+                {requestErrors.description ? <p className="text-xs font-medium text-red-600">{requestErrors.description}</p> : null}
               </label>
 
               <button

@@ -29,6 +29,9 @@ export default async function PropertyDetailsPage({
   if (!hasPropertyAccess(access, id)) {
     notFound();
   }
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
   const property = await prisma.properties.findFirst({
     where: {
       id,
@@ -55,6 +58,13 @@ export default async function PropertyDetailsPage({
                     },
                   },
                 },
+              },
+              payments: {
+                where: {
+                  status: "pending",
+                  due_date: { gte: today },
+                },
+                select: { id: true },
               },
             },
           },
@@ -93,6 +103,7 @@ export default async function PropertyDetailsPage({
     state: property.state,
     zip: property.zip,
     description: property.description ?? "",
+    isActive: property.is_active,
     units: property.units.map((unit) => {
       const primaryTenant = unit.leases?.lease_tenants?.tenants ?? null;
       return {
@@ -103,6 +114,8 @@ export default async function PropertyDetailsPage({
         squareFeet: unit.square_feet,
         rentAmount: unit.rent_amount === null ? null : Number(unit.rent_amount),
         status: unit.status,
+        hasActiveLease: Boolean(unit.leases),
+        futurePaymentCount: unit.leases?.payments.length ?? 0,
         tenant: primaryTenant
           ? {
               id: primaryTenant.id,
@@ -131,7 +144,6 @@ export default async function PropertyDetailsPage({
 
         <PropertyDetailsClient
           initialProperty={propertyDetails}
-          canManageProperty={access.permissions.manage_properties}
           canManageUnits={access.permissions.manage_units}
           canInviteRenters={access.permissions.invite_renters}
         />

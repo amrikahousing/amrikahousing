@@ -14,6 +14,16 @@ type UnitUpdateInput = {
   status?: string;
 };
 
+function isFiniteNumber(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value);
+}
+
+function todayStart() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return today;
+}
+
 async function findScopedUnit(propertyId: string, unitId: string, organizationId: string) {
   return prisma.units.findFirst({
     where: {
@@ -59,8 +69,21 @@ export async function PATCH(request: Request, context: RouteContext) {
   }
 
   const status = body.status?.trim() || "vacant";
-  if (!["vacant", "occupied", "maintenance"].includes(status)) {
-    return Response.json({ error: "Status must be vacant, occupied, or maintenance." }, { status: 400 });
+  if (!["vacant", "occupied", "maintenance", "inactive"].includes(status)) {
+    return Response.json({ error: "Status must be vacant, occupied, maintenance, or inactive." }, { status: 400 });
+  }
+
+  if (!isFiniteNumber(body.bedrooms) || body.bedrooms < 0) {
+    return Response.json({ error: "Bedrooms is required." }, { status: 400 });
+  }
+  if (!isFiniteNumber(body.bathrooms) || body.bathrooms <= 0) {
+    return Response.json({ error: "Bathrooms is required." }, { status: 400 });
+  }
+  if (!isFiniteNumber(body.squareFeet) || body.squareFeet <= 0) {
+    return Response.json({ error: "Square feet is required." }, { status: 400 });
+  }
+  if (!isFiniteNumber(body.rentAmount) || body.rentAmount <= 0) {
+    return Response.json({ error: "Monthly rent is required." }, { status: 400 });
   }
 
   const duplicateUnit = await prisma.units.findFirst({
@@ -81,10 +104,10 @@ export async function PATCH(request: Request, context: RouteContext) {
     where: { id: unitId },
     data: {
       unit_number: unitNumber,
-      bedrooms: body.bedrooms ?? 0,
-      bathrooms: body.bathrooms ?? 0,
-      square_feet: body.squareFeet ?? null,
-      rent_amount: body.rentAmount ?? null,
+      bedrooms: body.bedrooms,
+      bathrooms: body.bathrooms,
+      square_feet: body.squareFeet,
+      rent_amount: body.rentAmount,
       status,
       updated_at: new Date(),
     },
@@ -119,14 +142,56 @@ export async function DELETE(_request: Request, context: RouteContext) {
     return Response.json({ error: "Apartment not found." }, { status: 404 });
   }
 
-  const deletedAt = new Date();
-  await prisma.units.update({
-    where: { id: unitId },
-    data: {
-      deleted_at: deletedAt,
-      updated_at: deletedAt,
+  const activeLease = await prisma.leases.findFirst({
+    where: {
+      unit_id: unitId,
+      status: "active",
+      deleted_at: null,
     },
+    select: { id: true },
   });
 
-  return Response.json({ ok: true, unitNumber: unit.unit_number });
+  const now = new Date();
+  const futurePaymentsWhere = activeLease
+    ? {
+        lease_id: activeLease.id,
+        status: "pending",
+        due_date: { gte: todayStart() },
+      }
+    : null;
+
+  let cancelledFuturePaymentCount = 0;
+  if (futurePaymentsWhere) {
+    const [, cancelledPayments] = await prisma.$transaction([
+      prisma.units.update({
+        where: { id: unitId },
+        data: {
+          status: "inactive",
+          updated_at: now,
+        },
+      }),
+      prisma.payments.updateMany({
+        where: futurePaymentsWhere,
+        data: {
+          status: "cancelled",
+          updated_at: now,
+        },
+      }),
+    ]);
+    cancelledFuturePaymentCount = cancelledPayments.count;
+  } else {
+    await prisma.units.update({
+      where: { id: unitId },
+      data: {
+        status: "inactive",
+        updated_at: now,
+      },
+    });
+  }
+
+  return Response.json({
+    ok: true,
+    unitNumber: unit.unit_number,
+    cancelledFuturePaymentCount,
+  });
 }

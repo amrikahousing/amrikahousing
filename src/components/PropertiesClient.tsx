@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 
 type PropertyStatus = "available" | "occupied" | "maintenance";
 
@@ -87,6 +87,8 @@ const statusStyles: Record<PropertyStatus, string> = {
 
 const inputClass =
   "h-10 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 outline-none transition-colors placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/15";
+const invalidInputClass =
+  "border-red-300 bg-red-50/40 focus:border-red-500 focus:ring-red-500/15";
 
 function Icon({ name, className = "" }: { name: string; className?: string }) {
   const shared = {
@@ -254,6 +256,11 @@ export function PropertiesClient() {
   const [draft, setDraft] = useState<Property>(() =>
     emptyProperty(initialProperties.length + 1),
   );
+  const [fieldErrors, setFieldErrors] = useState({ address: "", city: "", state: "", zipCode: "" });
+  const addressRef = useRef<HTMLInputElement | null>(null);
+  const cityRef = useRef<HTMLInputElement | null>(null);
+  const stateRef = useRef<HTMLInputElement | null>(null);
+  const zipRef = useRef<HTMLInputElement | null>(null);
 
   const filteredProperties = useMemo(() => {
     const normalizedSearch = search.trim().toLowerCase();
@@ -280,12 +287,38 @@ export function PropertiesClient() {
 
   function updateDraft<K extends keyof Property>(key: K, value: Property[K]) {
     setDraft((current) => ({ ...current, [key]: value }));
+    if (key in fieldErrors && fieldErrors[key as keyof typeof fieldErrors]) {
+      setFieldErrors((current) => ({ ...current, [key]: "" }));
+    }
+  }
+
+  function fieldClass(field: keyof typeof fieldErrors) {
+    return `${inputClass} ${fieldErrors[field] ? invalidInputClass : ""}`;
+  }
+
+  function errorText(field: keyof typeof fieldErrors) {
+    return fieldErrors[field] ? <p className="text-xs font-medium text-red-600">{fieldErrors[field]}</p> : null;
   }
 
   function saveProperty(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    const nextErrors = {
+      address: draft.address.trim() ? "" : "Address is required.",
+      city: draft.city.trim() ? "" : "City is required.",
+      state: draft.state.trim() ? "" : "State is required.",
+      zipCode: draft.zipCode.trim() ? "" : "Zip code is required.",
+    };
+    setFieldErrors(nextErrors);
+    if (nextErrors.address || nextErrors.city || nextErrors.state || nextErrors.zipCode) {
+      if (nextErrors.address) addressRef.current?.focus();
+      else if (nextErrors.city) cityRef.current?.focus();
+      else if (nextErrors.state) stateRef.current?.focus();
+      else zipRef.current?.focus();
+      return;
+    }
     setProperties((current) => [draft, ...current]);
     setIsOpen(false);
+    setFieldErrors({ address: "", city: "", state: "", zipCode: "" });
     setDraft(emptyProperty(Math.max(...properties.map((item) => item.id)) + 2));
   }
 
@@ -383,6 +416,7 @@ export function PropertiesClient() {
               id="add-property-form"
               className="flex min-h-0 flex-1 flex-col"
               onSubmit={saveProperty}
+              noValidate
             >
               <div className="flex-1 space-y-4 overflow-y-auto px-6 py-4">
                 <label className="block space-y-2">
@@ -390,14 +424,17 @@ export function PropertiesClient() {
                     Address
                   </span>
                   <input
-                    className={inputClass}
+                    ref={addressRef}
+                    className={fieldClass("address")}
                     placeholder="123 Main St"
                     value={draft.address}
                     required
+                    aria-invalid={!!fieldErrors.address}
                     onChange={(event) =>
                       updateDraft("address", event.target.value)
                     }
                   />
+                  {errorText("address")}
                 </label>
 
                 <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
@@ -406,43 +443,52 @@ export function PropertiesClient() {
                       City
                     </span>
                     <input
-                      className={inputClass}
+                      ref={cityRef}
+                      className={fieldClass("city")}
                       placeholder="Atlanta"
                       value={draft.city}
                       required
+                      aria-invalid={!!fieldErrors.city}
                       onChange={(event) =>
                         updateDraft("city", event.target.value)
                       }
                     />
+                    {errorText("city")}
                   </label>
                   <label className="block space-y-2">
                     <span className="text-sm font-medium text-slate-700">
                       State
                     </span>
                     <input
-                      className={inputClass}
+                      ref={stateRef}
+                      className={fieldClass("state")}
                       placeholder="GA"
                       maxLength={2}
                       value={draft.state}
                       required
+                      aria-invalid={!!fieldErrors.state}
                       onChange={(event) =>
                         updateDraft("state", event.target.value.toUpperCase())
                       }
                     />
+                    {errorText("state")}
                   </label>
                   <label className="block space-y-2">
                     <span className="text-sm font-medium text-slate-700">
                       Zip Code
                     </span>
                     <input
-                      className={inputClass}
+                      ref={zipRef}
+                      className={fieldClass("zipCode")}
                       placeholder="30303"
                       value={draft.zipCode}
                       required
+                      aria-invalid={!!fieldErrors.zipCode}
                       onChange={(event) =>
                         updateDraft("zipCode", event.target.value)
                       }
                     />
+                    {errorText("zipCode")}
                   </label>
                 </div>
 
