@@ -40,11 +40,11 @@ type AccessPayload = {
 
 type AccessTab = "users" | "roles" | "permissions" | "insights";
 
-const ACCESS_TABS: Array<{ value: AccessTab; label: string; icon: string }> = [
-  { value: "users", label: "Users", icon: "Users" },
-  { value: "roles", label: "Roles", icon: "Shield" },
-  { value: "permissions", label: "Permissions", icon: "Grid" },
-  { value: "insights", label: "AI Insights", icon: "Sparkles" },
+const ACCESS_TABS: Array<{ value: AccessTab; label: string }> = [
+  { value: "users", label: "Users" },
+  { value: "roles", label: "Roles" },
+  { value: "permissions", label: "Permissions" },
+  { value: "insights", label: "AI Insights" },
 ];
 
 const PERMISSION_ROWS = [
@@ -78,16 +78,52 @@ const PERMISSION_ROWS = [
   },
 ];
 
+const ACCESS_ACTIONS = [
+  {
+    role: "admin",
+    label: "Make admin",
+    detail: "Full company access",
+  },
+  {
+    role: "property_manager",
+    label: "Make property manager",
+    detail: "Manage selected properties",
+  },
+  {
+    role: "accountant",
+    label: "Give accounting access",
+    detail: "Payments and reports",
+  },
+  {
+    role: "owner",
+    label: "Give owner access",
+    detail: "View property reports",
+  },
+  {
+    role: "tenant",
+    label: "Add tenant access",
+    detail: "Portal access for a unit",
+  },
+  {
+    role: "maintenance_staff",
+    label: "Add maintenance staff",
+    detail: "Handle assigned maintenance",
+  },
+] as const;
+
 function roleUsesPropertyScope(role: string) {
   return role !== "admin" && role !== "accountant";
 }
 
 function roleDescription(properties: PropertyOption[], role: string) {
-  if (role === "admin") return "Admins have full organization access.";
-  if (!roleUsesPropertyScope(role)) return "This role applies across the portfolio.";
-  if (properties.length === 0) return "Scoped roles can still be invited before properties exist.";
-  if (properties.length === 1) return "The only property will be assigned automatically.";
-  return "Choose one or more properties for this role.";
+  if (role === "admin") return "They can manage the whole company workspace.";
+  if (role === "accountant") return "They can work with payments, bank accounts, and reports.";
+  if (role === "owner") return "Choose which properties this owner can view.";
+  if (role === "tenant") return "Choose the property connected to this tenant access.";
+  if (role === "maintenance_staff") return "Choose where this person can handle maintenance.";
+  if (properties.length === 0) return "They can be invited now and assigned properties later.";
+  if (properties.length === 1) return "They will get access to the only property.";
+  return "Choose the properties this manager can work on.";
 }
 
 function rolePill(role: string) {
@@ -115,6 +151,55 @@ function roleInitial(role: string) {
 
 function userDisplayName(user: AccessUser) {
   return [user.firstName, user.lastName].filter(Boolean).join(" ") || user.email || "User";
+}
+
+function TabIcon({ tab }: { tab: AccessTab }) {
+  const shared = {
+    className: "h-6 w-6",
+    fill: "none",
+    stroke: "currentColor",
+    strokeWidth: "2",
+    strokeLinecap: "round" as const,
+    strokeLinejoin: "round" as const,
+    viewBox: "0 0 24 24",
+    "aria-hidden": true,
+  };
+
+  if (tab === "users") {
+    return (
+      <svg {...shared}>
+        <path d="M16 21v-2a4 4 0 0 0-4-4H7a4 4 0 0 0-4 4v2" />
+        <circle cx="9.5" cy="7" r="4" />
+        <path d="M22 21v-2a4 4 0 0 0-3-3.87" />
+        <path d="M16 3.13a4 4 0 0 1 0 7.75" />
+      </svg>
+    );
+  }
+
+  if (tab === "roles") {
+    return (
+      <svg {...shared}>
+        <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" />
+      </svg>
+    );
+  }
+
+  if (tab === "permissions") {
+    return (
+      <svg {...shared}>
+        <rect x="3" y="3" width="18" height="18" rx="2" />
+        <path d="M3 9h18M3 15h18M9 3v18M15 3v18" />
+      </svg>
+    );
+  }
+
+  return (
+    <svg {...shared}>
+      <path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3Z" />
+      <path d="M19 14l.8 2.2L22 17l-2.2.8L19 20l-.8-2.2L16 17l2.2-.8L19 14Z" />
+      <path d="M5 14l.8 2.2L8 17l-2.2.8L5 20l-.8-2.2L2 17l2.2-.8L5 14Z" />
+    </svg>
+  );
 }
 
 function userRiskScore(user: AccessUser) {
@@ -194,6 +279,40 @@ function PropertyChecklist({
             />
             <span>{property.name}</span>
           </label>
+        );
+      })}
+    </div>
+  );
+}
+
+function AccessActionPicker({
+  value,
+  onChange,
+}: {
+  value: string;
+  onChange: (role: string) => void;
+}) {
+  return (
+    <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+      {ACCESS_ACTIONS.map((action) => {
+        const selected = value === action.role;
+        return (
+          <button
+            key={action.role}
+            type="button"
+            onClick={() => onChange(action.role)}
+            className={`rounded-lg border p-3 text-left transition ${selected ? "border-slate-950 bg-slate-950 text-white shadow-sm" : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50"}`}
+          >
+            <span className="flex items-center gap-2 text-sm font-bold">
+              <span className={`flex h-7 w-7 items-center justify-center rounded-lg text-xs font-bold ${selected ? "bg-white text-slate-950" : `${roleAccent(action.role)} text-white`}`}>
+                {roleInitial(action.role)}
+              </span>
+              {action.label}
+            </span>
+            <span className={`mt-2 block text-xs ${selected ? "text-slate-200" : "text-slate-500"}`}>
+              {action.detail}
+            </span>
+          </button>
         );
       })}
     </div>
@@ -296,7 +415,7 @@ function AccessUserCard({
 
       <div className="mt-4 grid gap-4 lg:grid-cols-[220px,1fr]">
         <label className="block text-sm">
-          <span className="mb-1.5 block font-medium text-slate-700">Role</span>
+          <span className="mb-1.5 block font-medium text-slate-700">Access type</span>
           <select
             value={role}
             onChange={(event) => {
@@ -362,7 +481,13 @@ function AccessUserCard({
   );
 }
 
-export function PropertyManagersClient({ canInvite }: { canInvite: boolean }) {
+export function PropertyManagersClient({
+  canInvite,
+  organizationName,
+}: {
+  canInvite: boolean;
+  organizationName: string;
+}) {
   const [loading, setLoading] = useState(true);
   const [properties, setProperties] = useState<PropertyOption[]>([]);
   const [roles, setRoles] = useState<PresetRole[]>([]);
@@ -535,14 +660,24 @@ export function PropertyManagersClient({ canInvite }: { canInvite: boolean }) {
               key={tab.value}
               type="button"
               onClick={() => setActiveTab(tab.value)}
-              className={`flex h-12 shrink-0 items-center gap-2 rounded-lg px-5 text-sm font-bold transition ${selected ? "bg-slate-950 text-white shadow-sm" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"}`}
+              className={`flex h-14 shrink-0 items-center gap-3 rounded-lg px-6 text-lg font-bold transition ${selected ? "bg-slate-950 text-white shadow-md ring-2 ring-slate-300" : "text-slate-500 hover:bg-slate-100 hover:text-slate-900"}`}
             >
-              <span className="text-xs">{tab.icon}</span>
+              <TabIcon tab={tab.value} />
               {tab.label}
             </button>
           );
         })}
       </nav>
+
+      <div className="rounded-lg border border-slate-200 bg-white px-4 py-3 shadow-sm">
+        <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
+          Active organization
+        </p>
+        <p className="mt-1 text-base font-bold text-slate-950">{organizationName}</p>
+        <p className="mt-1 text-sm text-slate-500">
+          New access grants and role changes apply only to this organization.
+        </p>
+      </div>
 
       {activeTab === "users" ? null : (
       <section className="grid gap-3 md:grid-cols-4">
@@ -610,13 +745,16 @@ export function PropertyManagersClient({ canInvite }: { canInvite: boolean }) {
               className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
             >
               <div>
-                <h2 className="text-lg font-semibold text-slate-900">Invite user</h2>
+                <h2 className="text-lg font-semibold text-slate-900">Grant access</h2>
                 <p className="mt-1 text-sm text-slate-500">
                   {roleDescription(properties, form.permissionRole)}
                 </p>
+                <p className="mt-3 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800">
+                  Access will be granted in {organizationName}.
+                </p>
               </div>
 
-              <div className="mt-5 grid gap-4 lg:grid-cols-[minmax(0,1fr),220px]">
+              <div className="mt-5 grid gap-4">
                 <label className="block text-sm">
                   <span className="mb-1.5 block font-medium text-slate-700">Email</span>
                   <input
@@ -635,30 +773,25 @@ export function PropertyManagersClient({ canInvite }: { canInvite: boolean }) {
                   {fieldErrors.email ? <p className="mt-1 text-xs font-medium text-red-600">{fieldErrors.email}</p> : null}
                 </label>
 
-                <label className="block text-sm">
-                  <span className="mb-1.5 block font-medium text-slate-700">Role</span>
-                  <select
+                <div>
+                  <p className="mb-2 text-sm font-medium text-slate-700">What should they be able to do?</p>
+                  <AccessActionPicker
                     value={form.permissionRole}
-                    onChange={(event) => {
-                      const role = event.target.value;
+                    onChange={(role) => {
                       setForm((current) => ({
                         ...current,
                         permissionRole: role,
                         propertyIds: roleUsesPropertyScope(role) ? current.propertyIds : [],
                       }));
                     }}
-                    className="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
-                  >
-                    {roles.map((role) => (
-                      <option key={role.value} value={role.value}>
-                        {role.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                  />
+                </div>
               </div>
 
               <div className="mt-4">
+                <p className="mb-2 text-sm font-medium text-slate-700">
+                  {roleUsesPropertyScope(form.permissionRole) ? "Give access to property" : "Property access"}
+                </p>
                 <PropertyChecklist
                   properties={properties}
                   selected={form.propertyIds}

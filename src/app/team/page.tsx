@@ -2,6 +2,7 @@ import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { AppShell } from "@/components/AppShell";
 import { PropertyManagersClient } from "@/components/PropertyManagersClient";
+import { prisma } from "@/lib/db";
 import { getOrgPermissionContext, requirePermission } from "@/lib/org-authorization";
 
 export default async function TeamPage() {
@@ -15,6 +16,10 @@ export default async function TeamPage() {
   if (permissionError) redirect("/dashboard");
 
   const canInvite = true;
+  const organization = await prisma.organizations.findUnique({
+    where: { id: access.orgDbId },
+    select: { name: true },
+  });
 
   return (
     <AppShell>
@@ -32,7 +37,10 @@ export default async function TeamPage() {
           </p>
         </header>
 
-        <PropertyManagersClient canInvite={canInvite} />
+        <PropertyManagersClient
+          canInvite={canInvite}
+          organizationName={organization?.name ?? "this organization"}
+        />
       </div>
     </AppShell>
   );
