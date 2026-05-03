@@ -37,6 +37,8 @@ function hasCurrentAccountingDelegates(client: ReturnType<typeof createPrismaCli
     typeof client.accounting_vendor_category_rules?.findMany === "function" &&
     prismaModelHasField(client, "plaid_items", "sync_enabled") &&
     prismaModelHasField(client, "organization_payment_destinations", "plaid_funding_account_id") &&
+    prismaModelHasField(client, "organization_payment_destinations", "stripe_external_account_id") &&
+    prismaModelHasField(client, "organizations", "stripe_account_id") &&
     prismaModelHasField(client, "plaid_items", "last_synced_at") &&
     prismaModelHasField(client, "plaid_institutions", "logo_url") &&
     prismaModelHasField(client, "plaid_transactions", "connection_id") &&

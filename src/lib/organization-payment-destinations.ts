@@ -2,8 +2,10 @@ import { getAccountingData } from "@/lib/accounting";
 import { prisma } from "@/lib/db";
 import {
   createPlaidOriginatorFundingAccount,
+  createPlaidStripeBankAccountToken,
   decryptPlaidAccessToken,
 } from "@/lib/plaid";
+import { getStripeServer } from "@/lib/stripe";
 
 export type OrganizationRentCollectionAccount = {
   id: string;
@@ -14,6 +16,7 @@ export type OrganizationRentCollectionAccount = {
   bankInstitutionName: string;
   isActive: boolean;
   plaidFundingAccountId: string | null;
+  stripeExternalAccountId: string | null;
   selectedConnectedAccountId: string;
   createdAt: Date;
   updatedAt: Date;
@@ -67,6 +70,7 @@ function formatDestination(destination: {
   bank_institution_name: string;
   is_active: boolean;
   plaid_funding_account_id: string | null;
+  stripe_external_account_id: string | null;
   created_at: Date;
   updated_at: Date;
 }) {
@@ -79,6 +83,7 @@ function formatDestination(destination: {
     bankInstitutionName: destination.bank_institution_name,
     isActive: destination.is_active,
     plaidFundingAccountId: destination.plaid_funding_account_id,
+    stripeExternalAccountId: destination.stripe_external_account_id,
     selectedConnectedAccountId: toConnectedAccountId(destination),
     createdAt: destination.created_at,
     updatedAt: destination.updated_at,
@@ -97,6 +102,7 @@ export async function getOrganizationRentCollectionAccount(organizationId: strin
       bank_institution_name: true,
       is_active: true,
       plaid_funding_account_id: true,
+      stripe_external_account_id: true,
       created_at: true,
       updated_at: true,
     },
@@ -128,12 +134,127 @@ export async function requireOrganizationRentCollectionFundingAccount(organizati
   return destination;
 }
 
+export async function requireOrganizationStripeRentDestination(organizationId: string) {
+  const destination = await requireOrganizationRentCollectionAccount(organizationId);
+  const organization = await prisma.organizations.findUnique({
+    where: { id: organizationId },
+    select: {
+      stripe_account_id: true,
+      stripe_payouts_enabled: true,
+    },
+  });
+
+  if (!organization?.stripe_account_id || !destination.stripeExternalAccountId) {
+    throw new Error(
+      "This organization has not finished connecting its rent receiving account for online payments.",
+    );
+  }
+
+  return {
+    ...destination,
+    stripeAccountId: organization.stripe_account_id,
+    stripePayoutsEnabled: organization.stripe_payouts_enabled,
+  };
+}
+
+async function ensureOrganizationStripeConnectedAccount(args: {
+  organizationId: string;
+  name: string;
+  email?: string | null;
+}) {
+  const organization = await prisma.organizations.findUnique({
+    where: { id: args.organizationId },
+    select: {
+      stripe_account_id: true,
+      stripe_charges_enabled: true,
+      stripe_payouts_enabled: true,
+    },
+  });
+
+  if (organization?.stripe_account_id) {
+    return {
+      stripeAccountId: organization.stripe_account_id,
+      chargesEnabled: organization.stripe_charges_enabled,
+      payoutsEnabled: organization.stripe_payouts_enabled,
+    };
+  }
+
+  const stripe = getStripeServer();
+  const account = await stripe.accounts.create({
+    type: "custom",
+    country: "US",
+    email: args.email ?? undefined,
+    business_profile: {
+      name: args.name,
+      product_description: "Rental housing rent collection",
+    },
+    capabilities: {
+      card_payments: { requested: true },
+      transfers: { requested: true },
+    },
+    metadata: {
+      organizationId: args.organizationId,
+    },
+  });
+
+  await prisma.organizations.update({
+    where: { id: args.organizationId },
+    data: {
+      stripe_account_id: account.id,
+      stripe_charges_enabled: account.charges_enabled ?? false,
+      stripe_payouts_enabled: account.payouts_enabled ?? false,
+      updated_at: new Date(),
+    },
+  });
+
+  return {
+    stripeAccountId: account.id,
+    chargesEnabled: account.charges_enabled ?? false,
+    payoutsEnabled: account.payouts_enabled ?? false,
+  };
+}
+
+async function attachPlaidAccountToStripeConnectedAccount(args: {
+  stripeAccountId: string;
+  accessToken: string;
+  accountId: string;
+}) {
+  const token = await createPlaidStripeBankAccountToken({
+    accessToken: args.accessToken,
+    accountId: args.accountId,
+  });
+
+  if ("error" in token) {
+    throw new Error(token.error);
+  }
+
+  const stripe = getStripeServer();
+  const externalAccount = await stripe.accounts.createExternalAccount(
+    args.stripeAccountId,
+    {
+      external_account: token.bankAccountToken,
+      default_for_currency: true,
+    },
+  );
+
+  return externalAccount.id;
+}
+
 export async function setOrganizationRentCollectionAccount(args: {
   organizationId: string;
   clerkOrgId: string;
   connectedAccountId: string;
 }) {
   const existingDestination = await getOrganizationRentCollectionAccount(args.organizationId);
+  const organization = await prisma.organizations.findUnique({
+    where: { id: args.organizationId },
+    select: {
+      id: true,
+      name: true,
+      email: true,
+      stripe_account_id: true,
+    },
+  });
   const accountingData = await getAccountingData(args.clerkOrgId);
   const connectedAccount = accountingData.accountSummaries.find(
     (account) => account.id === args.connectedAccountId,
@@ -217,6 +338,38 @@ export async function setOrganizationRentCollectionAccount(args: {
     );
   }
 
+  if (!organization) {
+    throw new Error("Organization record not found.");
+  }
+
+  const connectedStripeAccount = await ensureOrganizationStripeConnectedAccount({
+    organizationId: args.organizationId,
+    name: organization.name,
+    email: organization.email,
+  });
+
+  let resolvedStripeExternalAccountId =
+    existingDestination?.selectedConnectedAccountId === connectedAccount.id
+      ? existingDestination.stripeExternalAccountId
+      : null;
+
+  if (!resolvedStripeExternalAccountId) {
+    const plaidItem = await prisma.plaid_items.findUnique({
+      where: { id: connectedAccount.plaidItemId },
+      select: { access_token: true },
+    });
+
+    if (!plaidItem?.access_token || !connectedAccount.plaidAccountId) {
+      throw new Error("Reconnect this bank account before using it for online rent payouts.");
+    }
+
+    resolvedStripeExternalAccountId = await attachPlaidAccountToStripeConnectedAccount({
+      stripeAccountId: connectedStripeAccount.stripeAccountId,
+      accessToken: decryptPlaidAccessToken(plaidItem.access_token),
+      accountId: connectedAccount.plaidAccountId,
+    });
+  }
+
   const destination = await prisma.organization_payment_destinations.upsert({
     where: { organization_id: args.organizationId },
     update: {
@@ -226,6 +379,7 @@ export async function setOrganizationRentCollectionAccount(args: {
       bank_institution_name: connectedAccount.provider,
       is_active: true,
       plaid_funding_account_id: resolvedFundingAccountId,
+      stripe_external_account_id: resolvedStripeExternalAccountId,
       updated_at: new Date(),
     },
     create: {
@@ -236,6 +390,7 @@ export async function setOrganizationRentCollectionAccount(args: {
       bank_institution_name: connectedAccount.provider,
       is_active: true,
       plaid_funding_account_id: resolvedFundingAccountId,
+      stripe_external_account_id: resolvedStripeExternalAccountId,
     },
     select: {
       id: true,
@@ -246,6 +401,7 @@ export async function setOrganizationRentCollectionAccount(args: {
       bank_institution_name: true,
       is_active: true,
       plaid_funding_account_id: true,
+      stripe_external_account_id: true,
       created_at: true,
       updated_at: true,
     },

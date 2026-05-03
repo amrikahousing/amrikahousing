@@ -153,12 +153,12 @@ function SidebarContent({
 
       <div className="mt-auto border-t border-slate-800 p-6">
         <Link
-          href="/profile"
+          href="/renter/profile"
           className={cx(
             "mb-4 flex items-center gap-3 rounded-lg px-2 py-1.5 hover:bg-slate-800",
-            pathname === "/profile" && "bg-slate-800",
+            pathname === "/renter/profile" && "bg-slate-800",
           )}
-          onPointerEnter={() => onNavHover("/profile")}
+          onPointerEnter={() => onNavHover("/renter/profile")}
           onClick={onNavClick}
         >
           <div className="flex h-10 w-10 items-center justify-center overflow-hidden rounded-full bg-slate-700">
@@ -207,7 +207,7 @@ export function RenterShell({ children, user }: RenterShellProps) {
   const handleSignOut = () => signOut(() => router.push("/login"));
   const prefetchHrefs = useMemo(() => [
     ...navigation.map((item) => item.href),
-    "/profile",
+    "/renter/profile",
     ...(user.hasBothPortals ? ["/dashboard"] : []),
   ], [user.hasBothPortals]);
 

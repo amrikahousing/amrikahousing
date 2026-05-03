@@ -1,4 +1,5 @@
 import type Stripe from "stripe";
+import type { Prisma } from "../generated/prisma/client";
 import type { TenantContext } from "@/lib/renter-auth";
 import { prisma } from "@/lib/db";
 import {
@@ -12,7 +13,10 @@ import {
   syncPlaidTransferEvents,
   type PlaidLinkSuccessMetadata,
 } from "@/lib/plaid";
-import { requireOrganizationRentCollectionFundingAccount } from "@/lib/organization-payment-destinations";
+import {
+  requireOrganizationRentCollectionFundingAccount,
+  requireOrganizationStripeRentDestination,
+} from "@/lib/organization-payment-destinations";
 import { getStripeServer } from "@/lib/stripe";
 
 const IN_FLIGHT_PLAID_ATTEMPT_STATUSES = [
@@ -20,6 +24,57 @@ const IN_FLIGHT_PLAID_ATTEMPT_STATUSES = [
   "pending",
   "posted",
 ] as const;
+
+function roundCurrency(value: number) {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function calculateProcessingFee(
+  amount: number | { toFixed(scale?: number): string },
+  paymentType: "card" | "us_bank_account" | string,
+) {
+  const numericAmount = Number(
+    typeof amount === "number" ? amount.toFixed(2) : amount.toFixed(2),
+  );
+
+  if (paymentType === "us_bank_account") {
+    return roundCurrency(Math.min(numericAmount * 0.008, 5));
+  }
+
+  return roundCurrency(numericAmount * 0.029 + 0.3);
+}
+
+function todayDateOnly() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  return today;
+}
+
+async function applyDefaultPaymentMethodToFuturePayments(
+  tx: Prisma.TransactionClient,
+  tenantId: string,
+  method: {
+    payment_provider?: string;
+    payment_type: string;
+    brand: string | null;
+    bank_name: string | null;
+    last4: string;
+  } | null,
+) {
+  await tx.payments.updateMany({
+    where: {
+      tenant_id: tenantId,
+      status: "pending",
+      due_date: {
+        gte: todayDateOnly(),
+      },
+    },
+    data: {
+      payment_method: method ? formatStoredPaymentMethodLabel(method) : null,
+      updated_at: new Date(),
+    },
+  });
+}
 
 export type SavedPaymentMethodSummary = {
   id: string;
@@ -81,6 +136,11 @@ export async function getTenantPaymentProfile(ctx: TenantContext) {
     },
   });
 
+  const effectiveDefaultPaymentMethodId =
+    tenant?.renter_payment_settings?.default_payment_method_id ??
+    tenant?.renter_payment_methods.find((method) => method.is_default)?.id ??
+    null;
+
   return tenant
     ? {
         ...tenant,
@@ -97,7 +157,7 @@ export async function getTenantPaymentProfile(ctx: TenantContext) {
           expMonth: method.exp_month,
           expYear: method.exp_year,
           billingName: method.billing_name,
-          isDefault: method.is_default,
+          isDefault: method.id === effectiveDefaultPaymentMethodId,
           isActive: method.is_active,
         })),
       }
@@ -293,6 +353,10 @@ export async function syncPaymentMethodFromStripe(
         default_payment_method_id: savedMethod.id,
       },
     });
+
+    if (shouldBeDefault) {
+      await applyDefaultPaymentMethodToFuturePayments(tx, ctx.tenantId, savedMethod);
+    }
   });
 }
 
@@ -308,6 +372,9 @@ export async function setDefaultPaymentMethodForTenant(ctx: TenantContext, metho
       id: true,
       payment_provider: true,
       payment_type: true,
+      brand: true,
+      bank_name: true,
+      last4: true,
     },
   });
 
@@ -315,9 +382,9 @@ export async function setDefaultPaymentMethodForTenant(ctx: TenantContext, metho
     throw new Error("Payment method not found.");
   }
 
-  if (method.payment_provider !== "stripe" && method.payment_provider !== "plaid") {
+  if (method.payment_provider !== "stripe") {
     throw new Error(
-      "This payment method cannot be used for rent collection.",
+      "Only Stripe payment methods can be used for renter payments.",
     );
   }
 
@@ -357,6 +424,8 @@ export async function setDefaultPaymentMethodForTenant(ctx: TenantContext, metho
         autopay_enabled: false,
       },
     });
+
+    await applyDefaultPaymentMethodToFuturePayments(tx, ctx.tenantId, method);
   });
 }
 
@@ -394,7 +463,14 @@ export async function removePaymentMethodForTenant(ctx: TenantContext, methodId:
       id: { not: method.id },
     },
     orderBy: { created_at: "desc" },
-    select: { id: true, payment_provider: true, payment_type: true },
+    select: {
+      id: true,
+      payment_provider: true,
+      payment_type: true,
+      brand: true,
+      bank_name: true,
+      last4: true,
+    },
   });
 
   await prisma.$transaction(async (tx) => {
@@ -426,8 +502,7 @@ export async function removePaymentMethodForTenant(ctx: TenantContext, methodId:
         default_payment_method_id: fallbackMethod?.id ?? null,
         autopay_enabled:
           fallbackMethod &&
-          fallbackMethod.payment_provider === "stripe" &&
-          fallbackMethod.payment_type === "card"
+          fallbackMethod.payment_provider === "stripe"
             ? undefined
             : false,
         updated_at: new Date(),
@@ -440,6 +515,8 @@ export async function removePaymentMethodForTenant(ctx: TenantContext, methodId:
         autopay_enabled: false,
       },
     });
+
+    await applyDefaultPaymentMethodToFuturePayments(tx, ctx.tenantId, fallbackMethod);
   });
 }
 
@@ -451,12 +528,25 @@ export async function setAutopayEnabledForTenant(ctx: TenantContext, enabled: bo
       is_active: true,
       deleted_at: null,
     },
-    select: { id: true },
+    select: {
+      id: true,
+      payment_provider: true,
+      stripe_customer_id: true,
+      stripe_payment_method_id: true,
+    },
   });
 
-  if (enabled) {
+  if (
+    enabled &&
+    (
+      !defaultMethod ||
+      defaultMethod.payment_provider !== "stripe" ||
+      !defaultMethod.stripe_customer_id ||
+      !defaultMethod.stripe_payment_method_id
+    )
+  ) {
     throw new Error(
-      "Auto-pay is unavailable right now. Rent payments must be submitted as ACH so funds land in the organization's receiving bank account.",
+      "Add a saved online payment method and make it the default before enabling auto-pay.",
     );
   }
 
@@ -560,9 +650,13 @@ export async function createPaymentAttempt(
     };
   }
 
+  const processingFee = calculateProcessingFee(payment.amount, method.payment_type);
+  const chargeAmount = roundCurrency(Number(payment.amount.toFixed(2)) + processingFee);
+  const rentDestination = await requireOrganizationStripeRentDestination(ctx.organizationId);
+
   const paymentIntent = await stripe.paymentIntents.create(
     {
-      amount: toStripeAmountInMinorUnits(payment.amount),
+      amount: toStripeAmountInMinorUnits(chargeAmount),
       currency: payment.currency.toLowerCase(),
       customer: method.stripe_customer_id,
       payment_method: method.stripe_payment_method_id,
@@ -570,11 +664,20 @@ export async function createPaymentAttempt(
       confirm: true,
       off_session: false,
       description: `${payment.type} payment`,
+      transfer_data: {
+        destination: rentDestination.stripeAccountId,
+        amount: toStripeAmountInMinorUnits(payment.amount),
+      },
       metadata: {
         paymentId: payment.id,
         tenantId: ctx.tenantId,
         organizationId: ctx.organizationId,
         renterPaymentMethodId: method.id,
+        stripeDestinationAccountId: rentDestination.stripeAccountId,
+        stripeExternalAccountId: rentDestination.stripeExternalAccountId,
+        rentAmount: payment.amount.toFixed(2),
+        processingFee: processingFee.toFixed(2),
+        totalAmount: chargeAmount.toFixed(2),
       },
     },
     { idempotencyKey },
@@ -590,7 +693,7 @@ export async function createPaymentAttempt(
       payment_provider: "stripe",
       stripe_payment_intent_id: paymentIntent.id,
       idempotency_key: idempotencyKey,
-      amount: payment.amount,
+      amount: chargeAmount,
       currency: payment.currency,
       status: paymentIntent.status,
       failure_code: paymentIntent.last_payment_error?.code ?? null,
@@ -685,6 +788,9 @@ export async function savePlaidBankAccountForTenant(
     },
     select: {
       id: true,
+      payment_provider: true,
+      payment_type: true,
+      brand: true,
       bank_name: true,
       last4: true,
       plaid_transfer_eligible: true,
@@ -706,6 +812,20 @@ export async function savePlaidBankAccountForTenant(
         user_id: ctx.sharedUserId,
         organization_id: ctx.organizationId,
         default_payment_method_id: paymentMethod.id,
+      },
+    });
+
+    await prisma.payments.updateMany({
+      where: {
+        tenant_id: ctx.tenantId,
+        status: "pending",
+        due_date: {
+          gte: todayDateOnly(),
+        },
+      },
+      data: {
+        payment_method: formatStoredPaymentMethodLabel(paymentMethod),
+        updated_at: new Date(),
       },
     });
   }
@@ -1060,6 +1180,18 @@ export async function syncSetupIntent(setupIntentOrId: string | Stripe.SetupInte
 
 export async function handleStripeWebhookEvent(event: Stripe.Event) {
   switch (event.type) {
+    case "account.updated": {
+      const account = event.data.object;
+      await prisma.organizations.updateMany({
+        where: { stripe_account_id: account.id },
+        data: {
+          stripe_charges_enabled: account.charges_enabled ?? false,
+          stripe_payouts_enabled: account.payouts_enabled ?? false,
+          updated_at: new Date(),
+        },
+      });
+      break;
+    }
     case "setup_intent.succeeded": {
       const setupIntent = event.data.object;
       if (

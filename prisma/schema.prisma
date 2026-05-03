@@ -86,6 +86,9 @@ model organizations {
   city                              String?
   state                             String?
   zip                               String?
+  stripe_account_id                 String?                             @unique
+  stripe_charges_enabled            Boolean                             @default(false)
+  stripe_payouts_enabled            Boolean                             @default(false)
   created_at                        DateTime                            @default(now()) @db.Timestamptz(6)
   updated_at                        DateTime                            @default(now()) @db.Timestamptz(6)
   maintenance_requests              maintenance_requests[]
@@ -210,6 +213,7 @@ model organization_payment_destinations {
   bank_institution_name     String
   is_active                 Boolean       @default(true)
   plaid_funding_account_id  String?
+  stripe_external_account_id String?
   created_at                DateTime      @default(now()) @db.Timestamptz(6)
   updated_at                DateTime      @default(now()) @db.Timestamptz(6)
   organizations             organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
