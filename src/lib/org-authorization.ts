@@ -1,8 +1,11 @@
 import { isAccessError, requireOrgAccess, type OrgContext } from "./auth";
 import { prisma } from "./db";
 import {
+  buildRolePermissionState,
   buildPermissionState,
+  normalizeOrganizationRole,
   normalizePermissionRole,
+  type OrganizationRole,
   type ManagerPermissionRole,
   type OrgPermissionName,
   type OrgPermissionState,
@@ -10,23 +13,10 @@ import {
 
 type AccessError = { error: string; status: number };
 
-const LEGACY_PROPERTY_MANAGER_PERMISSIONS: OrgPermissionState = {
-  manage_team: false,
-  manage_org_settings: false,
-  manage_bank_accounts: true,
-  manage_accounting: true,
-  create_properties: true,
-  view_properties: true,
-  view_all_properties: true,
-  manage_properties: true,
-  manage_units: true,
-  invite_renters: true,
-  manage_maintenance: true,
-};
-
 export type OrgPermissionContext = OrgContext & {
   dbRole: string | null;
   permissionRole: ManagerPermissionRole;
+  roles: OrganizationRole[];
   permissions: OrgPermissionState;
   assignedPropertyIds: string[];
   propertyCount: number;
@@ -45,6 +35,14 @@ export async function getOrgPermissionContext(): Promise<OrgPermissionContext | 
             role: true,
             is_active: true,
             property_assignments: { select: { property_id: true } },
+            memberships: {
+              where: { organization_id: access.orgDbId },
+              select: {
+                role: true,
+                property_id: true,
+                is_active: true,
+              },
+            },
           },
         })
       : null,
@@ -56,9 +54,18 @@ export async function getOrgPermissionContext(): Promise<OrgPermissionContext | 
     }),
   ]);
 
-  const permissionRole = normalizePermissionRole(user?.role);
-  const hasLegacyPropertyManagerAccess = user?.role === "property_manager";
-  const isActive = access.isOrgAdmin ? true : user?.is_active !== false;
+  const activeMemberships = (user?.memberships ?? []).filter(
+    (membership) => membership.is_active,
+  );
+  const organizationRoles = activeMemberships.map((membership) =>
+    normalizeOrganizationRole(membership.role),
+  );
+  const permissionRole = normalizePermissionRole(organizationRoles[0] ?? user?.role);
+  const isActive = access.isOrgAdmin
+    ? true
+    : activeMemberships.length
+      ? true
+      : user?.is_active !== false;
   if (!isActive) {
     return {
       error: "Your organization access is inactive. Ask an admin to reactivate it.",
@@ -70,14 +77,19 @@ export async function getOrgPermissionContext(): Promise<OrgPermissionContext | 
     ...access,
     dbRole: user?.role ?? null,
     permissionRole,
-    permissions: access.isOrgAdmin
-      ? buildPermissionState(permissionRole, true)
-      : hasLegacyPropertyManagerAccess
-        ? LEGACY_PROPERTY_MANAGER_PERMISSIONS
-        : buildPermissionState(permissionRole, false),
+    roles: access.isOrgAdmin
+      ? ["admin"]
+      : Array.from(new Set(organizationRoles.length ? organizationRoles : [permissionRole])),
+    permissions: activeMemberships.length
+      ? buildRolePermissionState(organizationRoles, access.isOrgAdmin)
+      : buildPermissionState(permissionRole, access.isOrgAdmin),
     assignedPropertyIds: access.isOrgAdmin
       ? []
-      : (user?.property_assignments ?? []).map((assignment) => assignment.property_id),
+      : activeMemberships.length
+        ? activeMemberships
+            .map((membership) => membership.property_id)
+            .filter((propertyId): propertyId is string => Boolean(propertyId))
+        : (user?.property_assignments ?? []).map((assignment) => assignment.property_id),
     propertyCount,
     isActive,
   };
@@ -96,7 +108,6 @@ export function hasPropertyAccess(
 ): boolean {
   return (
     ctx.isOrgAdmin ||
-    ctx.dbRole === "property_manager" ||
     ctx.permissions.view_all_properties ||
     ctx.assignedPropertyIds.includes(propertyId)
   );
@@ -135,7 +146,7 @@ export function requirePropertyPermission(
 }
 
 export function propertyScopeWhere(ctx: OrgPermissionContext) {
-  if (ctx.isOrgAdmin || ctx.dbRole === "property_manager" || ctx.permissions.view_all_properties) {
+  if (ctx.isOrgAdmin || ctx.permissions.view_all_properties) {
     return { organization_id: ctx.orgDbId, deleted_at: null as null };
   }
 

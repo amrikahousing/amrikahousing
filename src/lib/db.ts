@@ -60,10 +60,15 @@ function hasCurrentRenterPaymentDelegates(client: ReturnType<typeof createPrisma
   );
 }
 
+function hasCurrentAccessDelegates(client: ReturnType<typeof createPrismaClient>) {
+  return typeof client.memberships?.findMany === "function";
+}
+
 export const prisma =
   globalForPrisma.prisma &&
   hasCurrentAccountingDelegates(globalForPrisma.prisma) &&
-  hasCurrentRenterPaymentDelegates(globalForPrisma.prisma)
+  hasCurrentRenterPaymentDelegates(globalForPrisma.prisma) &&
+  hasCurrentAccessDelegates(globalForPrisma.prisma)
     ? globalForPrisma.prisma
     : createPrismaClient();
 

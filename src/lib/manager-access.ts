@@ -1,15 +1,20 @@
 import {
+  normalizeOrganizationRole,
   normalizePermissionRole,
   normalizePropertyIds,
   type ManagerPermissionRole,
+  type OrganizationRole,
 } from "./permissions";
 
 export function normalizeManagerAccessInput(input: {
   permissionRole: unknown;
   propertyIds: unknown;
 }) {
+  const role = normalizeOrganizationRole(input.permissionRole);
+
   return {
-    permissionRole: normalizePermissionRole(input.permissionRole),
+    role,
+    permissionRole: normalizePermissionRole(role),
     propertyIds: normalizePropertyIds(input.propertyIds),
   };
 }
@@ -17,7 +22,13 @@ export function normalizeManagerAccessInput(input: {
 export function resolveManagerPropertyIds(args: {
   requestedPropertyIds: string[];
   availablePropertyIds: string[];
+  permissionRole?: ManagerPermissionRole;
+  role?: OrganizationRole;
 }) {
+  if (args.role === "admin" || args.role === "accountant" || args.permissionRole === "accountant") {
+    return { propertyIds: [] as string[], error: null };
+  }
+
   const validPropertyIds = args.requestedPropertyIds.filter((propertyId) =>
     args.availablePropertyIds.includes(propertyId),
   );
@@ -36,20 +47,26 @@ export function resolveManagerPropertyIds(args: {
   if (validPropertyIds.length === 0) {
     return {
       propertyIds: [] as string[],
-      error: "Choose at least one property for this manager.",
+      error: "Choose at least one property for this role.",
     };
   }
 
   return { propertyIds: validPropertyIds, error: null };
 }
 
-export function roleLabel(role: ManagerPermissionRole) {
+export function roleLabel(role: OrganizationRole) {
   switch (role) {
-    case "leasing_manager":
-      return "Leasing Manager";
-    case "accounting_manager":
-      return "Accounting Manager";
+    case "admin":
+      return "Admin";
+    case "accountant":
+      return "Accountant";
+    case "owner":
+      return "Owner";
+    case "tenant":
+      return "Tenant";
+    case "maintenance_staff":
+      return "Maintenance Staff";
     default:
-      return "Operations Manager";
+      return "Property Manager";
   }
 }

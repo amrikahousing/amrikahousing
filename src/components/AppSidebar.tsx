@@ -48,6 +48,8 @@ const implementedRoutes = new Set([
 const roleLabels: Record<string, string> = {
   admin: "Admin",
   property_manager: "Property Manager",
+  accountant: "Accountant",
+  maintenance_staff: "Maintenance Staff",
   manager: "Property Manager",
   renter: "Tenant",
   tenant: "Tenant",
@@ -136,7 +138,7 @@ export function AppSidebar({ user }: AppSidebarProps) {
       ? [{ name: "Maintenance", href: "/maintenance", icon: "wrench" as const }]
       : []),
     ...(user.permissions.manage_team
-      ? [{ name: "Team", href: "/team", icon: "users" as const }]
+      ? [{ name: "Access", href: "/team", icon: "users" as const }]
       : []),
   ], [
     user.permissions.create_properties,

@@ -2,12 +2,23 @@ import { clerkClient } from "@clerk/nextjs/server";
 import { prisma } from "./db";
 
 export const MANAGER_PERMISSION_ROLES = [
-  "operations_manager",
-  "leasing_manager",
-  "accounting_manager",
+  "property_manager",
+  "accountant",
+  "maintenance_staff",
 ] as const;
 
 export type ManagerPermissionRole = (typeof MANAGER_PERMISSION_ROLES)[number];
+
+export const ORGANIZATION_ROLES = [
+  "admin",
+  "property_manager",
+  "accountant",
+  "owner",
+  "tenant",
+  "maintenance_staff",
+] as const;
+
+export type OrganizationRole = (typeof ORGANIZATION_ROLES)[number];
 
 export type OrgPermissionName =
   | "manage_team"
@@ -25,15 +36,16 @@ export type OrgPermissionName =
 export type OrgPermissionState = Record<OrgPermissionName, boolean>;
 
 export type OrganizationAccessMetadata = {
+  role: OrganizationRole;
   permissionRole: ManagerPermissionRole;
   propertyIds: string[];
   active: boolean;
 };
 
-const DEFAULT_MANAGER_ROLE: ManagerPermissionRole = "operations_manager";
+const DEFAULT_MANAGER_ROLE: ManagerPermissionRole = "property_manager";
 
 const ROLE_PERMISSIONS: Record<ManagerPermissionRole, OrgPermissionState> = {
-  operations_manager: {
+  property_manager: {
     manage_team: false,
     manage_org_settings: false,
     manage_bank_accounts: false,
@@ -46,20 +58,7 @@ const ROLE_PERMISSIONS: Record<ManagerPermissionRole, OrgPermissionState> = {
     invite_renters: true,
     manage_maintenance: true,
   },
-  leasing_manager: {
-    manage_team: false,
-    manage_org_settings: false,
-    manage_bank_accounts: false,
-    manage_accounting: false,
-    create_properties: true,
-    view_properties: true,
-    view_all_properties: false,
-    manage_properties: true,
-    manage_units: true,
-    invite_renters: true,
-    manage_maintenance: true,
-  },
-  accounting_manager: {
+  accountant: {
     manage_team: false,
     manage_org_settings: false,
     manage_bank_accounts: false,
@@ -72,6 +71,33 @@ const ROLE_PERMISSIONS: Record<ManagerPermissionRole, OrgPermissionState> = {
     invite_renters: false,
     manage_maintenance: false,
   },
+  maintenance_staff: {
+    manage_team: false,
+    manage_org_settings: false,
+    manage_bank_accounts: false,
+    manage_accounting: false,
+    create_properties: false,
+    view_properties: true,
+    view_all_properties: false,
+    manage_properties: false,
+    manage_units: false,
+    invite_renters: false,
+    manage_maintenance: true,
+  },
+};
+
+const NO_DASHBOARD_PERMISSIONS: OrgPermissionState = {
+  manage_team: false,
+  manage_org_settings: false,
+  manage_bank_accounts: false,
+  manage_accounting: false,
+  create_properties: false,
+  view_properties: false,
+  view_all_properties: false,
+  manage_properties: false,
+  manage_units: false,
+  invite_renters: false,
+  manage_maintenance: false,
 };
 
 const ADMIN_PERMISSIONS: OrgPermissionState = {
@@ -89,11 +115,50 @@ const ADMIN_PERMISSIONS: OrgPermissionState = {
 };
 
 export function normalizePermissionRole(value: unknown): ManagerPermissionRole {
-  if (value === "leasing_manager" || value === "accounting_manager") {
+  if (value === "accountant" || value === "maintenance_staff") {
     return value;
   }
 
+  if (value === "accounting_manager") {
+    return "accountant";
+  }
+
+  if (
+    value === "property_manager" ||
+    value === "operations_manager" ||
+    value === "leasing_manager"
+  ) {
+    return "property_manager";
+  }
+
   return DEFAULT_MANAGER_ROLE;
+}
+
+export function normalizeOrganizationRole(value: unknown): OrganizationRole {
+  if (
+    value === "admin" ||
+    value === "property_manager" ||
+    value === "accountant" ||
+    value === "owner" ||
+    value === "tenant" ||
+    value === "maintenance_staff"
+  ) {
+    return value;
+  }
+
+  if (value === "accounting_manager") {
+    return "accountant";
+  }
+
+  if (value === "renter") {
+    return "tenant";
+  }
+
+  if (value === "operations_manager" || value === "leasing_manager") {
+    return "property_manager";
+  }
+
+  return "property_manager";
 }
 
 export function buildPermissionState(
@@ -101,6 +166,31 @@ export function buildPermissionState(
   isOrgAdmin: boolean,
 ): OrgPermissionState {
   return isOrgAdmin ? ADMIN_PERMISSIONS : ROLE_PERMISSIONS[role];
+}
+
+export function buildRolePermissionState(
+  roles: OrganizationRole[],
+  isOrgAdmin: boolean,
+): OrgPermissionState {
+  if (isOrgAdmin || roles.includes("admin")) return ADMIN_PERMISSIONS;
+
+  return roles.reduce<OrgPermissionState>(
+    (merged, role) => {
+      const rolePermissions =
+        role === "property_manager" || role === "accountant" || role === "maintenance_staff"
+          ? ROLE_PERMISSIONS[role]
+          : role === "owner"
+            ? { ...NO_DASHBOARD_PERMISSIONS, view_properties: true }
+            : NO_DASHBOARD_PERMISSIONS;
+
+      for (const permission of Object.keys(merged) as OrgPermissionName[]) {
+        merged[permission] = merged[permission] || rolePermissions[permission];
+      }
+
+      return merged;
+    },
+    { ...NO_DASHBOARD_PERMISSIONS },
+  );
 }
 
 export function normalizePropertyIds(value: unknown): string[] {
@@ -119,11 +209,86 @@ export function normalizePropertyIds(value: unknown): string[] {
 export function readOrganizationAccessMetadata(
   metadata: Record<string, unknown> | null | undefined,
 ): OrganizationAccessMetadata {
+  const metadataRole = metadata?.permissionRole ?? metadata?.role;
+  const role = normalizeOrganizationRole(metadataRole);
+
   return {
-    permissionRole: normalizePermissionRole(metadata?.permissionRole),
+    role,
+    permissionRole: normalizePermissionRole(metadataRole),
     propertyIds: normalizePropertyIds(metadata?.propertyIds),
     active: metadata?.active !== false,
   };
+}
+
+export function membershipRowsForAccess({
+  userDbId,
+  orgDbId,
+  role,
+  propertyIds,
+  active,
+}: {
+  userDbId: string;
+  orgDbId: string;
+  role: OrganizationRole;
+  propertyIds: string[];
+  active: boolean;
+}) {
+  const scopedPropertyIds =
+    propertyIds.length ||
+    role === "property_manager" ||
+    role === "maintenance_staff" ||
+    role === "owner" ||
+    role === "tenant"
+      ? propertyIds
+      : [null];
+
+  return scopedPropertyIds.length
+    ? scopedPropertyIds.map((propertyId) => ({
+        user_id: userDbId,
+        organization_id: orgDbId,
+        role,
+        property_id: propertyId,
+        is_active: active,
+      }))
+    : [
+        {
+          user_id: userDbId,
+          organization_id: orgDbId,
+          role,
+          property_id: null,
+          is_active: active,
+        },
+      ];
+}
+
+export async function replaceMembershipAccess({
+  userDbId,
+  orgDbId,
+  role,
+  propertyIds,
+  active,
+}: {
+  userDbId: string;
+  orgDbId: string;
+  role: OrganizationRole;
+  propertyIds: string[];
+  active: boolean;
+}) {
+  await prisma.$transaction([
+    prisma.memberships.deleteMany({
+      where: { user_id: userDbId, organization_id: orgDbId },
+    }),
+    prisma.memberships.createMany({
+      data: membershipRowsForAccess({
+        userDbId,
+        orgDbId,
+        role,
+        propertyIds,
+        active,
+      }),
+      skipDuplicates: true,
+    }),
+  ]);
 }
 
 export async function syncClerkMembershipAccess({
@@ -140,13 +305,31 @@ export async function syncClerkMembershipAccess({
   isOrgAdmin: boolean;
 }) {
   if (isOrgAdmin) {
-    await prisma.users.update({
-      where: { id: userDbId },
-      data: {
-        is_active: true,
-        updated_at: new Date(),
-      },
-    });
+    await prisma.$transaction([
+      prisma.users.update({
+        where: { id: userDbId },
+        data: {
+          role: "admin",
+          is_active: true,
+          updated_at: new Date(),
+        },
+      }),
+      prisma.memberships.deleteMany({
+        where: { user_id: userDbId, organization_id: orgDbId },
+      }),
+      prisma.memberships.createMany({
+        data: [
+          {
+            user_id: userDbId,
+            organization_id: orgDbId,
+            role: "admin",
+            property_id: null,
+            is_active: true,
+          },
+        ],
+        skipDuplicates: true,
+      }),
+    ]);
     return;
   }
 
@@ -175,6 +358,7 @@ export async function syncClerkMembershipAccess({
       })
     : [];
 
+  const propertyIds = validProperties.map((property) => property.id);
   await prisma.users.update({
     where: { id: userDbId },
     data: {
@@ -183,10 +367,14 @@ export async function syncClerkMembershipAccess({
       updated_at: new Date(),
     },
   });
-  await replacePropertyAssignments(
+  await replacePropertyAssignments(userDbId, propertyIds);
+  await replaceMembershipAccess({
     userDbId,
-    validProperties.map((property) => property.id),
-  );
+    orgDbId,
+    role: metadata.permissionRole,
+    propertyIds,
+    active: metadata.active,
+  });
 }
 
 export async function replacePropertyAssignments(

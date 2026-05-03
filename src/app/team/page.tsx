@@ -21,14 +21,14 @@ export default async function TeamPage() {
       <div className="space-y-6">
         <header>
           <p className="text-sm font-semibold uppercase tracking-wide text-emerald-700">
-            Team
+            Admin
           </p>
           <h1 className="mt-1 text-3xl font-bold tracking-tight text-slate-900">
-            Property managers
+            Access Management
           </h1>
           <p className="mt-2 max-w-2xl text-slate-500">
-            Add property managers to your organization so they can access the
-            portfolio workspace.
+            Invite users, update roles, scope access by property, and revoke
+            permissions from one place.
           </p>
         </header>
 

@@ -1,7 +1,9 @@
 import { auth, currentUser } from "@clerk/nextjs/server";
+import { getOrgPermissionContext } from "@/lib/org-authorization";
+import { normalizePermissionRole } from "@/lib/permissions";
 
 export async function GET() {
-  const { userId } = await auth();
+  const { userId, orgId, orgRole } = await auth();
 
   if (!userId) {
     return Response.json({ signedIn: false }, { status: 401 });
@@ -9,23 +11,21 @@ export async function GET() {
 
   const user = await currentUser();
   const privateMetadata = (user?.privateMetadata ?? {}) as Record<string, unknown>;
-
-  const unsafeMetadata = (user?.unsafeMetadata ?? {}) as Record<string, unknown>;
-  const publicMetadata = (user?.publicMetadata ?? {}) as Record<string, unknown>;
-  const role =
-    (typeof unsafeMetadata.role === "string" && unsafeMetadata.role.trim()
-      ? unsafeMetadata.role
-      : null) ??
-    (typeof publicMetadata.role === "string" && publicMetadata.role.trim()
-      ? publicMetadata.role
-      : null) ??
-    "property_manager";
+  const orgAccess = orgId ? await getOrgPermissionContext() : null;
+  const resolvedRole =
+    orgRole === "org:admin"
+      ? "admin"
+      : orgAccess && !("error" in orgAccess)
+        ? orgAccess.permissionRole
+        : normalizePermissionRole(null);
 
   return Response.json({
     signedIn: true,
     userId,
+    orgId: orgId ?? null,
+    orgRole: orgRole ?? null,
     email: user?.primaryEmailAddress?.emailAddress ?? null,
-    role,
+    role: resolvedRole,
     internalAdmin: privateMetadata.internalAdmin === true,
     internalAdminType: typeof privateMetadata.internalAdmin,
   });
