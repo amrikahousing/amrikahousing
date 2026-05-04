@@ -425,7 +425,7 @@ export default async function RenterPage() {
               <div className="p-4 pt-0">
                 <Link
                   href="/renter/maintenance"
-                  className="flex items-center justify-center gap-2 rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-sky-700"
+                  className="flex items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-slate-800"
                 >
                   <Icon name="wrench" className="h-4 w-4" />
                   Submit a request

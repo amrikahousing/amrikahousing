@@ -529,7 +529,7 @@ export function AiImportWizard({ existingProperty }: { existingProperty?: Existi
             type="button"
             onClick={addUnitsMode ? handleConfirmUnits : handleConfirmProperties}
             disabled={isConfirming || (addUnitsMode ? parsedUnits.length === 0 : properties.length === 0)}
-            className="rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+            className="rounded-lg bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
           >
             {isConfirming
               ? "Saving…"
@@ -640,7 +640,7 @@ export function AiImportWizard({ existingProperty }: { existingProperty?: Existi
           type="button"
           onClick={handleParse}
           disabled={isParsing || !prompt.trim()}
-          className="inline-flex items-center gap-2 rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+          className="inline-flex items-center gap-2 rounded-lg bg-slate-950 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:opacity-50"
         >
           <SparklesIcon />
           {isParsing ? "Parsing…" : "Parse with AI"}

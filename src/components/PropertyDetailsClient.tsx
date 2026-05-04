@@ -794,7 +794,7 @@ export function PropertyDetailsClient({
                 </Link>
                 <button
                 onClick={() => { setAddingUnit(true); setNewUnitForm(emptyUnitForm); setNewUnitFieldErrors({}); }}
-                  className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-emerald-600 px-3 text-sm font-semibold text-white hover:bg-emerald-700 transition-colors"
+                  className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-slate-950 px-3 text-sm font-semibold text-white hover:bg-slate-800 transition-colors"
                 >
                   <PlusIcon className="h-4 w-4" />
                   Add Unit

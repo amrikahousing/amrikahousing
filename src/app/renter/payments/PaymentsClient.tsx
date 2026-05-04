@@ -240,7 +240,7 @@ function StripeSetupForm({
         <button
           type="submit"
           disabled={!stripe || !elements || isSubmitting}
-          className="rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+          className="rounded-lg bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
         >
           {isSubmitting
             ? "Saving..."
@@ -830,7 +830,7 @@ export function PaymentsClient({
                 !selectedMethod ||
                 !canUseStripe
               }
-              className="mt-5 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+              className="mt-5 rounded-lg bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
             >
               {isPaying
                 ? "Processing..."
@@ -865,7 +865,7 @@ export function PaymentsClient({
                   type="button"
                   onClick={() => void handleAddStripeMethod("card")}
                   disabled={isPreparingStripeSetup !== null || !canUseStripe}
-                  className="rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-sky-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                  className="rounded-lg bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
                 >
                   {isPreparingStripeSetup === "card" ? "Preparing..." : "Add Card"}
                 </button>
@@ -873,7 +873,7 @@ export function PaymentsClient({
                   type="button"
                   onClick={() => void handleAddStripeMethod("us_bank_account")}
                   disabled={isPreparingStripeSetup !== null || !canUseStripe}
-                  className="rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+                  className="rounded-lg bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
                 >
                   {isPreparingStripeSetup === "us_bank_account" ? "Preparing..." : "Add ACH"}
                 </button>
