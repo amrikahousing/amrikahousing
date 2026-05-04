@@ -31,6 +31,10 @@ type PendingInvite = {
   propertyIds: string[];
 };
 
+type UnifiedEntry =
+  | { kind: "user"; user: AccessUser }
+  | { kind: "invite"; invite: PendingInvite };
+
 type AccessPayload = {
   properties: PropertyOption[];
   presetRoles: PresetRole[];
@@ -81,32 +85,27 @@ const PERMISSION_ROWS = [
 const ACCESS_ACTIONS = [
   {
     role: "admin",
-    label: "Make admin",
+    label: "Admin",
     detail: "Full company access",
   },
   {
     role: "property_manager",
-    label: "Make property manager",
+    label: "Property Manager",
     detail: "Manage selected properties",
   },
   {
     role: "accountant",
-    label: "Give accounting access",
+    label: "Accountant",
     detail: "Payments and reports",
   },
   {
     role: "owner",
-    label: "Give owner access",
+    label: "Owner",
     detail: "View property reports",
   },
   {
-    role: "tenant",
-    label: "Add tenant access",
-    detail: "Portal access for a unit",
-  },
-  {
     role: "maintenance_staff",
-    label: "Add maintenance staff",
+    label: "Maintenance Staff",
     detail: "Handle assigned maintenance",
   },
 ] as const;
@@ -198,6 +197,23 @@ function TabIcon({ tab }: { tab: AccessTab }) {
       <path d="M12 3l1.5 4.5L18 9l-4.5 1.5L12 15l-1.5-4.5L6 9l4.5-1.5L12 3Z" />
       <path d="M19 14l.8 2.2L22 17l-2.2.8L19 20l-.8-2.2L16 17l2.2-.8L19 14Z" />
       <path d="M5 14l.8 2.2L8 17l-2.2.8L5 20l-.8-2.2L2 17l2.2-.8L5 14Z" />
+    </svg>
+  );
+}
+
+function XIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="1.8"
+    >
+      <path d="M18 6 6 18M6 6l12 12" />
     </svg>
   );
 }
@@ -503,25 +519,43 @@ export function PropertyManagersClient({
   const [notice, setNotice] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState({ email: "", propertyIds: "" });
   const [query, setQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive">("all");
+  const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive" | "pending">("all");
   const [activeTab, setActiveTab] = useState<AccessTab>("users");
-  const [showInviteForm, setShowInviteForm] = useState(false);
+  const [showAddUserModal, setShowAddUserModal] = useState(false);
   const emailRef = useRef<HTMLInputElement | null>(null);
 
-  const filteredUsers = useMemo(() => {
+  const filteredEntries = useMemo((): UnifiedEntry[] => {
     const normalizedQuery = query.trim().toLowerCase();
-    return users.filter((user) => {
-      const matchesStatus =
-        statusFilter === "all" ||
-        (statusFilter === "active" ? user.active : !user.active);
-      const matchesQuery =
-        !normalizedQuery ||
-        userDisplayName(user).toLowerCase().includes(normalizedQuery) ||
-        (user.email ?? "").toLowerCase().includes(normalizedQuery) ||
-        user.role.toLowerCase().includes(normalizedQuery);
-      return matchesStatus && matchesQuery;
-    });
-  }, [query, statusFilter, users]);
+
+    const userEntries: UnifiedEntry[] = users
+      .filter((user) => {
+        if (statusFilter === "pending") return false;
+        const matchesStatus =
+          statusFilter === "all" ||
+          (statusFilter === "active" ? user.active : !user.active);
+        const matchesQuery =
+          !normalizedQuery ||
+          userDisplayName(user).toLowerCase().includes(normalizedQuery) ||
+          (user.email ?? "").toLowerCase().includes(normalizedQuery) ||
+          user.role.toLowerCase().includes(normalizedQuery);
+        return matchesStatus && matchesQuery;
+      })
+      .map((user) => ({ kind: "user" as const, user }));
+
+    const inviteEntries: UnifiedEntry[] =
+      statusFilter === "all" || statusFilter === "pending"
+        ? pendingInvites
+            .filter(
+              (invite) =>
+                !normalizedQuery ||
+                invite.email.toLowerCase().includes(normalizedQuery) ||
+                invite.role.toLowerCase().includes(normalizedQuery),
+            )
+            .map((invite) => ({ kind: "invite" as const, invite }))
+        : [];
+
+    return [...userEntries, ...inviteEntries];
+  }, [query, statusFilter, users, pendingInvites]);
 
   const activeCount = users.filter((user) => user.active).length;
   const adminCount = users.filter((user) => user.role === "admin").length;
@@ -558,6 +592,15 @@ export function PropertyManagersClient({
     if (!canInvite) return;
     void loadData();
   }, [canInvite]);
+
+  useEffect(() => {
+    if (!showAddUserModal) return;
+    function onKeyDown(event: KeyboardEvent) {
+      if (event.key === "Escape") setShowAddUserModal(false);
+    }
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [showAddUserModal]);
 
   async function inviteUser(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -604,7 +647,7 @@ export function PropertyManagersClient({
         permissionRole: roles[0]?.value ?? "property_manager",
         propertyIds: [],
       });
-      setShowInviteForm(false);
+      setShowAddUserModal(false);
       await loadData();
     } catch {
       setError("Network error. Please try again.");
@@ -737,153 +780,134 @@ export function PropertyManagersClient({
             </section>
           ) : null}
 
-          {showInviteForm ? (
-          <section className="grid gap-6 xl:grid-cols-[minmax(0,1fr),380px]">
-            <form
-              onSubmit={inviteUser}
-              noValidate
-              className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
-            >
-              <div>
-                <h2 className="text-lg font-semibold text-slate-900">Grant access</h2>
-                <p className="mt-1 text-sm text-slate-500">
-                  {roleDescription(properties, form.permissionRole)}
-                </p>
-                <p className="mt-3 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800">
+          {showAddUserModal ? (
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+              <div className="absolute inset-0 bg-slate-950/40" onClick={() => setShowAddUserModal(false)} />
+              <div className="relative max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl border border-slate-200 bg-white p-6 shadow-2xl">
+                <div className="mb-5 flex items-start justify-between gap-4">
+                  <div>
+                    <h2 className="text-xl font-bold text-slate-900">Add user</h2>
+                    <p className="mt-1 text-sm text-slate-500">
+                      {roleDescription(properties, form.permissionRole)}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setShowAddUserModal(false)}
+                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900"
+                    aria-label="Close add user"
+                  >
+                    <XIcon className="h-5 w-5" />
+                  </button>
+                </div>
+
+                <p className="mb-5 rounded-lg border border-blue-100 bg-blue-50 px-3 py-2 text-sm font-semibold text-blue-800">
                   Access will be granted in {organizationName}.
                 </p>
-              </div>
 
-              <div className="mt-5 grid gap-4">
-                <label className="block text-sm">
-                  <span className="mb-1.5 block font-medium text-slate-700">Email</span>
-                  <input
-                    type="email"
-                    value={form.email}
-                    ref={emailRef}
-                    onChange={(event) => {
-                      setForm((current) => ({ ...current, email: event.target.value }));
-                      if (fieldErrors.email) setFieldErrors((current) => ({ ...current, email: "" }));
-                    }}
-                    placeholder="name@company.com"
-                    className={`h-10 w-full rounded-lg border border-slate-300 px-3 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 ${fieldErrors.email ? "border-red-300 bg-red-50/40 focus:border-red-500 focus:ring-red-500/20" : ""}`}
-                    required
-                    aria-invalid={!!fieldErrors.email}
-                  />
-                  {fieldErrors.email ? <p className="mt-1 text-xs font-medium text-red-600">{fieldErrors.email}</p> : null}
-                </label>
+                <form onSubmit={inviteUser} noValidate className="space-y-4">
+                  <label className="block text-sm">
+                    <span className="mb-1.5 block font-medium text-slate-700">Email</span>
+                    <input
+                      type="email"
+                      value={form.email}
+                      ref={emailRef}
+                      onChange={(event) => {
+                        setForm((current) => ({ ...current, email: event.target.value }));
+                        if (fieldErrors.email) setFieldErrors((current) => ({ ...current, email: "" }));
+                      }}
+                      placeholder="name@company.com"
+                      className={`h-10 w-full rounded-lg border border-slate-300 px-3 text-sm text-slate-900 outline-none transition focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20 ${fieldErrors.email ? "border-red-300 bg-red-50/40 focus:border-red-500 focus:ring-red-500/20" : ""}`}
+                      required
+                      aria-invalid={!!fieldErrors.email}
+                    />
+                    {fieldErrors.email ? <p className="mt-1 text-xs font-medium text-red-600">{fieldErrors.email}</p> : null}
+                  </label>
 
-                <div>
-                  <p className="mb-2 text-sm font-medium text-slate-700">What should they be able to do?</p>
-                  <AccessActionPicker
-                    value={form.permissionRole}
-                    onChange={(role) => {
-                      setForm((current) => ({
-                        ...current,
-                        permissionRole: role,
-                        propertyIds: roleUsesPropertyScope(role) ? current.propertyIds : [],
-                      }));
-                    }}
-                  />
-                </div>
-              </div>
+                  <div>
+                    <p className="mb-2 text-sm font-medium text-slate-700">What should they be able to do?</p>
+                    <AccessActionPicker
+                      value={form.permissionRole}
+                      onChange={(role) => {
+                        setForm((current) => ({
+                          ...current,
+                          permissionRole: role,
+                          propertyIds: roleUsesPropertyScope(role) ? current.propertyIds : [],
+                        }));
+                      }}
+                    />
+                  </div>
 
-              <div className="mt-4">
-                <p className="mb-2 text-sm font-medium text-slate-700">
-                  {roleUsesPropertyScope(form.permissionRole) ? "Give access to property" : "Property access"}
-                </p>
-                <PropertyChecklist
-                  properties={properties}
-                  selected={form.propertyIds}
-                  onChange={(propertyIds) => {
-                    setForm((current) => ({ ...current, propertyIds }));
-                    if (fieldErrors.propertyIds) setFieldErrors((current) => ({ ...current, propertyIds: "" }));
-                  }}
-                  required={roleUsesPropertyScope(form.permissionRole) && properties.length > 1}
-                  disabled={!roleUsesPropertyScope(form.permissionRole)}
-                />
-                {fieldErrors.propertyIds ? <p className="mt-2 text-xs font-medium text-red-600">{fieldErrors.propertyIds}</p> : null}
-              </div>
-
-              {error ? (
-                <p className="mt-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-                  {error}
-                </p>
-              ) : null}
-
-              {notice ? (
-                <p className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 px-3 py-2 text-sm text-emerald-700">
-                  {notice}
-                </p>
-              ) : null}
-
-              <div className="mt-5">
-                <button
-                  type="submit"
-                  disabled={submitting}
-                  className="inline-flex h-10 items-center justify-center rounded-lg bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {submitting ? "Saving..." : "Add User"}
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowInviteForm(false)}
-                  className="ml-2 inline-flex h-10 items-center justify-center rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
-                >
-                  Cancel
-                </button>
-              </div>
-            </form>
-
-            <section className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm">
-              <h2 className="text-lg font-semibold text-slate-900">Pending invites</h2>
-              {pendingInvites.length === 0 ? (
-                <p className="mt-4 rounded-lg border border-slate-200 bg-slate-50 px-4 py-6 text-center text-sm text-slate-500">
-                  No pending invites.
-                </p>
-              ) : (
-                <div className="mt-4 space-y-3">
-                  {pendingInvites.map((invite) => (
-                    <div
-                      key={invite.id}
-                      className="rounded-lg border border-slate-200 bg-slate-50 px-4 py-3"
-                    >
-                      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                        <div>
-                          <p className="text-sm font-medium text-slate-900">{invite.email}</p>
-                          <p className="mt-1 text-xs text-slate-500">Awaiting acceptance</p>
-                        </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${rolePill(invite.role)}`}>
-                            {roles.find((role) => role.value === invite.role)?.label ?? invite.role}
-                          </span>
-                          <button
-                            type="button"
-                            onClick={() => void revokeInvite(invite)}
-                            className="inline-flex h-8 items-center justify-center rounded-lg border border-red-200 px-3 text-xs font-semibold text-red-700 transition hover:bg-red-50"
-                          >
-                            Revoke
-                          </button>
-                        </div>
-                      </div>
+                  {roleUsesPropertyScope(form.permissionRole) ? (
+                    <div>
+                      <p className="mb-2 text-sm font-medium text-slate-700">Give access to property</p>
+                      <PropertyChecklist
+                        properties={properties}
+                        selected={form.propertyIds}
+                        onChange={(propertyIds) => {
+                          setForm((current) => ({ ...current, propertyIds }));
+                          if (fieldErrors.propertyIds) setFieldErrors((current) => ({ ...current, propertyIds: "" }));
+                        }}
+                        required={properties.length > 1}
+                        disabled={false}
+                      />
+                      {fieldErrors.propertyIds ? <p className="mt-2 text-xs font-medium text-red-600">{fieldErrors.propertyIds}</p> : null}
                     </div>
-                  ))}
-                </div>
-              )}
-            </section>
-          </section>
+                  ) : null}
+
+                  {error ? (
+                    <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                      {error}
+                    </p>
+                  ) : null}
+
+                  <div className="flex gap-2 pt-1">
+                    <button
+                      type="submit"
+                      disabled={submitting}
+                      className="inline-flex h-10 items-center justify-center rounded-lg bg-slate-950 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      {submitting ? "Saving..." : "Add User"}
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setShowAddUserModal(false)}
+                      className="inline-flex h-10 items-center justify-center rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </form>
+              </div>
+            </div>
+          ) : null}
+
+          {notice ? (
+            <p className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-700">
+              {notice}
+            </p>
           ) : null}
 
           <section className="space-y-4">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-              <div className="relative">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                 <input
                   type="search"
                   value={query}
                   onChange={(event) => setQuery(event.target.value)}
                   placeholder="Search users by name, email, or role..."
-                  className="h-12 w-full rounded-lg border border-slate-300 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-200 lg:w-[460px]"
+                  className="h-12 w-full rounded-lg border border-slate-300 bg-white px-4 text-sm text-slate-900 outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-200 sm:w-[340px] lg:w-[420px]"
                 />
+                <select
+                  value={statusFilter}
+                  onChange={(event) => setStatusFilter(event.target.value as typeof statusFilter)}
+                  className="h-12 rounded-lg border border-slate-300 bg-white px-3 text-sm text-slate-900 outline-none transition focus:border-slate-500 focus:ring-2 focus:ring-slate-200"
+                >
+                  <option value="all">All statuses</option>
+                  <option value="active">Active</option>
+                  <option value="inactive">Inactive</option>
+                  <option value="pending">Pending</option>
+                </select>
               </div>
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                 <button
@@ -896,8 +920,8 @@ export function PropertyManagersClient({
                 <button
                   type="button"
                   onClick={() => {
-                    setShowInviteForm(true);
-                    window.setTimeout(() => emailRef.current?.focus(), 0);
+                    setShowAddUserModal(true);
+                    window.setTimeout(() => emailRef.current?.focus(), 50);
                   }}
                   className="h-11 rounded-lg bg-slate-950 px-4 text-sm font-bold text-white transition hover:bg-slate-800"
                 >
@@ -920,7 +944,51 @@ export function PropertyManagersClient({
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredUsers.map((user) => {
+                  {filteredEntries.map((entry) => {
+                    if (entry.kind === "invite") {
+                      const { invite } = entry;
+                      return (
+                        <tr key={`invite-${invite.id}`} className="border-b border-slate-100 last:border-b-0">
+                          <td className="px-6 py-4"><input type="checkbox" className="h-4 w-4 rounded border-slate-300" disabled aria-label="Pending invite" /></td>
+                          <td className="px-6 py-4">
+                            <div className="flex min-w-0 items-center gap-3">
+                              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-300 text-sm font-bold text-slate-600">
+                                {invite.email.charAt(0).toUpperCase()}
+                              </div>
+                              <div className="min-w-0">
+                                <p className="truncate text-sm font-semibold text-slate-950">{invite.email}</p>
+                                <p className="mt-1 truncate text-sm text-slate-400">Invited</p>
+                              </div>
+                            </div>
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className={`inline-flex rounded-lg border px-3 py-1.5 text-sm font-medium ${rolePill(invite.role)}`}>
+                              {roles.find((r) => r.value === invite.role)?.label ?? invite.role}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-sm font-semibold text-slate-500">
+                            {invite.role === "admin" || invite.role === "accountant" ? "All" : invite.propertyIds.length}
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className="inline-flex rounded-lg border border-amber-200 bg-amber-50 px-3 py-1.5 text-sm font-medium text-amber-700">
+                              Pending
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-sm text-slate-400">—</td>
+                          <td className="px-6 py-4 text-right">
+                            <button
+                              type="button"
+                              onClick={() => void revokeInvite(invite)}
+                              className="rounded-lg border border-red-200 px-3 py-2 text-xs font-bold text-red-700 transition hover:bg-red-50"
+                            >
+                              Revoke
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    }
+
+                    const { user } = entry;
                     const score = userRiskScore(user);
                     return (
                       <tr key={user.id} className="border-b border-slate-100 last:border-b-0">
@@ -980,26 +1048,63 @@ export function PropertyManagersClient({
                   })}
                 </tbody>
               </table>
-              {filteredUsers.length === 0 ? (
+              {filteredEntries.length === 0 ? (
                 <div className="px-4 py-10 text-center text-sm text-slate-500">No matching users found.</div>
               ) : null}
             </div>
 
             <div className="space-y-3 lg:hidden">
-              {filteredUsers.length === 0 ? (
+              {filteredEntries.length === 0 ? (
                 <div className="rounded-lg border border-slate-200 bg-white px-4 py-8 text-center text-sm text-slate-500 shadow-sm">
                   No matching users found.
                 </div>
               ) : (
-                filteredUsers.map((user) => (
-                  <AccessUserCard
-                    key={user.id}
-                    user={user}
-                    properties={properties}
-                    roles={roles}
-                    onSaved={loadData}
-                  />
-                ))
+                filteredEntries.map((entry) => {
+                  if (entry.kind === "invite") {
+                    const { invite } = entry;
+                    return (
+                      <article key={`invite-${invite.id}`} className="rounded-lg border border-amber-100 bg-amber-50 p-4 shadow-sm">
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex min-w-0 items-center gap-3">
+                            <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-slate-300 text-sm font-bold text-slate-600">
+                              {invite.email.charAt(0).toUpperCase()}
+                            </div>
+                            <div className="min-w-0">
+                              <p className="truncate text-sm font-semibold text-slate-900">{invite.email}</p>
+                              <p className="mt-1 text-xs text-slate-500">Awaiting acceptance</p>
+                            </div>
+                          </div>
+                          <div className="flex flex-wrap items-center gap-2">
+                            <span className="inline-flex rounded-full border border-amber-200 bg-white px-2.5 py-1 text-xs font-semibold text-amber-700">
+                              Pending
+                            </span>
+                            <span className={`inline-flex rounded-full border px-2.5 py-1 text-xs font-semibold ${rolePill(invite.role)}`}>
+                              {roles.find((r) => r.value === invite.role)?.label ?? invite.role}
+                            </span>
+                          </div>
+                        </div>
+                        <div className="mt-3 flex justify-end">
+                          <button
+                            type="button"
+                            onClick={() => void revokeInvite(invite)}
+                            className="inline-flex h-8 items-center justify-center rounded-lg border border-red-200 px-3 text-xs font-semibold text-red-700 transition hover:bg-red-50"
+                          >
+                            Revoke
+                          </button>
+                        </div>
+                      </article>
+                    );
+                  }
+                  return (
+                    <AccessUserCard
+                      key={entry.user.id}
+                      user={entry.user}
+                      properties={properties}
+                      roles={roles}
+                      onSaved={loadData}
+                    />
+                  );
+                })
               )}
             </div>
           </section>

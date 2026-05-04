@@ -1,6 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import { AppShell } from "@/components/AppShell";
 import { PropertyManagersClient } from "@/components/PropertyManagersClient";
 import { prisma } from "@/lib/db";
 import { getOrgPermissionContext, requirePermission } from "@/lib/org-authorization";
@@ -22,8 +21,7 @@ export default async function TeamPage() {
   });
 
   return (
-    <AppShell>
-      <div className="space-y-6">
+    <div className="space-y-6">
         <header>
           <p className="text-sm font-semibold uppercase tracking-wide text-emerald-700">
             Admin
@@ -41,7 +39,6 @@ export default async function TeamPage() {
           canInvite={canInvite}
           organizationName={organization?.name ?? "this organization"}
         />
-      </div>
-    </AppShell>
+    </div>
   );
 }

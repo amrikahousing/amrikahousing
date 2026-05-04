@@ -310,6 +310,7 @@ export function OnboardRenterWizard({
   const [testMode, setTestMode] = useState(false);
   const [skipLeaseMismatchValidation, setSkipLeaseMismatchValidation] = useState(false);
   const preMismatchOverrideFormRef = useRef<FormData | null>(null);
+  const additionalTenantKeysRef = useRef<string[]>([]);
 
   const selectedUnit = vacantUnits.find((u) => u.id === selectedUnitId) ?? null;
 
@@ -438,6 +439,7 @@ export function OnboardRenterWizard({
         securityDeposit: data.securityDeposit ?? "",
         additionalTenants: data.additionalTenants ?? [],
       });
+      additionalTenantKeysRef.current = (data.additionalTenants ?? []).map(() => crypto.randomUUID());
       setExtractedAddress(data.propertyAddress ?? "");
       setExtractedUnitNumber(data.unitNumber ?? "");
       setStep("review");
@@ -614,6 +616,7 @@ export function OnboardRenterWizard({
   }
 
   function addAdditionalTenant() {
+    additionalTenantKeysRef.current = [...additionalTenantKeysRef.current, crypto.randomUUID()];
     setForm((f) => ({
       ...f,
       additionalTenants: [...f.additionalTenants, { firstName: "", lastName: "", email: "", phone: "" }],
@@ -621,6 +624,7 @@ export function OnboardRenterWizard({
   }
 
   function removeAdditionalTenant(index: number) {
+    additionalTenantKeysRef.current = additionalTenantKeysRef.current.filter((_, i) => i !== index);
     setForm((f) => ({
       ...f,
       additionalTenants: f.additionalTenants.filter((_, i) => i !== index),
@@ -637,6 +641,7 @@ export function OnboardRenterWizard({
       const lastName = currentUser?.lastName ?? "";
       const nameParts = !firstName && !lastName ? (currentUser?.fullName ?? "").trim().split(/\s+/) : [];
 
+      additionalTenantKeysRef.current = [];
       patchForm({
         firstName: firstName || nameParts[0] || form.firstName,
         lastName: lastName || nameParts.slice(1).join(" ") || form.lastName,
@@ -648,6 +653,7 @@ export function OnboardRenterWizard({
     }
 
     if (preMismatchOverrideFormRef.current) {
+      additionalTenantKeysRef.current = preMismatchOverrideFormRef.current.additionalTenants.map(() => crypto.randomUUID());
       setForm(preMismatchOverrideFormRef.current);
       preMismatchOverrideFormRef.current = null;
     }
@@ -782,7 +788,7 @@ export function OnboardRenterWizard({
             type="button"
             disabled={!selectedUnitId}
             onClick={() => setStep("upload-lease")}
-            className="rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700 disabled:opacity-50"
+            className="h-11 rounded-lg bg-slate-950 px-4 text-sm font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
           >
             Continue
           </button>
@@ -899,7 +905,7 @@ export function OnboardRenterWizard({
               type="button"
               disabled={!fileName || scanning}
               onClick={() => startScan()}
-              className="flex items-center gap-2 rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700 disabled:opacity-50"
+              className="inline-flex h-11 items-center gap-2 rounded-lg bg-slate-950 px-4 text-sm font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {scanning ? (
                 <>
@@ -919,7 +925,7 @@ export function OnboardRenterWizard({
             <button
               type="button"
               onClick={() => setStep("review")}
-              className="rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700"
+              className="h-11 rounded-lg bg-slate-950 px-4 text-sm font-bold text-white transition hover:bg-slate-800"
             >
               Review details →
             </button>
@@ -1031,29 +1037,17 @@ export function OnboardRenterWizard({
 
           {/* Right: Co-tenants */}
           <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-300 text-xs font-bold text-slate-700">+</div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">
-                  Co-tenants{form.additionalTenants.length > 0 ? ` (${form.additionalTenants.length})` : ""}
-                </p>
-              </div>
-              <button type="button" onClick={addAdditionalTenant} className="flex items-center gap-1 rounded-md bg-emerald-600 px-2.5 py-1 text-xs font-semibold text-white hover:bg-emerald-700">
-                + Add
-              </button>
+            <div className="flex items-center gap-2">
+              <div className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-300 text-xs font-bold text-slate-700">+</div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">
+                Co-tenants{form.additionalTenants.length > 0 ? ` (${form.additionalTenants.length})` : ""}
+              </p>
             </div>
 
-            {form.additionalTenants.length === 0 ? (
-              <div className="flex flex-1 flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-slate-200 py-8 text-center">
-                <UserIcon className="h-8 w-8 text-slate-300" />
-                <p className="text-xs text-slate-400">No co-tenants on lease</p>
-                <button type="button" onClick={addAdditionalTenant} className="text-xs font-medium text-emerald-600 hover:text-emerald-800">
-                  Add manually
-                </button>
-              </div>
-            ) : (
-              <div className="space-y-2 overflow-y-auto" style={{ maxHeight: "260px" }}>
+            {form.additionalTenants.length > 0 && (
+              <div className="space-y-2">
                 {form.additionalTenants.map((tenant, i) => {
+                  const stableKey = additionalTenantKeysRef.current[i] ?? i;
                   const lookup = additionalLookups[i];
                   const cotenantNotice =
                     lookup?.status === "loading"
@@ -1066,7 +1060,7 @@ export function OnboardRenterWizard({
                           ? { className: "border-amber-200 bg-amber-50 text-amber-800", iconClassName: "text-amber-600", text: "New account will be created." }
                           : null;
                   return (
-                    <div key={i} className="space-y-2 rounded-lg border border-slate-200 bg-white p-3">
+                    <div key={stableKey} className="space-y-2 rounded-lg border border-slate-200 bg-white p-3">
                       <div className="flex items-center justify-between">
                         <p className="text-xs font-semibold text-slate-600">Co-tenant {i + 1}</p>
                         <button type="button" onClick={() => removeAdditionalTenant(i)} className="text-xs text-slate-400 hover:text-red-600" aria-label={`Remove co-tenant ${i + 1}`}>
@@ -1102,6 +1096,15 @@ export function OnboardRenterWizard({
                 })}
               </div>
             )}
+
+            {/* Add button — always at the bottom, never overlapping cards */}
+            <button
+              type="button"
+              onClick={addAdditionalTenant}
+              className="flex w-full items-center justify-center gap-1.5 rounded-lg border-2 border-dashed border-slate-300 py-2 text-xs font-medium text-slate-500 transition-colors hover:border-emerald-400 hover:text-emerald-600"
+            >
+              + Add co-tenant
+            </button>
           </div>
         </div>
 
@@ -1152,7 +1155,7 @@ export function OnboardRenterWizard({
               !form.rentAmount
             }
             onClick={() => setStep("confirm")}
-            className="rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700 disabled:opacity-50"
+            className="h-11 rounded-lg bg-slate-950 px-4 text-sm font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
           >
             Continue
           </button>
@@ -1252,7 +1255,7 @@ export function OnboardRenterWizard({
             type="button"
             disabled={submitting}
             onClick={submitOnboard}
-            className="flex items-center gap-2 rounded-lg bg-emerald-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700 disabled:opacity-50"
+            className="inline-flex h-11 items-center gap-2 rounded-lg bg-slate-950 px-4 text-sm font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {submitting ? (
               <>

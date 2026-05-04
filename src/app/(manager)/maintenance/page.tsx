@@ -1,6 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import { AppShell } from "@/components/AppShell";
 import { MaintenanceClient } from "@/components/MaintenanceClient";
 import type {
   MaintenanceRequest,
@@ -99,13 +98,11 @@ export default async function MaintenancePage() {
   });
 
   return (
-    <AppShell>
-      <MaintenanceClient
+    <MaintenanceClient
         role={role}
         userId={userId}
         initialProperties={initialProperties}
         initialRequests={initialRequests}
       />
-    </AppShell>
   );
 }

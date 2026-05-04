@@ -1,9 +1,7 @@
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { ProfileForm } from "@/components/ProfileForm";
-import { RenterShell } from "@/components/RenterShell";
 import { prisma } from "@/lib/db";
-import { getPortalAccessState } from "@/lib/portal-access";
 import { resolveSharedUserIdentity } from "@/lib/renter-auth";
 
 function metadataString(metadata: Record<string, unknown>, key: string) {
@@ -16,7 +14,7 @@ function metadataBoolean(metadata: Record<string, unknown>, key: string) {
 }
 
 export default async function RenterProfilePage() {
-  const { userId, orgId } = await auth();
+  const { userId } = await auth();
   if (!userId) redirect("/login");
 
   const [identity, user] = await Promise.all([
@@ -44,18 +42,6 @@ export default async function RenterProfilePage() {
       })
     : null;
 
-  const shellUser = {
-    email: identity.sharedUser?.email ?? user?.primaryEmailAddress?.emailAddress ?? null,
-    firstName: identity.sharedUser?.first_name ?? user?.firstName ?? tenant?.first_name ?? null,
-    imageUrl: user?.imageUrl ?? null,
-    portal: "renter" as const,
-    ...(await getPortalAccessState({
-      userId,
-      orgId,
-      email: identity.sharedUser?.email ?? user?.primaryEmailAddress?.emailAddress ?? null,
-    })),
-  };
-
   if (!tenant) {
     redirect("/renter");
   }
@@ -67,8 +53,7 @@ export default async function RenterProfilePage() {
       : "";
 
   return (
-    <RenterShell user={shellUser}>
-      <div className="space-y-8">
+    <div className="space-y-8">
         <header>
           <h1 className="text-3xl font-bold tracking-tight text-slate-900">
             Profile
@@ -100,7 +85,6 @@ export default async function RenterProfilePage() {
             twoFactorMethod: normalizedMethod,
           }}
         />
-      </div>
-    </RenterShell>
+    </div>
   );
 }

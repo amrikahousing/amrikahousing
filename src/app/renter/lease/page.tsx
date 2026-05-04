@@ -1,8 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
-import { RenterShell } from "@/components/RenterShell";
-import { getPortalAccessState } from "@/lib/portal-access";
 import { getRenterSupportContact } from "@/lib/renter-portal";
 import { resolveSharedUserIdentity } from "@/lib/renter-auth";
 import { LeaseActions } from "./LeaseActions";
@@ -77,7 +75,7 @@ function Icon({ name, className = "" }: { name: string; className?: string }) {
 }
 
 export default async function RenterLeasePage() {
-  const { userId, orgId } = await auth();
+  const { userId } = await auth();
   if (!userId) redirect("/login");
 
   const identity = await resolveSharedUserIdentity(userId);
@@ -130,18 +128,6 @@ export default async function RenterLeasePage() {
     })
     : null;
 
-  const shellUser = {
-    email: identity.sharedUser?.email ?? identity.clerkUser?.primaryEmailAddress?.emailAddress ?? null,
-    firstName: identity.sharedUser?.first_name ?? identity.clerkUser?.firstName ?? tenant?.first_name ?? null,
-    imageUrl: identity.clerkUser?.imageUrl ?? null,
-    portal: "renter" as const,
-    ...(await getPortalAccessState({
-      userId,
-      orgId,
-      email: identity.sharedUser?.email ?? identity.clerkUser?.primaryEmailAddress?.emailAddress ?? null,
-    })),
-  };
-
   if (!tenant) {
     redirect("/renter");
   }
@@ -156,8 +142,7 @@ export default async function RenterLeasePage() {
   const unit = lease.units;
   const property = unit.properties;
   return (
-    <RenterShell user={shellUser}>
-      <div className="space-y-8">
+    <div className="space-y-8">
         <header>
           <h1 className="text-3xl font-bold tracking-tight text-slate-900">Lease</h1>
           <p className="mt-1 text-slate-500">View and manage your current lease agreement.</p>
@@ -276,7 +261,6 @@ export default async function RenterLeasePage() {
           </div>
         </section>
 
-      </div>
-    </RenterShell>
+    </div>
   );
 }

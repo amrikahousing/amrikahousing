@@ -442,7 +442,7 @@ export function AiImportWizard({ existingProperty }: { existingProperty?: Existi
             </button>
             <button
               onClick={() => router.push(`/properties/${existingProperty!.id}`)}
-              className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700"
+              className="h-11 rounded-lg bg-slate-950 px-4 text-sm font-bold text-white transition hover:bg-slate-800"
             >
               View property
             </button>
@@ -469,7 +469,7 @@ export function AiImportWizard({ existingProperty }: { existingProperty?: Existi
           >
             Add more
           </button>
-          <button onClick={() => router.push("/properties")} className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700">
+          <button onClick={() => router.push("/properties")} className="h-11 rounded-lg bg-slate-950 px-4 text-sm font-bold text-white transition hover:bg-slate-800">
             View properties
           </button>
         </div>

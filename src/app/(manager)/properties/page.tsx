@@ -2,7 +2,6 @@ export const dynamic = "force-dynamic";
 
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import { AppShell } from "@/components/AppShell";
 import { AddPropertyModalButton } from "@/components/AddPropertyModalButton";
 import { PropertiesList } from "@/components/PropertiesList";
 import { prisma } from "@/lib/db";
@@ -53,8 +52,7 @@ export default async function PropertiesPage() {
   }));
 
   return (
-    <AppShell>
-      <div className="space-y-6">
+    <div className="space-y-6">
         <header className="flex items-end justify-between">
           <div>
             <h1 className="text-3xl font-bold tracking-tight text-slate-900">Properties</h1>
@@ -68,7 +66,6 @@ export default async function PropertiesPage() {
         </header>
 
         <PropertiesList properties={propertyGroups} />
-      </div>
-    </AppShell>
+    </div>
   );
 }

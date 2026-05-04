@@ -514,7 +514,7 @@ export function MaintenanceClient({
               <button
                 type="submit"
                 disabled={!activeProperty}
-                className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-emerald-700"
+                className="h-11 rounded-lg bg-slate-950 px-4 text-sm font-bold text-white transition hover:bg-slate-800"
               >
                 Submit Request
               </button>

@@ -1,7 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import Link from "next/link";
 import { redirect } from "next/navigation";
-import { AppShell } from "@/components/AppShell";
 import { TransactionsLedger } from "@/components/TransactionsLedger";
 import { mergeAccountingCategoryOptions } from "@/lib/accounting-categories";
 import {
@@ -177,9 +176,8 @@ export default async function TransactionsPage({
   const netTotal = totalIncome - totalExpenses;
 
   return (
-    <AppShell>
-      <div className="space-y-5">
-        <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+    <div className="space-y-5">
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <Link
               href="/accounts"
@@ -251,7 +249,6 @@ export default async function TransactionsPage({
           categories={categories}
           years={years}
         />
-      </div>
-    </AppShell>
+    </div>
   );
 }

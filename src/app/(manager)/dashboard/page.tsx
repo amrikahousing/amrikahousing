@@ -1,6 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import { AppShell, getAppShellUser } from "@/components/AppShell";
+import { getAppShellUser } from "@/components/AppShell";
 import { prisma } from "@/lib/db";
 
 function formatCurrency(value: number) {
@@ -540,7 +540,7 @@ export default async function DashboardPage() {
   }).format(new Date());
 
   return (
-    <AppShell user={shellUser}>
+    <>
       <div className="space-y-8">
         <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -867,6 +867,6 @@ export default async function DashboardPage() {
           </div>
         </section>
       </div>
-    </AppShell>
+    </>
   );
 }

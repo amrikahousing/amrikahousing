@@ -4,7 +4,6 @@ import Link from "next/link";
 import { redirect } from "next/navigation";
 import { AccountsYearSelect } from "@/components/AccountsYearSelect";
 import { AccountsRangeSelect } from "@/components/AccountsRangeSelect";
-import { AppShell } from "@/components/AppShell";
 import { ExpenseCategoryPieChart } from "@/components/ExpenseCategoryPieChart";
 import { PlaidLinkButton } from "@/components/PlaidLinkButton";
 import { PlaidRemoveButton } from "@/components/PlaidRemoveButton";
@@ -398,9 +397,8 @@ export default async function AccountsPage({
   const activeRentCollectionAccountId = rentCollectionAccount?.selectedConnectedAccountId ?? null;
 
   return (
-    <AppShell>
-      <div className="space-y-5">
-        <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+    <div className="space-y-5">
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
             <h1 className="text-3xl font-bold tracking-tight text-slate-950">
               Accounts
@@ -924,7 +922,6 @@ export default async function AccountsPage({
             </div>
           )}
         </section>
-      </div>
-    </AppShell>
+    </div>
   );
 }
