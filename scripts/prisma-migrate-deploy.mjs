@@ -7,6 +7,8 @@ const PRISMA_MIGRATION_ADVISORY_LOCK = 72707369;
 const STALE_LOCK_MIN_AGE_SECONDS = 10;
 const LOCK_RETRY_DELAY_MS = 5000;
 const MAX_LOCK_RETRY_ATTEMPTS = 3;
+const P1001_RETRY_DELAY_MS = 5000;
+const P1001_MAX_RETRY_ATTEMPTS = 2;
 
 function argValue(name) {
   const index = process.argv.indexOf(name);
@@ -15,6 +17,19 @@ function argValue(name) {
 
 function sleep(ms) {
   Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, ms);
+}
+
+function ensureConnectTimeout(databaseUrl, seconds = 30) {
+  if (!databaseUrl) return databaseUrl;
+  try {
+    const url = new URL(databaseUrl);
+    if (!url.searchParams.has("connect_timeout")) {
+      url.searchParams.set("connect_timeout", String(seconds));
+    }
+    return url.toString();
+  } catch {
+    return databaseUrl;
+  }
 }
 
 function runPrismaMigrateDeploy() {
@@ -38,6 +53,10 @@ function runPrismaMigrateDeploy() {
 
 function combinedOutput(result) {
   return `${result.stdout ?? ""}\n${result.stderr ?? ""}`;
+}
+
+function isConnectionError(result) {
+  return result.status !== 0 && combinedOutput(result).includes("P1001");
 }
 
 function shouldInspectPrismaAdvisoryLock(result) {
@@ -116,6 +135,10 @@ async function terminateStalePrismaLock({ label }) {
 async function main() {
   const label = argValue("--label") ?? "database";
 
+  if (process.env.DATABASE_URL) {
+    process.env.DATABASE_URL = ensureConnectTimeout(process.env.DATABASE_URL);
+  }
+
   let result = runPrismaMigrateDeploy();
   if (result.error) {
     console.error(`npx prisma migrate deploy failed: ${result.error.message}`);
@@ -124,6 +147,22 @@ async function main() {
 
   if (result.status === 0) {
     return;
+  }
+
+  if (isConnectionError(result)) {
+    for (let attempt = 1; attempt <= P1001_MAX_RETRY_ATTEMPTS; attempt += 1) {
+      console.warn(
+        `Prisma migration failed for ${label} with a connection error (P1001). Retrying (${attempt}/${P1001_MAX_RETRY_ATTEMPTS})...`
+      );
+      sleep(P1001_RETRY_DELAY_MS);
+      result = runPrismaMigrateDeploy();
+      if (result.error) {
+        console.error(`npx prisma migrate deploy failed: ${result.error.message}`);
+        process.exit(1);
+      }
+      if (result.status === 0) return;
+      if (!isConnectionError(result)) break;
+    }
   }
 
   if (!shouldInspectPrismaAdvisoryLock(result)) {
