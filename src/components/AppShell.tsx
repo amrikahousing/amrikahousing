@@ -2,6 +2,7 @@ import { auth, currentUser } from "@clerk/nextjs/server";
 import { syncLocalUser } from "@/lib/auth";
 import { getOrgPermissionContext } from "@/lib/org-authorization";
 import { getPortalAccessState } from "@/lib/portal-access";
+import { normalizePermissionRole } from "@/lib/permissions";
 import type { OrgPermissionState } from "@/lib/permissions";
 import { AppSidebar } from "./AppSidebar";
 
@@ -38,10 +39,6 @@ export async function getAppShellUser(): Promise<AppShellUser> {
   const unsafeMetadata = user?.unsafeMetadata as Record<string, unknown> | null;
   const publicMetadata = user?.publicMetadata as Record<string, unknown> | null;
 
-  const role =
-    metadataString(unsafeMetadata, "role") ??
-    metadataString(publicMetadata, "role") ??
-    "property_manager";
   const isOrgAdmin = orgRole === "org:admin";
   const organizationName =
     metadataString(unsafeMetadata, "organizationName") ??
@@ -60,7 +57,7 @@ export async function getAppShellUser(): Promise<AppShellUser> {
   const hasResolvedPermissions =
     permissionContext !== null && !("error" in permissionContext);
   const normalizedRole = !hasResolvedPermissions
-    ? role === "renter" || role === "tenant" ? "property_manager" : role
+    ? normalizePermissionRole(null)
     : permissionContext.isOrgAdmin
       ? "admin"
       : permissionContext.permissionRole;

@@ -385,7 +385,7 @@ export function MaintenanceClient({ requests, hasActiveLease, unitLabel }: Props
                   <button
                     type="submit"
                     disabled={isPrefilledSubmitting}
-                    className="flex-1 rounded-lg bg-emerald-600 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                    className="flex-1 rounded-lg bg-slate-950 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
                   >
                     {isPrefilledSubmitting ? "Submitting…" : "Submit Request"}
                   </button>
@@ -420,7 +420,7 @@ export function MaintenanceClient({ requests, hasActiveLease, unitLabel }: Props
                   type="button"
                   onClick={() => void handleSubmit()}
                   disabled={!freeformInput.trim() || busy}
-                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  className="flex w-full items-center justify-center gap-2 rounded-lg bg-slate-950 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
                 >
                   {busy ? (
                     <>

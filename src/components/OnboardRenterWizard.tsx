@@ -1,5 +1,6 @@
 "use client";
 
+import { useUser } from "@clerk/nextjs";
 import { useEffect, useRef, useState } from "react";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -14,6 +15,13 @@ export type WizardUnit = {
 
 type Step = "select-unit" | "upload-lease" | "review" | "confirm" | "done";
 
+type AdditionalTenant = {
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone: string;
+};
+
 type FormData = {
   firstName: string;
   lastName: string;
@@ -23,6 +31,7 @@ type FormData = {
   endDate: string;
   rentAmount: string;
   securityDeposit: string;
+  additionalTenants: AdditionalTenant[];
 };
 
 type ScanPhase = {
@@ -54,6 +63,7 @@ type LeaseParseResult = {
   lastName?: string;
   email?: string;
   phone?: string;
+  additionalTenants?: AdditionalTenant[];
   startDate?: string;
   endDate?: string;
   rentAmount?: string;
@@ -145,6 +155,11 @@ function BedIcon({ className = "" }: { className?: string }) {
 
 const inputClass =
   "w-full rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20";
+
+const allowLeaseMismatchOverride =
+  process.env.NODE_ENV !== "production" ||
+  process.env.NEXT_PUBLIC_VERCEL_ENV === "preview" ||
+  process.env.NEXT_PUBLIC_VERCEL_ENV === "development";
 
 function fmt(n: number) {
   return n.toLocaleString("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 });
@@ -252,6 +267,7 @@ export function OnboardRenterWizard({
   onClose: () => void;
   onSuccess: (unitId: string) => void;
 }) {
+  const { user: currentUser } = useUser();
   const [step, setStep] = useState<Step>(initialUnitId ? "upload-lease" : "select-unit");
   const [selectedUnitId, setSelectedUnitId] = useState<string>(initialUnitId ?? vacantUnits[0]?.id ?? "");
 
@@ -279,6 +295,7 @@ export function OnboardRenterWizard({
     endDate: "",
     rentAmount: "",
     securityDeposit: "",
+    additionalTenants: [],
   });
 
   // Step 4/5 — submission
@@ -289,7 +306,11 @@ export function OnboardRenterWizard({
   const [resultTestMode, setResultTestMode] = useState(false);
   const [completedActions, setCompletedActions] = useState(0);
   const [accountLookup, setAccountLookup] = useState<AccountLookup>({ status: "idle" });
+  const [additionalLookups, setAdditionalLookups] = useState<AccountLookup[]>([]);
   const [testMode, setTestMode] = useState(false);
+  const [skipLeaseMismatchValidation, setSkipLeaseMismatchValidation] = useState(false);
+  const preMismatchOverrideFormRef = useRef<FormData | null>(null);
+  const additionalTenantKeysRef = useRef<string[]>([]);
 
   const selectedUnit = vacantUnits.find((u) => u.id === selectedUnitId) ?? null;
 
@@ -416,7 +437,9 @@ export function OnboardRenterWizard({
         endDate: data.endDate ?? "",
         rentAmount: data.rentAmount || (unit?.rentAmount != null ? String(unit.rentAmount) : ""),
         securityDeposit: data.securityDeposit ?? "",
+        additionalTenants: data.additionalTenants ?? [],
       });
+      additionalTenantKeysRef.current = (data.additionalTenants ?? []).map(() => crypto.randomUUID());
       setExtractedAddress(data.propertyAddress ?? "");
       setExtractedUnitNumber(data.unitNumber ?? "");
       setStep("review");
@@ -495,6 +518,74 @@ export function OnboardRenterWizard({
     };
   }, [form.email, propertyId, step]);
 
+  const additionalEmailKey = form.additionalTenants.map((t) => t.email).join(",");
+  useEffect(() => {
+    if (step !== "review" || form.additionalTenants.length === 0) {
+      setAdditionalLookups([]);
+      return;
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    const tenants = form.additionalTenants;
+
+    setAdditionalLookups(
+      tenants.map((t) =>
+        emailRegex.test(t.email.trim().toLowerCase()) ? { status: "loading" } : { status: "idle" },
+      ),
+    );
+
+    const controllers = tenants.map(() => new AbortController());
+
+    tenants.forEach(async (tenant, idx) => {
+      const email = tenant.email.trim().toLowerCase();
+      if (!emailRegex.test(email)) return;
+      try {
+        const params = new URLSearchParams({ email, propertyId });
+        const res = await fetch(`/api/renters/lookup?${params.toString()}`, {
+          signal: controllers[idx].signal,
+        });
+        const data = (await res.json()) as {
+          error?: string;
+          tenantExists?: boolean;
+          sharedUserExists?: boolean;
+          clerkUserExists?: boolean;
+        };
+
+        if (!res.ok) {
+          setAdditionalLookups((prev) => {
+            const next = [...prev];
+            next[idx] = { status: "error", message: data.error ?? "Could not check this email." };
+            return next;
+          });
+          return;
+        }
+
+        const tenantExists = Boolean(data.tenantExists);
+        const sharedUserExists = Boolean(data.sharedUserExists);
+        const clerkUserExists = Boolean(data.clerkUserExists);
+
+        setAdditionalLookups((prev) => {
+          const next = [...prev];
+          next[idx] =
+            tenantExists || sharedUserExists || clerkUserExists
+              ? { status: "existing", tenantExists, sharedUserExists, clerkUserExists }
+              : { status: "new" };
+          return next;
+        });
+      } catch (err) {
+        if (err instanceof DOMException && err.name === "AbortError") return;
+        setAdditionalLookups((prev) => {
+          const next = [...prev];
+          next[idx] = { status: "error", message: "Could not check this email." };
+          return next;
+        });
+      }
+    });
+
+    return () => controllers.forEach((c) => c.abort());
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [additionalEmailKey, form.additionalTenants.length, propertyId, step]);
+
   // ── Handlers ──────────────────────────────────────────────────────────────
 
   function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -506,6 +597,8 @@ export function OnboardRenterWizard({
       setExtractedUnitNumber(null);
       setScanError(null);
       setScanNotice(null);
+      setSkipLeaseMismatchValidation(false);
+      preMismatchOverrideFormRef.current = null;
       startScan(picked);
     }
     e.target.value = "";
@@ -513,6 +606,57 @@ export function OnboardRenterWizard({
 
   function patchForm(partial: Partial<FormData>) {
     setForm((f) => ({ ...f, ...partial }));
+  }
+
+  function patchAdditional(index: number, partial: Partial<AdditionalTenant>) {
+    setForm((f) => {
+      const next = f.additionalTenants.map((t, i) => (i === index ? { ...t, ...partial } : t));
+      return { ...f, additionalTenants: next };
+    });
+  }
+
+  function addAdditionalTenant() {
+    additionalTenantKeysRef.current = [...additionalTenantKeysRef.current, crypto.randomUUID()];
+    setForm((f) => ({
+      ...f,
+      additionalTenants: [...f.additionalTenants, { firstName: "", lastName: "", email: "", phone: "" }],
+    }));
+  }
+
+  function removeAdditionalTenant(index: number) {
+    additionalTenantKeysRef.current = additionalTenantKeysRef.current.filter((_, i) => i !== index);
+    setForm((f) => ({
+      ...f,
+      additionalTenants: f.additionalTenants.filter((_, i) => i !== index),
+    }));
+  }
+
+  function setLeaseMismatchOverride(enabled: boolean) {
+    setSkipLeaseMismatchValidation(enabled);
+
+    if (enabled) {
+      preMismatchOverrideFormRef.current = form;
+      const email = currentUser?.primaryEmailAddress?.emailAddress ?? "";
+      const firstName = currentUser?.firstName ?? "";
+      const lastName = currentUser?.lastName ?? "";
+      const nameParts = !firstName && !lastName ? (currentUser?.fullName ?? "").trim().split(/\s+/) : [];
+
+      additionalTenantKeysRef.current = [];
+      patchForm({
+        firstName: firstName || nameParts[0] || form.firstName,
+        lastName: lastName || nameParts.slice(1).join(" ") || form.lastName,
+        email: email || form.email,
+        phone: "",
+        additionalTenants: [],
+      });
+      return;
+    }
+
+    if (preMismatchOverrideFormRef.current) {
+      additionalTenantKeysRef.current = preMismatchOverrideFormRef.current.additionalTenants.map(() => crypto.randomUUID());
+      setForm(preMismatchOverrideFormRef.current);
+      preMismatchOverrideFormRef.current = null;
+    }
   }
 
   function submitPdfPassword() {
@@ -548,6 +692,9 @@ export function OnboardRenterWizard({
       body.append("rentAmount", String(Number(form.rentAmount)));
       if (form.securityDeposit) body.append("securityDeposit", String(Number(form.securityDeposit)));
       if (file) body.append("leaseFile", file);
+      if (form.additionalTenants.length > 0) {
+        body.append("additionalTenants", JSON.stringify(form.additionalTenants));
+      }
       if (testMode) body.append("testMode", "true");
 
       const res = await fetch("/api/renters/onboard", { method: "POST", body });
@@ -641,7 +788,7 @@ export function OnboardRenterWizard({
             type="button"
             disabled={!selectedUnitId}
             onClick={() => setStep("upload-lease")}
-            className="rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700 disabled:opacity-50"
+            className="h-11 rounded-lg bg-slate-950 px-4 text-sm font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
           >
             Continue
           </button>
@@ -758,7 +905,7 @@ export function OnboardRenterWizard({
               type="button"
               disabled={!fileName || scanning}
               onClick={() => startScan()}
-              className="flex items-center gap-2 rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700 disabled:opacity-50"
+              className="inline-flex h-11 items-center gap-2 rounded-lg bg-slate-950 px-4 text-sm font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
             >
               {scanning ? (
                 <>
@@ -778,7 +925,7 @@ export function OnboardRenterWizard({
             <button
               type="button"
               onClick={() => setStep("review")}
-              className="rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700"
+              className="h-11 rounded-lg bg-slate-950 px-4 text-sm font-bold text-white transition hover:bg-slate-800"
             >
               Review details →
             </button>
@@ -803,39 +950,22 @@ export function OnboardRenterWizard({
     );
     const leaseValidationBlocked =
       missingExtractedAddress || missingExtractedUnit || addressMismatch || unitMismatch;
+    const canSkipLeaseValidation = allowLeaseMismatchOverride && leaseValidationBlocked;
+    const blockContinueForLeaseValidation = leaseValidationBlocked && !skipLeaseMismatchValidation;
+
     const accountNotice =
       accountLookup.status === "loading"
-        ? {
-            className: "border-slate-200 bg-slate-50 text-slate-700",
-            iconClassName: "text-slate-500",
-            text: "Checking whether this renter already has an account...",
-          }
+        ? { className: "border-slate-200 bg-slate-50 text-slate-700", iconClassName: "text-slate-500", text: "Checking account…" }
         : accountLookup.status === "existing"
           ? accountLookup.clerkUserExists
-            ? {
-                className: "border-emerald-200 bg-emerald-50 text-emerald-800",
-                iconClassName: "text-emerald-600",
-                text: "Existing renter account found. This lease will be linked to their current login.",
-              }
+            ? { className: "border-emerald-200 bg-emerald-50 text-emerald-800", iconClassName: "text-emerald-600", text: "Existing account — lease will be linked to their current login." }
             : accountLookup.tenantExists || accountLookup.sharedUserExists
-              ? {
-                  className: "border-sky-200 bg-sky-50 text-sky-800",
-                  iconClassName: "text-sky-600",
-                  text: "Existing renter record found. We will update it and attach this lease.",
-                }
+              ? { className: "border-sky-200 bg-sky-50 text-sky-800", iconClassName: "text-sky-600", text: "Existing renter record found — will be updated." }
               : null
           : accountLookup.status === "new"
-            ? {
-                className: "border-amber-200 bg-amber-50 text-amber-800",
-                iconClassName: "text-amber-600",
-                text: "No existing account found for this email. A new renter account will be created when you complete onboarding.",
-              }
+            ? { className: "border-amber-200 bg-amber-50 text-amber-800", iconClassName: "text-amber-600", text: "No existing account — a new renter account will be created." }
             : accountLookup.status === "error"
-              ? {
-                  className: "border-amber-200 bg-amber-50 text-amber-800",
-                  iconClassName: "text-amber-600",
-                  text: accountLookup.message ?? "Could not check this email. We will verify it when you complete onboarding.",
-                }
+              ? { className: "border-amber-200 bg-amber-50 text-amber-800", iconClassName: "text-amber-600", text: accountLookup.message ?? "Could not check this email." }
               : null;
 
     return (
@@ -850,45 +980,42 @@ export function OnboardRenterWizard({
               </svg>
               <div className="text-xs text-red-800">
                 <p className="font-semibold">Lease document can&apos;t be used for this unit</p>
-                {missingExtractedAddress && (
-                  <p className="mt-1">
-                    The lease address could not be read. Upload a clearer document before continuing.
-                  </p>
-                )}
-                {addressMismatch && (
-                  <p className="mt-1">
-                    Address on lease: <span className="font-medium">{extractedAddress}</span>
-                    <br />Expected: <span className="font-medium">{propertyAddress}</span>
-                  </p>
-                )}
-                {missingExtractedUnit && (
-                  <p className="mt-1">
-                    The lease unit number could not be read. Upload a clearer document before continuing.
-                  </p>
-                )}
-                {unitMismatch && (
-                  <p className="mt-1">
-                    Unit on lease: <span className="font-medium">{extractedUnitNumber}</span>
-                    <br />Expected: <span className="font-medium">Unit {selectedUnit?.unitNumber}</span>
-                  </p>
-                )}
-                <p className="mt-1.5 text-red-700">You cannot continue until the uploaded lease matches the selected property and unit.</p>
+                {missingExtractedAddress && <p className="mt-1">The lease address could not be read. Upload a clearer document before continuing.</p>}
+                {addressMismatch && <p className="mt-1">Address on lease: <span className="font-medium">{extractedAddress}</span> · Expected: <span className="font-medium">{propertyAddress}</span></p>}
+                {missingExtractedUnit && <p className="mt-1">The lease unit number could not be read. Upload a clearer document before continuing.</p>}
+                {unitMismatch && <p className="mt-1">Unit on lease: <span className="font-medium">{extractedUnitNumber}</span> · Expected: <span className="font-medium">Unit {selectedUnit?.unitNumber}</span></p>}
+                <p className="mt-1 text-red-700">{canSkipLeaseValidation ? "Non-production override available below." : "Upload a matching lease to continue."}</p>
               </div>
             </div>
           </div>
         )}
-
-        {accountNotice && (
-          <div className={`flex items-start gap-2.5 rounded-lg border px-3 py-2 ${accountNotice.className}`}>
-            <UserIcon className={`mt-0.5 h-4 w-4 shrink-0 ${accountNotice.iconClassName}`} />
-            <p className="text-xs">{accountNotice.text}</p>
-          </div>
+        {canSkipLeaseValidation && (
+          <label className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+            <input type="checkbox" checked={skipLeaseMismatchValidation} onChange={(e) => setLeaseMismatchOverride(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-amber-300 text-amber-600 focus:ring-amber-500" />
+            <span>
+              <span className="font-semibold">Skip lease mismatch validation</span>
+              <span className="block text-amber-700">
+                Non-production testing only. Checking this will replace the primary tenant fields with your signed-in account info. Uncheck to restore the extracted values.
+              </span>
+            </span>
+          </label>
         )}
 
-        <div className="space-y-3">
-          <section className="space-y-2">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Tenant info</p>
-            <div className="grid gap-2.5 sm:grid-cols-2">
+        {/* ── Side-by-side: Primary tenant | Co-tenants ── */}
+        <div className="grid grid-cols-2 gap-4">
+          {/* Left: Primary tenant */}
+          <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <div className="flex items-center gap-2">
+              <div className="flex h-6 w-6 items-center justify-center rounded-full bg-emerald-600 text-xs font-bold text-white">1</div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">Primary Tenant</p>
+            </div>
+            {accountNotice && (
+              <div className={`flex items-start gap-2 rounded-md border px-2.5 py-1.5 ${accountNotice.className}`}>
+                <UserIcon className={`mt-0.5 h-3.5 w-3.5 shrink-0 ${accountNotice.iconClassName}`} />
+                <p className="text-xs">{accountNotice.text}</p>
+              </div>
+            )}
+            <div className="grid grid-cols-2 gap-2">
               <label className="block space-y-1 text-xs font-medium text-slate-700">
                 First name <span className="text-red-500">*</span>
                 <input className={inputClass} value={form.firstName} onChange={(e) => patchForm({ firstName: e.target.value })} placeholder="Jordan" />
@@ -906,54 +1033,121 @@ export function OnboardRenterWizard({
               Phone <span className="text-slate-400 font-normal">(optional)</span>
               <input className={inputClass} type="tel" value={form.phone} onChange={(e) => patchForm({ phone: e.target.value })} placeholder="(555) 000-0000" />
             </label>
-          </section>
+          </div>
 
-          <section className="space-y-2 border-t border-slate-100 pt-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Lease terms</p>
-            <div className="grid gap-2.5 sm:grid-cols-2">
-              <label className="block space-y-1 text-xs font-medium text-slate-700">
-                Lease start date <span className="text-red-500">*</span>
-                <input className={inputClass} type="date" value={form.startDate} onChange={(e) => patchForm({ startDate: e.target.value })} />
-              </label>
-              <label className="block space-y-1 text-xs font-medium text-slate-700">
-                Lease end date <span className="text-slate-400 font-normal">(optional)</span>
-                <input className={inputClass} type="date" value={form.endDate} onChange={(e) => patchForm({ endDate: e.target.value })} />
-              </label>
+          {/* Right: Co-tenants */}
+          <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
+            <div className="flex items-center gap-2">
+              <div className="flex h-6 w-6 items-center justify-center rounded-full bg-slate-300 text-xs font-bold text-slate-700">+</div>
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-600">
+                Co-tenants{form.additionalTenants.length > 0 ? ` (${form.additionalTenants.length})` : ""}
+              </p>
             </div>
-            <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-              Lease will be set to <span className="font-semibold text-slate-800">active</span> immediately. The tenant will have portal access from day one.
-            </div>
-          </section>
 
-          <section className="space-y-2 border-t border-slate-100 pt-3">
-            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Financial</p>
-            <div className="grid gap-2.5 sm:grid-cols-2">
-              <label className="block space-y-1 text-xs font-medium text-slate-700">
-                Monthly rent <span className="text-red-500">*</span>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">$</span>
-                  <input className={inputClass + " pl-7"} type="number" min="0" step="1" value={form.rentAmount} onChange={(e) => patchForm({ rentAmount: e.target.value })} placeholder="2200" />
-                </div>
-              </label>
-              <label className="block space-y-1 text-xs font-medium text-slate-700">
-                Security deposit <span className="text-slate-400 font-normal">(optional)</span>
-                <div className="relative">
-                  <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">$</span>
-                  <input className={inputClass + " pl-7"} type="number" min="0" step="1" value={form.securityDeposit} onChange={(e) => patchForm({ securityDeposit: e.target.value })} placeholder="3300" />
-                </div>
-              </label>
-            </div>
-          </section>
+            {form.additionalTenants.length > 0 && (
+              <div className="space-y-2">
+                {form.additionalTenants.map((tenant, i) => {
+                  const stableKey = additionalTenantKeysRef.current[i] ?? i;
+                  const lookup = additionalLookups[i];
+                  const cotenantNotice =
+                    lookup?.status === "loading"
+                      ? { className: "border-slate-200 bg-slate-50 text-slate-700", iconClassName: "text-slate-500", text: "Checking…" }
+                      : lookup?.status === "existing"
+                        ? lookup.clerkUserExists
+                          ? { className: "border-emerald-200 bg-emerald-50 text-emerald-800", iconClassName: "text-emerald-600", text: "Existing account — will be linked." }
+                          : { className: "border-sky-200 bg-sky-50 text-sky-800", iconClassName: "text-sky-600", text: "Existing record — will be updated." }
+                        : lookup?.status === "new"
+                          ? { className: "border-amber-200 bg-amber-50 text-amber-800", iconClassName: "text-amber-600", text: "New account will be created." }
+                          : null;
+                  return (
+                    <div key={stableKey} className="space-y-2 rounded-lg border border-slate-200 bg-white p-3">
+                      <div className="flex items-center justify-between">
+                        <p className="text-xs font-semibold text-slate-600">Co-tenant {i + 1}</p>
+                        <button type="button" onClick={() => removeAdditionalTenant(i)} className="text-xs text-slate-400 hover:text-red-600" aria-label={`Remove co-tenant ${i + 1}`}>
+                          Remove
+                        </button>
+                      </div>
+                      {cotenantNotice && (
+                        <div className={`flex items-start gap-1.5 rounded-md border px-2 py-1 ${cotenantNotice.className}`}>
+                          <UserIcon className={`mt-0.5 h-3 w-3 shrink-0 ${cotenantNotice.iconClassName}`} />
+                          <p className="text-xs">{cotenantNotice.text}</p>
+                        </div>
+                      )}
+                      <div className="grid grid-cols-2 gap-1.5">
+                        <label className="block space-y-1 text-xs font-medium text-slate-700">
+                          First name
+                          <input className={inputClass} value={tenant.firstName} onChange={(e) => patchAdditional(i, { firstName: e.target.value })} placeholder="Alex" />
+                        </label>
+                        <label className="block space-y-1 text-xs font-medium text-slate-700">
+                          Last name
+                          <input className={inputClass} value={tenant.lastName} onChange={(e) => patchAdditional(i, { lastName: e.target.value })} placeholder="Smith" />
+                        </label>
+                      </div>
+                      <label className="block space-y-1 text-xs font-medium text-slate-700">
+                        Email
+                        <input className={inputClass} type="email" value={tenant.email} onChange={(e) => patchAdditional(i, { email: e.target.value })} placeholder="alex@example.com" />
+                      </label>
+                      <label className="block space-y-1 text-xs font-medium text-slate-700">
+                        Phone <span className="text-slate-400 font-normal">(optional)</span>
+                        <input className={inputClass} type="tel" value={tenant.phone} onChange={(e) => patchAdditional(i, { phone: e.target.value })} placeholder="(555) 000-0000" />
+                      </label>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+
+            {/* Add button — always at the bottom, never overlapping cards */}
+            <button
+              type="button"
+              onClick={addAdditionalTenant}
+              className="flex w-full items-center justify-center gap-1.5 rounded-lg border-2 border-dashed border-slate-300 py-2 text-xs font-medium text-slate-500 transition-colors hover:border-emerald-400 hover:text-emerald-600"
+            >
+              + Add co-tenant
+            </button>
+          </div>
         </div>
 
-        <div className="flex items-center justify-between pt-1">
+        {/* ── Lease & Financial (full width, 2-col grid) ── */}
+        <div className="grid grid-cols-2 gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Lease terms</p>
+            <label className="block space-y-1 text-xs font-medium text-slate-700">
+              Start date <span className="text-red-500">*</span>
+              <input className={inputClass} type="date" value={form.startDate} onChange={(e) => patchForm({ startDate: e.target.value })} />
+            </label>
+            <label className="block space-y-1 text-xs font-medium text-slate-700">
+              End date <span className="text-slate-400 font-normal">(optional)</span>
+              <input className={inputClass} type="date" value={form.endDate} onChange={(e) => patchForm({ endDate: e.target.value })} />
+            </label>
+          </div>
+          <div className="space-y-2">
+            <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Financial</p>
+            <label className="block space-y-1 text-xs font-medium text-slate-700">
+              Monthly rent <span className="text-red-500">*</span>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">$</span>
+                <input className={inputClass + " pl-7"} type="number" min="0" step="1" value={form.rentAmount} onChange={(e) => patchForm({ rentAmount: e.target.value })} placeholder="2200" />
+              </div>
+            </label>
+            <label className="block space-y-1 text-xs font-medium text-slate-700">
+              Security deposit <span className="text-slate-400 font-normal">(optional)</span>
+              <div className="relative">
+                <span className="absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">$</span>
+                <input className={inputClass + " pl-7"} type="number" min="0" step="1" value={form.securityDeposit} onChange={(e) => patchForm({ securityDeposit: e.target.value })} placeholder="3300" />
+              </div>
+            </label>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between border-t border-slate-100 pt-1">
           <button type="button" onClick={() => setStep("upload-lease")} className="text-sm text-slate-500 hover:text-slate-800">
             ← Back
           </button>
           <button
             type="button"
             disabled={
-              leaseValidationBlocked ||
+              blockContinueForLeaseValidation ||
               !form.firstName.trim() ||
               !form.lastName.trim() ||
               !form.email.trim() ||
@@ -961,7 +1155,7 @@ export function OnboardRenterWizard({
               !form.rentAmount
             }
             onClick={() => setStep("confirm")}
-            className="rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700 disabled:opacity-50"
+            className="h-11 rounded-lg bg-slate-950 px-4 text-sm font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
           >
             Continue
           </button>
@@ -973,14 +1167,18 @@ export function OnboardRenterWizard({
   function renderConfirm() {
     const name = `${form.firstName.trim()} ${form.lastName.trim()}`;
     const unitNum = selectedUnit?.unitNumber ?? "";
+    const coTenantCount = form.additionalTenants.length;
     const actions = [
       `Create a tenant account for ${form.email.trim()}`,
+      ...(coTenantCount > 0 ? [`Create ${coTenantCount} co-tenant account${coTenantCount > 1 ? "s" : ""}`] : []),
       `Mark Unit ${unitNum} as occupied`,
       `Create an active lease starting ${form.startDate}`,
       `Create monthly rent charges from the lease dates`,
       testMode
         ? `Skip welcome email and Clerk account linking`
-        : `Send a welcome & login email to ${form.email.trim()}`,
+        : coTenantCount > 0
+          ? `Send welcome & login emails to all ${1 + coTenantCount} tenants`
+          : `Send a welcome & login email to ${form.email.trim()}`,
       testMode ? `Leave existing portal access unchanged` : `Grant immediate tenant portal access`,
     ];
 
@@ -1004,7 +1202,7 @@ export function OnboardRenterWizard({
 
         <div className="grid grid-cols-2 gap-3 text-sm">
           <div className="rounded-lg border border-slate-200 bg-white p-3">
-            <p className="text-xs text-slate-500">Tenant</p>
+            <p className="text-xs text-slate-500">Primary tenant</p>
             <p className="mt-0.5 font-semibold text-slate-800">{name}</p>
             <p className="text-xs text-slate-500">{form.email.trim()}</p>
           </div>
@@ -1014,6 +1212,19 @@ export function OnboardRenterWizard({
             <p className="text-xs text-slate-500">{fmt(Number(form.rentAmount))}/mo</p>
           </div>
         </div>
+        {form.additionalTenants.length > 0 && (
+          <div className="rounded-lg border border-slate-200 bg-white p-3 text-sm">
+            <p className="mb-2 text-xs text-slate-500">Co-tenants ({form.additionalTenants.length})</p>
+            <ul className="space-y-1">
+              {form.additionalTenants.map((t, i) => (
+                <li key={i} className="flex items-center gap-2 text-slate-700">
+                  <span className="font-medium">{[t.firstName, t.lastName].filter(Boolean).join(" ") || "Unnamed"}</span>
+                  {t.email && <span className="text-xs text-slate-500">{t.email}</span>}
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
 
         <label className="flex items-start gap-3 rounded-lg border border-slate-200 bg-white p-3 text-sm text-slate-700">
           <input
@@ -1044,7 +1255,7 @@ export function OnboardRenterWizard({
             type="button"
             disabled={submitting}
             onClick={submitOnboard}
-            className="flex items-center gap-2 rounded-lg bg-emerald-600 px-6 py-2.5 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700 disabled:opacity-50"
+            className="inline-flex h-11 items-center gap-2 rounded-lg bg-slate-950 px-4 text-sm font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
           >
             {submitting ? (
               <>
@@ -1148,9 +1359,9 @@ export function OnboardRenterWizard({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-start justify-center overflow-y-auto p-4 pt-8">
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={step !== "done" ? onClose : undefined} />
-      <div className="relative w-full max-w-xl rounded-2xl border border-slate-200 bg-white shadow-2xl">
+      <div className="relative w-full max-w-3xl rounded-2xl border border-slate-200 bg-white shadow-2xl">
         {/* Header */}
         <div className="border-b border-slate-100 px-6 pt-5 pb-4">
           <div className="flex items-start justify-between">
@@ -1184,7 +1395,7 @@ export function OnboardRenterWizard({
         </div>
 
         {/* Body */}
-        <div className="px-6 py-5">
+        <div className="overflow-y-auto px-6 py-5" style={{ maxHeight: "calc(100dvh - 190px)" }}>
           {stepContent[step]()}
         </div>
       </div>
@@ -1222,7 +1433,7 @@ export function OnboardRenterWizard({
                 type="button"
                 disabled={!pdfPassword}
                 onClick={submitPdfPassword}
-                className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-emerald-700 disabled:opacity-50"
+                className="rounded-lg bg-slate-950 px-4 py-2 text-sm font-semibold text-white shadow-sm transition-colors hover:bg-slate-800 disabled:opacity-50"
               >
                 Unlock
               </button>

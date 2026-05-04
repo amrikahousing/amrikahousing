@@ -1,7 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { PropertyForm } from "@/components/PropertyForm";
-import { AppShell } from "@/components/AppShell";
 import { getOrgPermissionContext, requirePermission } from "@/lib/org-authorization";
 
 export default async function NewPropertyPage() {
@@ -13,8 +12,7 @@ export default async function NewPropertyPage() {
   if (permissionError) redirect("/properties");
 
   return (
-    <AppShell>
-      <div className="mx-auto max-w-3xl space-y-6">
+    <div className="mx-auto max-w-3xl space-y-6">
         <header>
           <h1 className="text-3xl font-bold tracking-tight text-slate-900">
             Add property
@@ -24,7 +22,6 @@ export default async function NewPropertyPage() {
           </p>
         </header>
         <PropertyForm />
-      </div>
-    </AppShell>
+    </div>
   );
 }

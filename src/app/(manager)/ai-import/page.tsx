@@ -1,6 +1,5 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import { AppShell } from "@/components/AppShell";
 import { AiImportWizard } from "@/components/AiImportWizard";
 import { normalizePropertyType } from "@/lib/property-types";
 
@@ -26,8 +25,7 @@ export default async function AiImportPage({
     : undefined;
 
   return (
-    <AppShell>
-      <div className="space-y-6">
+    <div className="space-y-6">
         <header>
           {existingProperty ? (
             <>
@@ -46,7 +44,6 @@ export default async function AiImportPage({
           )}
         </header>
         <AiImportWizard existingProperty={existingProperty} />
-      </div>
-    </AppShell>
+    </div>
   );
 }

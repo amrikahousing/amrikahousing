@@ -1,13 +1,11 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
-import { RenterShell } from "@/components/RenterShell";
 import { MaintenanceClient } from "./MaintenanceClient";
-import { getPortalAccessState } from "@/lib/portal-access";
 import { resolveSharedUserIdentity } from "@/lib/renter-auth";
 
 export default async function RenterMaintenancePage() {
-  const { userId, orgId } = await auth();
+  const { userId } = await auth();
   if (!userId) redirect("/login");
 
   const identity = await resolveSharedUserIdentity(userId);
@@ -63,18 +61,6 @@ export default async function RenterMaintenancePage() {
     })
     : null;
 
-  const shellUser = {
-    email: identity.sharedUser?.email ?? identity.clerkUser?.primaryEmailAddress?.emailAddress ?? null,
-    firstName: identity.sharedUser?.first_name ?? identity.clerkUser?.firstName ?? tenant?.first_name ?? null,
-    imageUrl: identity.clerkUser?.imageUrl ?? null,
-    portal: "renter" as const,
-    ...(await getPortalAccessState({
-      userId,
-      orgId,
-      email: identity.sharedUser?.email ?? identity.clerkUser?.primaryEmailAddress?.emailAddress ?? null,
-    })),
-  };
-
   const hasActiveLease = tenant?.lease_tenants.some(
     (lt) => lt.leases.status === "active",
   ) ?? false;
@@ -85,12 +71,10 @@ export default async function RenterMaintenancePage() {
     : null;
 
   return (
-    <RenterShell user={shellUser}>
-      <MaintenanceClient
+    <MaintenanceClient
         requests={tenant?.maintenance_requests ?? []}
         hasActiveLease={hasActiveLease}
         unitLabel={unitLabel}
       />
-    </RenterShell>
   );
 }

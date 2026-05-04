@@ -184,7 +184,7 @@ export function PropertyForm({
         <button
           type="submit"
           disabled={isLoading}
-          className="rounded-lg bg-emerald-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+          className="h-11 rounded-lg bg-slate-950 px-4 text-sm font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
         >
           {isLoading ? "Saving…" : "Add property"}
         </button>

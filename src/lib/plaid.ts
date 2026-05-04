@@ -104,6 +104,11 @@ type PlaidTransferOriginatorFundingAccountCreateResponse = {
   request_id: string;
 };
 
+type PlaidStripeBankAccountTokenCreateResponse = {
+  stripe_bank_account_token: string;
+  request_id: string;
+};
+
 export type PlaidLinkAccount = {
   id?: string | null;
   name?: string | null;
@@ -425,6 +430,26 @@ export async function createPlaidOriginatorFundingAccount(args: {
 
   return {
     fundingAccountId: result.data.funding_account_id,
+  };
+}
+
+export async function createPlaidStripeBankAccountToken(args: {
+  accessToken: string;
+  accountId: string;
+}) {
+  const result = await plaidPost<PlaidStripeBankAccountTokenCreateResponse>(
+    "/processor/stripe/bank_account_token/create",
+    {
+      access_token: args.accessToken,
+      account_id: args.accountId,
+    },
+    "Could not create the Stripe payout token for this Plaid account.",
+  );
+
+  if ("error" in result) return { error: result.error, status: result.status };
+
+  return {
+    bankAccountToken: result.data.stripe_bank_account_token,
   };
 }
 

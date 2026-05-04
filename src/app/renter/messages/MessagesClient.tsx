@@ -137,7 +137,7 @@ export function MessagesClient({
                 type="button"
                 onClick={handleSend}
                 disabled={!draft.trim()}
-                className="rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                className="rounded-lg bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
               >
                 Send
               </button>

@@ -1,6 +1,9 @@
 "use client";
 
+import { Elements, PaymentElement, useElements, useStripe } from "@stripe/react-stripe-js";
+import { loadStripe, type Stripe } from "@stripe/stripe-js";
 import { useRouter } from "next/navigation";
+import type { FormEvent } from "react";
 import { useEffect, useMemo, useState } from "react";
 
 type PaymentRow = {
@@ -38,78 +41,21 @@ type Props = {
   nextDueDate: string | null;
   paymentMethod: string | null;
   payments: PaymentRow[];
-  plaidConfigured: boolean;
   savedPaymentMethods: SavedPaymentMethod[];
+  stripePublishableKey: string | null;
   totalPaid: number;
 };
 
 type PaymentTab = "overview" | "pay" | "methods";
 type FeedbackTone = "error" | "success";
 type FeedbackScope = "pay" | "methods";
+type StripeMethodType = "card" | "us_bank_account";
 
-type PlaidInstitution = {
-  institution_id?: string | null;
-  name?: string | null;
-};
+let stripePromise: Promise<Stripe | null> | null = null;
 
-type PlaidAccount = {
-  id?: string | null;
-  name?: string | null;
-  mask?: string | null;
-  subtype?: string | null;
-  type?: string | null;
-};
-
-type PlaidSuccessMetadata = {
-  institution?: PlaidInstitution | null;
-  accounts?: PlaidAccount[] | null;
-  link_session_id?: string | null;
-};
-
-type PlaidHandler = {
-  open: () => void;
-  destroy: () => void;
-};
-
-type PlaidFactory = {
-  create: (options: {
-    token: string;
-    onSuccess: (publicToken: string, metadata: PlaidSuccessMetadata) => void;
-    onExit?: (error: unknown) => void;
-  }) => PlaidHandler;
-};
-
-let plaidScriptPromise: Promise<void> | null = null;
-
-function plaidWindow() {
-  return window as Window & { Plaid?: PlaidFactory };
-}
-
-function loadPlaidScript() {
-  if (typeof window === "undefined") return Promise.resolve();
-  if (plaidWindow().Plaid) return Promise.resolve();
-  if (plaidScriptPromise) return plaidScriptPromise;
-
-  plaidScriptPromise = new Promise((resolve, reject) => {
-    const existing = document.querySelector<HTMLScriptElement>(
-      'script[src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"]',
-    );
-
-    if (existing) {
-      existing.addEventListener("load", () => resolve(), { once: true });
-      existing.addEventListener("error", () => reject(new Error("Plaid Link failed to load.")), { once: true });
-      return;
-    }
-
-    const script = document.createElement("script");
-    script.src = "https://cdn.plaid.com/link/v2/stable/link-initialize.js";
-    script.async = true;
-    script.onload = () => resolve();
-    script.onerror = () => reject(new Error("Plaid Link failed to load."));
-    document.body.appendChild(script);
-  });
-
-  return plaidScriptPromise;
+function getStripePromise(publishableKey: string) {
+  stripePromise ??= loadStripe(publishableKey);
+  return stripePromise;
 }
 
 const paymentTypeLabels: Record<string, string> = {
@@ -135,6 +81,18 @@ function formatCurrency(value: number | null | undefined) {
     currency: "USD",
     maximumFractionDigits: 2,
   }).format(value);
+}
+
+function roundCurrency(value: number) {
+  return Math.round((value + Number.EPSILON) * 100) / 100;
+}
+
+function estimateProcessingFee(amount: number, paymentType: SavedPaymentMethod["paymentType"]) {
+  if (paymentType === "us_bank_account") {
+    return roundCurrency(Math.min(amount * 0.008, 5));
+  }
+
+  return roundCurrency(amount * 0.029 + 0.3);
 }
 
 function formatDate(value: string | null | undefined) {
@@ -183,6 +141,20 @@ function formatMethodMeta(method: SavedPaymentMethod) {
     .join(" · ");
 }
 
+function resolveDefaultPaymentMethodId(
+  methods: SavedPaymentMethod[],
+  defaultPaymentMethodId: string | null,
+) {
+  const stripeMethods = methods.filter((method) => method.paymentProvider === "stripe");
+
+  return (
+    stripeMethods.find((method) => method.id === defaultPaymentMethodId)?.id ??
+    stripeMethods.find((method) => method.isDefault)?.id ??
+    stripeMethods[0]?.id ??
+    null
+  );
+}
+
 function FeedbackMessage({
   message,
   tone,
@@ -204,6 +176,83 @@ function FeedbackMessage({
   );
 }
 
+function StripeSetupForm({
+  methodType,
+  onCancel,
+  onError,
+  onSuccess,
+}: {
+  methodType: StripeMethodType;
+  onCancel: () => void;
+  onError: (message: string) => void;
+  onSuccess: () => void;
+}) {
+  const stripe = useStripe();
+  const elements = useElements();
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  async function handleSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!stripe || !elements) return;
+
+    setIsSubmitting(true);
+    const result = await stripe.confirmSetup({
+      elements,
+      redirect: "if_required",
+    });
+
+    if (result.error) {
+      onError(result.error.message ?? "Unable to save this payment method.");
+      setIsSubmitting(false);
+      return;
+    }
+
+    if (result.setupIntent?.id) {
+      const response = await fetch("/api/renter/payments/setup-intent/complete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ setupIntentId: result.setupIntent.id }),
+      });
+      const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+
+      if (!response.ok) {
+        onError(payload?.error ?? "The method was saved, but the app could not record it.");
+        setIsSubmitting(false);
+        return;
+      }
+    }
+
+    onSuccess();
+  }
+
+  return (
+    <form onSubmit={handleSubmit} className="mt-5 space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+      <PaymentElement />
+      <div className="flex flex-wrap justify-end gap-3">
+        <button
+          type="button"
+          onClick={onCancel}
+          disabled={isSubmitting}
+          className="rounded-lg border border-slate-300 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:bg-slate-100"
+        >
+          Cancel
+        </button>
+        <button
+          type="submit"
+          disabled={!stripe || !elements || isSubmitting}
+          className="rounded-lg bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+        >
+          {isSubmitting
+            ? "Saving..."
+            : methodType === "us_bank_account"
+              ? "Save ACH Account"
+              : "Save Card"}
+        </button>
+      </div>
+    </form>
+  );
+}
+
 export function PaymentsClient({
   autopayEnabled: initialAutopayEnabled,
   currentBalance,
@@ -211,20 +260,29 @@ export function PaymentsClient({
   nextDueDate,
   paymentMethod,
   payments,
-  plaidConfigured,
   savedPaymentMethods,
+  stripePublishableKey,
   totalPaid,
 }: Props) {
   const router = useRouter();
   const [tab, setTab] = useState<PaymentTab>("overview");
   const [autopayEnabled, setAutopayEnabled] = useState(initialAutopayEnabled);
+  const [effectiveDefaultMethodId, setEffectiveDefaultMethodId] = useState<string | null>(() =>
+    resolveDefaultPaymentMethodId(savedPaymentMethods, defaultPaymentMethodId),
+  );
+  const [localDefaultOverrideId, setLocalDefaultOverrideId] = useState<string | null>(null);
   const [selectedMethodId, setSelectedMethodId] = useState<string | null>(
-    defaultPaymentMethodId ?? savedPaymentMethods[0]?.id ?? null,
+    resolveDefaultPaymentMethodId(savedPaymentMethods, defaultPaymentMethodId),
   );
   const [selectedChargeId, setSelectedChargeId] = useState<string | null>(null);
-  const [isLinkingPlaidBank, setIsLinkingPlaidBank] = useState(false);
+  const [stripeSetup, setStripeSetup] = useState<{
+    clientSecret: string;
+    methodType: StripeMethodType;
+  } | null>(null);
+  const [isPreparingStripeSetup, setIsPreparingStripeSetup] = useState<StripeMethodType | null>(null);
   const [isPaying, setIsPaying] = useState(false);
   const [isSavingDefault, setIsSavingDefault] = useState<string | null>(null);
+  const [isSavingAutopay, setIsSavingAutopay] = useState(false);
   const [isRemovingMethod, setIsRemovingMethod] = useState<string | null>(null);
   const [feedback, setFeedback] = useState<{
     message: string;
@@ -246,35 +304,48 @@ export function PaymentsClient({
     [payments],
   );
 
-  const selectedMethod =
-    savedPaymentMethods.find((method) => method.id === selectedMethodId) ??
-    savedPaymentMethods.find((method) => method.isDefault) ??
-    savedPaymentMethods[0] ??
-    null;
-
   const selectedCharge =
     pendingPayments.find((payment) => payment.id === selectedChargeId) ?? pendingPayments[0] ?? null;
-  const cardMethods = savedPaymentMethods.filter(
-    (method) => method.paymentProvider === "stripe" && method.paymentType === "card",
+  const stripeMethods = useMemo(
+    () => savedPaymentMethods.filter((method) => method.paymentProvider === "stripe"),
+    [savedPaymentMethods],
   );
-  const achMethods = savedPaymentMethods.filter(
-    (method) => method.paymentType === "us_bank_account",
-  );
+  const selectedMethod =
+    stripeMethods.find((method) => method.id === selectedMethodId) ??
+    stripeMethods.find((method) => method.id === effectiveDefaultMethodId) ??
+    stripeMethods[0] ??
+    null;
+  const effectiveDefaultMethod =
+    stripeMethods.find((method) => method.id === effectiveDefaultMethodId) ?? null;
+  const estimatedProcessingFee =
+    selectedCharge && selectedMethod
+      ? estimateProcessingFee(selectedCharge.amount, selectedMethod.paymentType)
+      : 0;
+  const estimatedPaymentTotal = selectedCharge
+    ? roundCurrency(selectedCharge.amount + estimatedProcessingFee)
+    : 0;
+  const canUseStripe = Boolean(stripePublishableKey);
 
   useEffect(() => {
     setAutopayEnabled(initialAutopayEnabled);
   }, [initialAutopayEnabled]);
 
   useEffect(() => {
-    setSelectedMethodId(defaultPaymentMethodId ?? savedPaymentMethods[0]?.id ?? null);
-  }, [defaultPaymentMethodId, savedPaymentMethods]);
+    if (localDefaultOverrideId && stripeMethods.some((method) => method.id === localDefaultOverrideId)) {
+      setEffectiveDefaultMethodId(localDefaultOverrideId);
+      setSelectedMethodId(localDefaultOverrideId);
 
-  useEffect(() => {
-    if (!plaidConfigured) return;
-    void loadPlaidScript().catch(() => {
-      setScopedFeedback("methods", "error", "Plaid Link could not be loaded.");
-    });
-  }, [plaidConfigured]);
+      if (defaultPaymentMethodId === localDefaultOverrideId) {
+        setLocalDefaultOverrideId(null);
+      }
+
+      return;
+    }
+
+    const resolvedDefaultMethodId = resolveDefaultPaymentMethodId(stripeMethods, defaultPaymentMethodId);
+    setEffectiveDefaultMethodId(resolvedDefaultMethodId);
+    setSelectedMethodId(resolvedDefaultMethodId);
+  }, [defaultPaymentMethodId, localDefaultOverrideId, stripeMethods]);
 
   useEffect(() => {
     setSelectedChargeId((current) => {
@@ -297,96 +368,39 @@ export function PaymentsClient({
     setFeedback({ scope, tone, message });
   }
 
-  async function handleConnectPlaidBankAccount() {
+  async function handleAddStripeMethod(methodType: StripeMethodType) {
     clearFeedback("methods");
 
-    if (!plaidConfigured) {
-      setScopedFeedback("methods", "error", "Plaid is not configured yet for this environment.");
+    if (!stripePublishableKey) {
+      setScopedFeedback("methods", "error", "Online payments are not configured yet for this environment.");
       return;
     }
 
-    setIsLinkingPlaidBank(true);
+    setIsPreparingStripeSetup(methodType);
 
     try {
-      await loadPlaidScript();
-      if (!plaidWindow().Plaid) {
-        throw new Error("Plaid Link is unavailable.");
-      }
-
-      const tokenResponse = await fetch("/api/renter/payments/plaid/link-token", {
+      const response = await fetch("/api/renter/payments/setup-intent", {
         method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ paymentMethodType: methodType }),
       });
-      const tokenPayload = (await tokenResponse.json().catch(() => null)) as
-        | { linkToken?: string; error?: string }
+      const payload = (await response.json().catch(() => null)) as
+        | { clientSecret?: string; error?: string }
         | null;
 
-      if (!tokenResponse.ok || !tokenPayload?.linkToken) {
-        throw new Error(tokenPayload?.error ?? "Unable to prepare Plaid Link.");
+      if (!response.ok || !payload?.clientSecret) {
+        throw new Error(payload?.error ?? "Unable to prepare payment setup.");
       }
-      const linkToken = tokenPayload.linkToken;
 
-      const linkedMethod = await new Promise<{ bankName?: string | null; last4?: string | null }>(
-        (resolve, reject) => {
-          const handler = plaidWindow().Plaid?.create({
-            token: linkToken,
-            onSuccess: async (publicToken, metadata) => {
-              try {
-                const response = await fetch("/api/renter/payments/plaid/exchange", {
-                  method: "POST",
-                  headers: { "Content-Type": "application/json" },
-                  body: JSON.stringify({ publicToken, metadata }),
-                });
-                const payload = (await response.json().catch(() => null)) as
-                  | {
-                    paymentMethod?: { bankName?: string | null; last4?: string | null };
-                    error?: string;
-                  }
-                  | null;
-
-                if (!response.ok || !payload?.paymentMethod) {
-                  reject(new Error(payload?.error ?? "Unable to save the Plaid bank account."));
-                  return;
-                }
-
-                resolve(payload.paymentMethod);
-              } catch (error) {
-                reject(error);
-              } finally {
-                handler?.destroy();
-              }
-            },
-            onExit: (plaidError) => {
-              handler?.destroy();
-              reject(
-                new Error(
-                  plaidError
-                    ? "Plaid Link was closed before the bank account was connected."
-                    : "Plaid Link was closed before the bank account was connected.",
-                ),
-              );
-            },
-          });
-
-          handler?.open();
-        },
-      );
-
-      setScopedFeedback(
-        "methods",
-        "success",
-        linkedMethod.bankName
-          ? `${linkedMethod.bankName} ending in ${linkedMethod.last4 ?? "—"} linked for ACH rent payments.`
-          : "Bank account linked for ACH rent payments.",
-      );
-      router.refresh();
+      setStripeSetup({ clientSecret: payload.clientSecret, methodType });
     } catch (error) {
       setScopedFeedback(
         "methods",
         "error",
-        error instanceof Error ? error.message : "Unable to link the Plaid bank account.",
+        error instanceof Error ? error.message : "Unable to prepare payment setup.",
       );
     } finally {
-      setIsLinkingPlaidBank(false);
+      setIsPreparingStripeSetup(null);
     }
   }
 
@@ -403,15 +417,14 @@ export function PaymentsClient({
       return;
     }
 
-    if (selectedMethod.paymentProvider === "plaid") {
-      if (!plaidConfigured) {
-        setScopedFeedback("pay", "error", "Plaid ACH is not configured yet for this environment.");
+    if (selectedMethod.paymentProvider === "stripe") {
+      if (!stripePublishableKey) {
+        setScopedFeedback("pay", "error", "Online payments are not configured yet for this environment.");
         return;
       }
 
       setIsPaying(true);
-
-      const authorizeResponse = await fetch("/api/renter/payments/plaid/authorize", {
+      const response = await fetch("/api/renter/payments/intent", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -420,65 +433,55 @@ export function PaymentsClient({
           amount: selectedCharge.amount.toFixed(2),
         }),
       });
-      const authorizePayload = (await authorizeResponse.json().catch(() => null)) as
-        | { status?: string; error?: string; failure_message?: string | null }
+      const payload = (await response.json().catch(() => null)) as
+        | { clientSecret?: string | null; status?: string; error?: string }
         | null;
 
-      if (!authorizeResponse.ok) {
-        setScopedFeedback("pay", "error", authorizePayload?.error ?? "Unable to authorize the ACH debit.");
+      if (!response.ok) {
+        setScopedFeedback("pay", "error", payload?.error ?? "Unable to submit the online payment.");
         setIsPaying(false);
         return;
       }
 
-      if (authorizePayload?.status === "failed") {
-        setScopedFeedback(
-          "pay",
-          "error",
-          authorizePayload.failure_message ?? "The ACH authorization was declined.",
-        );
-        setIsPaying(false);
-        router.refresh();
-        return;
-      }
+      if (payload?.status === "requires_action" && payload.clientSecret) {
+        const stripe = await getStripePromise(stripePublishableKey);
+        if (!stripe) {
+          setScopedFeedback("pay", "error", "The payment form could not be loaded.");
+          setIsPaying(false);
+          return;
+        }
 
-      const transferResponse = await fetch("/api/renter/payments/plaid/transfer", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          paymentId: selectedCharge.id,
-          paymentMethodId: selectedMethod.id,
-          amount: selectedCharge.amount.toFixed(2),
-        }),
-      });
-      const transferPayload = (await transferResponse.json().catch(() => null)) as
-        | { status?: string; error?: string }
-        | null;
+        const confirmation = await stripe.confirmPayment({
+          clientSecret: payload.clientSecret,
+          redirect: "if_required",
+        });
 
-      if (!transferResponse.ok) {
-        setScopedFeedback("pay", "error", transferPayload?.error ?? "Unable to submit the ACH payment.");
-        setIsPaying(false);
-        return;
+        if (confirmation.error) {
+          setScopedFeedback("pay", "error", confirmation.error.message ?? "Unable to confirm this payment.");
+          setIsPaying(false);
+          return;
+        }
       }
 
       setScopedFeedback(
         "pay",
         "success",
-        "ACH payment submitted. Your rent ledger will update after Plaid confirms the transfer.",
+        selectedMethod.paymentType === "us_bank_account"
+          ? "ACH payment submitted. Your ledger will update after the payment is confirmed."
+          : "Card payment submitted.",
       );
       setIsPaying(false);
       router.refresh();
-      return;
     }
-
-    setScopedFeedback(
-      "pay",
-      "error",
-      "Only ACH rent payments are available right now so funds go to the organization receiving account.",
-    );
   }
 
   async function handleMakeDefault(methodId: string) {
     clearFeedback("methods");
+    const previousDefaultMethodId = effectiveDefaultMethodId;
+    const previousLocalDefaultOverrideId = localDefaultOverrideId;
+    setLocalDefaultOverrideId(methodId);
+    setEffectiveDefaultMethodId(methodId);
+    setSelectedMethodId(methodId);
     setIsSavingDefault(methodId);
 
     const response = await fetch("/api/renter/payments/default-method", {
@@ -491,13 +494,13 @@ export function PaymentsClient({
     setIsSavingDefault(null);
 
     if (!response.ok) {
+      setLocalDefaultOverrideId(previousLocalDefaultOverrideId);
+      setEffectiveDefaultMethodId(previousDefaultMethodId);
       setScopedFeedback("methods", "error", payload?.error ?? "Unable to update the default payment method.");
       return;
     }
 
-    setSelectedMethodId(methodId);
     setScopedFeedback("methods", "success", "Default payment method updated.");
-    router.refresh();
   }
 
   async function handleRemoveMethod(methodId: string) {
@@ -517,6 +520,37 @@ export function PaymentsClient({
     }
 
     setScopedFeedback("methods", "success", "Payment method removed.");
+    router.refresh();
+  }
+
+  async function handleToggleAutopay(enabled: boolean) {
+    clearFeedback("methods");
+
+    if (enabled && !effectiveDefaultMethodId) {
+      setScopedFeedback("methods", "error", "Make an online payment method the default before enabling auto-pay.");
+      return;
+    }
+
+    const previousAutopayState = autopayEnabled;
+    setAutopayEnabled(enabled);
+    setIsSavingAutopay(true);
+
+    const response = await fetch("/api/renter/payments/autopay", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ enabled }),
+    });
+    const payload = (await response.json().catch(() => null)) as { error?: string } | null;
+
+    setIsSavingAutopay(false);
+
+    if (!response.ok) {
+      setAutopayEnabled(previousAutopayState);
+      setScopedFeedback("methods", "error", payload?.error ?? "Unable to update auto-pay.");
+      return;
+    }
+
+    setScopedFeedback("methods", "success", enabled ? "Auto-pay enabled." : "Auto-pay disabled.");
     router.refresh();
   }
 
@@ -540,15 +574,17 @@ export function PaymentsClient({
           <p className="text-sm font-medium text-slate-500">Auto-Pay Status</p>
           <p className="mt-3 text-3xl font-bold text-slate-900">{autopayEnabled ? "Active" : "Inactive"}</p>
           <p className="mt-1 text-sm text-slate-500">
-            {autopayEnabled ? "Disabled until ACH auto-collection is fully supported." : "Submit rent manually with ACH."}
+            {autopayEnabled ? "Enabled for your default method." : "Submit rent manually online."}
           </p>
         </article>
 
         <article className="rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
           <p className="text-sm font-medium text-slate-500">Default Method</p>
-          <p className="mt-3 text-3xl font-bold text-slate-900">{paymentMethod ?? "No method"}</p>
+          <p className="mt-3 text-3xl font-bold text-slate-900">
+            {effectiveDefaultMethod ? formatMethodLabel(effectiveDefaultMethod) : paymentMethod ?? "No method"}
+          </p>
           <p className="mt-1 text-sm text-slate-500">
-            {savedPaymentMethods.length > 0 ? "Use a linked bank account for rent payments." : "Link a bank account to pay rent online."}
+            {stripeMethods.length > 0 ? "Use a saved online payment method." : "Add a payment method to pay online."}
           </p>
         </article>
       </section>
@@ -705,72 +741,83 @@ export function PaymentsClient({
 
           <article className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
             <h2 className="font-semibold text-slate-900">Choose How To Pay</h2>
-            <p className="mt-1 text-sm text-slate-500">Rent payments are collected by ACH through Plaid Transfer so funds settle to the organization&apos;s receiving bank account.</p>
+            <p className="mt-1 text-sm text-slate-500">Choose a saved card or ACH bank account.</p>
 
-            <div className="mt-5 space-y-6">
-              <div>
-                <div className="flex items-center justify-between gap-3">
-                  <div>
-                    <h3 className="font-medium text-slate-900">Pay by bank (ACH via Plaid Transfer)</h3>
-                    <p className="mt-1 text-sm text-slate-500">Manual one-time ACH debits from your linked bank account.</p>
-                  </div>
-                </div>
-                <div className="mt-3 space-y-3">
-                  {achMethods.length === 0 ? (
-                    <p className="rounded-xl border border-dashed border-slate-200 px-4 py-4 text-sm text-slate-500">
-                      Link a bank account in the Payment Methods tab to pay rent by ACH.
-                    </p>
-                  ) : (
-                    achMethods.map((method) => {
-                      const isSelected = selectedMethod?.id === method.id;
-                      return (
-                        <button
-                          key={method.id}
-                          type="button"
-                          onClick={() => setSelectedMethodId(method.id)}
-                          className={[
-                            "flex w-full items-center justify-between rounded-xl border px-4 py-4 text-left transition-colors",
-                            isSelected ? "border-emerald-300 bg-emerald-50" : "border-slate-200 hover:bg-slate-50",
-                          ].join(" ")}
-                        >
-                          <div>
-                            <p className="font-medium text-slate-900">{formatMethodLabel(method)}</p>
-                            <p className="text-sm text-slate-500">One-time ACH debit via Plaid Transfer</p>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            {method.isDefault ? (
-                              <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-medium text-emerald-700">
-                                Default
-                              </span>
-                            ) : null}
-                            <span className="rounded-full bg-sky-100 px-2.5 py-0.5 text-xs font-medium text-sky-700">
-                              ACH
-                            </span>
-                          </div>
-                        </button>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
-
-              {cardMethods.length > 0 ? (
-                <div className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-4 text-sm text-amber-900">
-                  Saved cards can stay on file for now, but new rent payments must use ACH so money goes to the landlord organization&apos;s receiving bank account.
-                </div>
-              ) : null}
+            <div className="mt-5 space-y-3">
+              {stripeMethods.length === 0 ? (
+                <p className="rounded-xl border border-dashed border-slate-200 px-4 py-4 text-sm text-slate-500">
+                  Add a card or ACH account in the Payment Methods tab to pay online.
+                </p>
+              ) : (
+                stripeMethods.map((method) => {
+                  const isSelected = selectedMethod?.id === method.id;
+                  const isDefault = method.id === effectiveDefaultMethodId;
+                  return (
+                    <button
+                      key={method.id}
+                      type="button"
+                      onClick={() => setSelectedMethodId(method.id)}
+                      className={[
+                        "flex w-full items-center justify-between rounded-xl border px-4 py-4 text-left transition-colors",
+                        isSelected ? "border-sky-300 bg-sky-50" : "border-slate-200 hover:bg-slate-50",
+                      ].join(" ")}
+                    >
+                      <div>
+                        <p className="font-medium text-slate-900">{formatMethodLabel(method)}</p>
+                        <p className="text-sm text-slate-500">
+                          {method.paymentType === "us_bank_account"
+                            ? "ACH bank payment"
+                            : "Card payment"}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {isDefault ? (
+                          <span className="rounded-full bg-emerald-100 px-2.5 py-0.5 text-xs font-medium text-emerald-700">
+                            Default
+                          </span>
+                        ) : null}
+                        <span className="rounded-full bg-violet-100 px-2.5 py-0.5 text-xs font-medium text-violet-700">
+                          Online
+                        </span>
+                      </div>
+                    </button>
+                  );
+                })
+              )}
             </div>
 
             <div className="mt-6 rounded-xl bg-slate-50 p-4">
-              <p className="text-sm text-slate-500">Selected charge</p>
-              <p className="mt-1 text-lg font-semibold text-slate-900">
-                {selectedCharge ? formatCurrency(selectedCharge.amount) : "No charge selected"}
-              </p>
+              <p className="text-sm text-slate-500">Payment breakdown</p>
+              {selectedCharge ? (
+                <div className="mt-3 space-y-2 text-sm">
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="text-slate-600">Rent charge</span>
+                    <span className="font-medium text-slate-900">{formatCurrency(selectedCharge.amount)}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-4">
+                    <span className="text-slate-600">
+                      Estimated processing fee
+                      {selectedMethod?.paymentType === "us_bank_account"
+                        ? " (0.8%, capped at $5.00)"
+                        : " (2.9% + $0.30)"}
+                    </span>
+                    <span className="font-medium text-slate-900">{formatCurrency(estimatedProcessingFee)}</span>
+                  </div>
+                  <div className="flex items-center justify-between gap-4 border-t border-slate-200 pt-2">
+                    <span className="font-semibold text-slate-900">Estimated total</span>
+                    <span className="text-lg font-semibold text-slate-900">
+                      {formatCurrency(estimatedPaymentTotal)}
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <p className="mt-1 text-lg font-semibold text-slate-900">No charge selected</p>
+              )}
             </div>
 
-            {selectedMethod?.paymentProvider === "plaid" ? (
+            {selectedMethod ? (
               <div className="mt-4 rounded-xl border border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-800">
-                Submitting this payment authorizes a one-time ACH debit for the selected rent charge.
+                Processing fees are added to your rent payment: cards are typically 2.9% + $0.30, and ACH bank payments are typically 0.8% capped at $5.00. The final total may vary by payment type.
               </div>
             ) : null}
 
@@ -781,15 +828,14 @@ export function PaymentsClient({
                 isPaying ||
                 !selectedCharge ||
                 !selectedMethod ||
-                selectedMethod.paymentProvider !== "plaid" ||
-                !plaidConfigured
+                !canUseStripe
               }
-              className="mt-5 rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+              className="mt-5 rounded-lg bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
             >
               {isPaying
                 ? "Processing..."
                 : selectedCharge
-                  ? `Pay ${formatCurrency(selectedCharge.amount)} by ACH`
+                  ? `Pay ${formatCurrency(estimatedPaymentTotal)}`
                   : "Choose a charge"}
             </button>
             {feedback?.scope === "pay" ? (
@@ -808,34 +854,61 @@ export function PaymentsClient({
               <div>
                 <h2 className="font-semibold text-slate-900">Payment Methods</h2>
                 <p className="mt-1 text-sm text-slate-500">
-                  ACH bank accounts are linked through Plaid Transfer for rent payments that settle to the landlord organization&apos;s receiving bank account.
+                  Save cards and ACH bank accounts for online rent payments.
                 </p>
                 <p className="mt-3 text-sm text-slate-500">
-                  Link a bank account to pay rent online.
+                  Your default method is applied to upcoming rent payments.
                 </p>
               </div>
               <div className="flex flex-wrap gap-3">
                 <button
                   type="button"
-                  onClick={() => void handleConnectPlaidBankAccount()}
-                  disabled={isLinkingPlaidBank || !plaidConfigured}
-                  className={[
-                    "rounded-lg px-4 py-2.5 text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:bg-slate-100",
-                    "border border-slate-300 bg-white text-slate-700 hover:bg-slate-100",
-                  ].join(" ")}
+                  onClick={() => void handleAddStripeMethod("card")}
+                  disabled={isPreparingStripeSetup !== null || !canUseStripe}
+                  className="rounded-lg bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
                 >
-                  {isLinkingPlaidBank ? "Opening Plaid..." : "Link Bank Account"}
+                  {isPreparingStripeSetup === "card" ? "Preparing..." : "Add Card"}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void handleAddStripeMethod("us_bank_account")}
+                  disabled={isPreparingStripeSetup !== null || !canUseStripe}
+                  className="rounded-lg bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                >
+                  {isPreparingStripeSetup === "us_bank_account" ? "Preparing..." : "Add ACH"}
                 </button>
               </div>
             </div>
-            <p className="mt-4 text-sm text-slate-500">
-              `Link Bank Account` starts the Plaid ACH flow.
-            </p>
 
-            {!plaidConfigured ? (
+            {!canUseStripe ? (
               <div className="mt-5 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
-                Add `PLAID_CLIENT_ID`, `PLAID_SECRET`, and `PLAID_ENV` to enable ACH rent payments.
+                Add payment processor keys to enable online payment methods.
               </div>
+            ) : null}
+
+            {stripeSetup && stripePublishableKey ? (
+              <Elements
+                key={stripeSetup.clientSecret}
+                stripe={getStripePromise(stripePublishableKey)}
+                options={{ clientSecret: stripeSetup.clientSecret }}
+              >
+                <StripeSetupForm
+                  methodType={stripeSetup.methodType}
+                  onCancel={() => setStripeSetup(null)}
+                  onError={(message) => setScopedFeedback("methods", "error", message)}
+                  onSuccess={() => {
+                    setStripeSetup(null);
+                    setScopedFeedback(
+                      "methods",
+                      "success",
+                      stripeSetup.methodType === "us_bank_account"
+                        ? "ACH bank account saved."
+                        : "Card saved.",
+                    );
+                    router.refresh();
+                  }}
+                />
+              </Elements>
             ) : null}
 
             {feedback?.scope === "methods" ? (
@@ -845,60 +918,86 @@ export function PaymentsClient({
             ) : null}
 
             <div className="mt-6 space-y-3">
-              {savedPaymentMethods.length === 0 ? (
+              {stripeMethods.length === 0 ? (
                 <p className="text-sm text-slate-500">No saved payment methods yet.</p>
               ) : (
-                savedPaymentMethods.map((method) => (
-                  <div
-                    key={method.id}
-                    className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white px-4 py-4"
-                  >
-                    <div>
-                      <p className="font-medium text-slate-900">
-                        {formatMethodLabel(method)}
-                      </p>
-                      <p className="text-sm text-slate-500">
-                        {method.paymentProvider === "plaid"
-                          ? "Plaid Transfer ACH"
-                          : formatMethodMeta(method)}
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span
-                        className={[
-                          "inline-flex items-center rounded-full px-3 py-1 text-xs font-medium",
-                          method.paymentProvider === "plaid"
-                            ? "bg-sky-100 text-sky-700"
-                            : "bg-violet-100 text-violet-700",
-                        ].join(" ")}
-                      >
-                        {method.paymentProvider === "plaid" ? "Plaid ACH" : "Stripe"}
-                      </span>
-                      {method.isDefault ? (
-                        <span className="inline-flex items-center rounded-full bg-emerald-100 px-3 py-1 text-xs font-medium text-emerald-700">
-                          Default
+                stripeMethods.map((method) => {
+                  const isDefault = method.id === effectiveDefaultMethodId;
+                  const isSavingThisDefault = isSavingDefault === method.id;
+
+                  return (
+                    <div
+                      key={method.id}
+                      className="flex flex-wrap items-center justify-between gap-4 rounded-xl border border-slate-200 bg-white px-4 py-4"
+                    >
+                      <div>
+                        <p className="font-medium text-slate-900">
+                          {formatMethodLabel(method)}
+                        </p>
+                        <p className="text-sm text-slate-500">
+                          {method.paymentType === "us_bank_account"
+                            ? `ACH${formatMethodMeta(method) ? ` · ${formatMethodMeta(method)}` : ""}`
+                            : formatMethodMeta(method)}
+                        </p>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-3">
+                        <span
+                          className="inline-flex items-center rounded-full bg-violet-100 px-3 py-1 text-xs font-medium text-violet-700"
+                        >
+                          Online
                         </span>
-                      ) : (
+                        <label
+                          className={[
+                            "inline-flex min-w-[154px] items-center justify-between gap-3 rounded-full border px-3 py-2 text-sm font-semibold transition-colors",
+                            isDefault
+                              ? "border-emerald-200 bg-emerald-50 text-emerald-800"
+                              : "border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50",
+                            isSavingDefault ? "cursor-wait opacity-75" : "cursor-pointer",
+                          ].join(" ")}
+                        >
+                          <span>{isSavingThisDefault ? "Saving..." : isDefault ? "Default method" : "Make default"}</span>
+                          <input
+                            type="checkbox"
+                            aria-label={`${isDefault ? "Default payment method" : "Make default payment method"}: ${formatMethodLabel(method)}`}
+                            checked={isDefault}
+                            disabled={isSavingDefault !== null}
+                            onChange={(event) => {
+                              if (event.target.checked && !isDefault) {
+                                void handleMakeDefault(method.id);
+                              }
+                            }}
+                            className="peer sr-only"
+                          />
+                          <span
+                            aria-hidden="true"
+                            className={[
+                              "relative inline-flex h-6 w-11 shrink-0 items-center rounded-full border transition-colors",
+                              isDefault
+                                ? "border-emerald-500 bg-emerald-500"
+                                : "border-slate-300 bg-slate-100",
+                              isSavingDefault ? "opacity-70" : "",
+                            ].join(" ")}
+                          >
+                            <span
+                              className={[
+                                "inline-block h-[18px] w-[18px] rounded-full bg-white shadow-sm transition-transform",
+                                isDefault ? "translate-x-5" : "translate-x-1",
+                              ].join(" ")}
+                            />
+                          </span>
+                        </label>
                         <button
                           type="button"
-                          onClick={() => handleMakeDefault(method.id)}
-                          disabled={isSavingDefault === method.id}
-                          className="rounded-lg border border-slate-300 px-3 py-2 text-sm font-medium text-slate-700 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:bg-slate-100"
+                          onClick={() => handleRemoveMethod(method.id)}
+                          disabled={isRemovingMethod === method.id}
+                          className="rounded-lg border border-rose-200 px-3 py-2 text-sm font-medium text-rose-700 transition-colors hover:bg-rose-50 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
                         >
-                          {isSavingDefault === method.id ? "Saving..." : "Make Default"}
+                          {isRemovingMethod === method.id ? "Removing..." : "Remove"}
                         </button>
-                      )}
-                      <button
-                        type="button"
-                        onClick={() => handleRemoveMethod(method.id)}
-                        disabled={isRemovingMethod === method.id}
-                        className="rounded-lg border border-rose-200 px-3 py-2 text-sm font-medium text-rose-700 transition-colors hover:bg-rose-50 disabled:cursor-not-allowed disabled:bg-slate-100 disabled:text-slate-400"
-                      >
-                        {isRemovingMethod === method.id ? "Removing..." : "Remove"}
-                      </button>
+                      </div>
                     </div>
-                  </div>
-                ))
+                  );
+                })
               )}
             </div>
           </section>
@@ -907,17 +1006,23 @@ export function PaymentsClient({
             <div className="flex items-start justify-between gap-4">
               <div>
                 <h2 className="font-semibold text-slate-900">Auto-Pay Settings</h2>
-                <p className="mt-1 text-sm text-slate-500">Auto-pay will return once recurring ACH collection is wired to the organization&apos;s receiving bank account.</p>
+                <p className="mt-1 text-sm text-slate-500">
+                  Automatically charge your default online payment method for new rent charges.
+                </p>
               </div>
               <button
                 type="button"
-                disabled
+                onClick={() => void handleToggleAutopay(!autopayEnabled)}
+                disabled={isSavingAutopay || !effectiveDefaultMethodId}
                 className={[
                   "relative mt-1 inline-flex h-8 w-14 items-center rounded-full transition-colors",
                   autopayEnabled ? "bg-emerald-500" : "bg-slate-300",
-                  "cursor-not-allowed opacity-70",
+                  isSavingAutopay || !effectiveDefaultMethodId
+                    ? "cursor-not-allowed opacity-70"
+                    : "hover:ring-4 hover:ring-emerald-100",
                 ].join(" ")}
                 aria-pressed={autopayEnabled}
+                aria-label={autopayEnabled ? "Disable auto-pay" : "Enable auto-pay"}
               >
                 <span
                   className={[
@@ -929,9 +1034,13 @@ export function PaymentsClient({
             </div>
 
               <div className="mt-5 rounded-xl bg-slate-50 p-4">
-                <p className="font-medium text-slate-900">Enable Auto-Pay</p>
+                <p className="font-medium text-slate-900">
+                  {isSavingAutopay ? "Saving auto-pay..." : autopayEnabled ? "Auto-pay is enabled" : "Enable Auto-Pay"}
+                </p>
                 <p className="mt-1 text-sm text-slate-500">
-                  Auto-pay is currently disabled so rent does not bypass the organization&apos;s receiving-account setup.
+                  {effectiveDefaultMethodId
+                    ? "Future eligible rent charges will use your default online payment method. Processing fees still apply."
+                    : "Set a default online payment method before enabling auto-pay."}
                 </p>
               </div>
           </section>

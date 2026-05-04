@@ -1,7 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
-import { AppShell } from "@/components/AppShell";
 import { PropertyManagersClient } from "@/components/PropertyManagersClient";
+import { prisma } from "@/lib/db";
 import { getOrgPermissionContext, requirePermission } from "@/lib/org-authorization";
 
 export default async function TeamPage() {
@@ -15,25 +15,30 @@ export default async function TeamPage() {
   if (permissionError) redirect("/dashboard");
 
   const canInvite = true;
+  const organization = await prisma.organizations.findUnique({
+    where: { id: access.orgDbId },
+    select: { name: true },
+  });
 
   return (
-    <AppShell>
-      <div className="space-y-6">
+    <div className="space-y-6">
         <header>
           <p className="text-sm font-semibold uppercase tracking-wide text-emerald-700">
-            Team
+            Admin
           </p>
           <h1 className="mt-1 text-3xl font-bold tracking-tight text-slate-900">
-            Property managers
+            Access Management
           </h1>
           <p className="mt-2 max-w-2xl text-slate-500">
-            Add property managers to your organization so they can access the
-            portfolio workspace.
+            Invite users, update roles, scope access by property, and revoke
+            permissions from one place.
           </p>
         </header>
 
-        <PropertyManagersClient canInvite={canInvite} />
-      </div>
-    </AppShell>
+        <PropertyManagersClient
+          canInvite={canInvite}
+          organizationName={organization?.name ?? "this organization"}
+        />
+    </div>
   );
 }

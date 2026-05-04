@@ -11,8 +11,11 @@ import {
   requirePermission,
 } from "@/lib/org-authorization";
 import {
-  MANAGER_PERMISSION_ROLES,
+  normalizePermissionRole,
+  normalizeOrganizationRole,
+  ORGANIZATION_ROLES,
   readOrganizationAccessMetadata,
+  replaceMembershipAccess,
   replacePropertyAssignments,
 } from "@/lib/permissions";
 
@@ -53,7 +56,6 @@ export async function GET() {
   ]);
 
   const memberUserIds = memberships.data
-    .filter((membership) => membership.role === "org:member")
     .map((membership) => membership.publicUserData?.userId)
     .filter((userId): userId is string => Boolean(userId));
   const localUsers = memberUserIds.length
@@ -72,6 +74,10 @@ export async function GET() {
           role: true,
           is_active: true,
           property_assignments: { select: { property_id: true } },
+          memberships: {
+            where: { organization_id: access.orgDbId },
+            select: { role: true, property_id: true, is_active: true },
+          },
         },
       })
     : [];
@@ -81,17 +87,25 @@ export async function GET() {
 
   return Response.json({
     properties,
-    presetRoles: MANAGER_PERMISSION_ROLES.map((role) => ({
+    presetRoles: ORGANIZATION_ROLES.map((role) => ({
       value: role,
       label: roleLabel(role),
     })),
     managers: memberships.data
-      .filter((membership) => membership.role === "org:member")
       .map((membership) => {
         const localUser = localUsersByClerkId.get(membership.publicUserData?.userId ?? "");
         const metadata = readOrganizationAccessMetadata(
           membership.publicMetadata as Record<string, unknown> | null | undefined,
         );
+        const activeMemberships = localUser?.memberships.filter((row) => row.is_active) ?? [];
+        const localRole = normalizeOrganizationRole(
+          membership.role === "org:admin"
+            ? "admin"
+            : activeMemberships[0]?.role ?? localUser?.role ?? metadata.role,
+        );
+        const localPropertyIds = activeMemberships
+          .map((row) => row.property_id)
+          .filter((propertyId): propertyId is string => Boolean(propertyId));
 
         return {
           id: localUser?.id ?? membership.publicUserData?.userId ?? membership.id,
@@ -104,11 +118,12 @@ export async function GET() {
             localUser?.first_name ?? membership.publicUserData?.firstName ?? null,
           lastName:
             localUser?.last_name ?? membership.publicUserData?.lastName ?? null,
-          permissionRole: localUser?.role ?? metadata.permissionRole,
-          propertyIds:
-            localUser?.property_assignments.map((assignment) => assignment.property_id) ??
-            metadata.propertyIds,
+          clerkRole: membership.role,
+          permissionRole: normalizePermissionRole(localRole),
+          role: localRole,
+          propertyIds: localPropertyIds.length ? localPropertyIds : metadata.propertyIds,
           active: localUser?.is_active ?? metadata.active,
+          canRevoke: membership.publicUserData?.userId !== access.userId,
         };
       }),
     pendingInvites: invitations.data.map((invitation) => {
@@ -118,6 +133,7 @@ export async function GET() {
       return {
         id: invitation.id,
         email: invitation.emailAddress,
+        role: metadata.role,
         permissionRole: metadata.permissionRole,
         propertyIds: metadata.propertyIds,
         active: metadata.active,
@@ -150,7 +166,7 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: "A valid email address is required." }, { status: 422 });
   }
 
-  const { permissionRole, propertyIds } = normalizeManagerAccessInput({
+  const { role, permissionRole, propertyIds } = normalizeManagerAccessInput({
     permissionRole: body.permissionRole,
     propertyIds: body.propertyIds,
   });
@@ -162,6 +178,8 @@ export async function POST(request: NextRequest) {
   const resolvedProperties = resolveManagerPropertyIds({
     requestedPropertyIds: propertyIds,
     availablePropertyIds: availableProperties.map((property) => property.id),
+    role,
+    permissionRole,
   });
   if (resolvedProperties.error) {
     return Response.json({ error: resolvedProperties.error }, { status: 422 });
@@ -169,6 +187,7 @@ export async function POST(request: NextRequest) {
 
   const clerk = await clerkClient();
   const membershipMetadata = {
+    role,
     permissionRole,
     propertyIds: resolvedProperties.propertyIds,
     active: true,
@@ -185,14 +204,12 @@ export async function POST(request: NextRequest) {
       (candidate) => candidate.organization.id === access.orgId,
     );
 
-    if (membership?.role === "org:admin") {
-      return Response.json(
-        { error: "Organization admins already have full access and cannot be downgraded here." },
-        { status: 409 },
-      );
-    }
-
     if (membership) {
+      await clerk.organizations.updateOrganizationMembership({
+        organizationId: access.orgId,
+        userId: existingUser.id,
+        role: role === "admin" ? "org:admin" : "org:member",
+      });
       await clerk.organizations.updateOrganizationMembershipMetadata({
         organizationId: access.orgId,
         userId: existingUser.id,
@@ -207,12 +224,19 @@ export async function POST(request: NextRequest) {
         await prisma.users.update({
           where: { id: localUser.id },
           data: {
-            role: permissionRole,
+            role,
             is_active: true,
             updated_at: new Date(),
           },
         });
         await replacePropertyAssignments(localUser.id, resolvedProperties.propertyIds);
+        await replaceMembershipAccess({
+          userDbId: localUser.id,
+          orgDbId: access.orgDbId,
+          role,
+          propertyIds: resolvedProperties.propertyIds,
+          active: true,
+        });
       }
 
       return Response.json({ memberUpdated: emailAddress });
@@ -238,7 +262,7 @@ export async function POST(request: NextRequest) {
   await clerk.organizations.createOrganizationInvitation({
     organizationId: access.orgId,
     emailAddress,
-    role: "org:member",
+    role: role === "admin" ? "org:admin" : "org:member",
     redirectUrl,
     publicMetadata: membershipMetadata,
   });

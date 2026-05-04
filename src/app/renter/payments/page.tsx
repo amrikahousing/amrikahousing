@@ -1,9 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
-import { RenterShell } from "@/components/RenterShell";
-import { getPortalAccessState } from "@/lib/portal-access";
-import { getPlaidConfig } from "@/lib/plaid";
 import { resolveSharedUserIdentity } from "@/lib/renter-auth";
 import { getTenantPaymentProfile } from "@/lib/renter-payments";
 import { PaymentsClient } from "./PaymentsClient";
@@ -40,7 +37,7 @@ function formatSavedMethodLabel(method: {
 }
 
 export default async function RenterPaymentsPage() {
-  const { userId, orgId } = await auth();
+  const { userId } = await auth();
   if (!userId) redirect("/login");
 
   const identity = await resolveSharedUserIdentity(userId);
@@ -84,18 +81,6 @@ export default async function RenterPaymentsPage() {
     })
     : null;
 
-  const shellUser = {
-    email: identity.sharedUser?.email ?? identity.clerkUser?.primaryEmailAddress?.emailAddress ?? null,
-    firstName: identity.sharedUser?.first_name ?? identity.clerkUser?.firstName ?? tenant?.first_name ?? null,
-    imageUrl: identity.clerkUser?.imageUrl ?? null,
-    portal: "renter" as const,
-    ...(await getPortalAccessState({
-      userId,
-      orgId,
-      email: identity.sharedUser?.email ?? identity.clerkUser?.primaryEmailAddress?.emailAddress ?? null,
-    })),
-  };
-
   const paymentProfile = tenant
     ? await getTenantPaymentProfile({
         userId,
@@ -110,7 +95,7 @@ export default async function RenterPaymentsPage() {
       paymentProvider: method.paymentProvider === "plaid" ? "plaid" : "stripe",
       paymentType: method.paymentType === "us_bank_account" ? "us_bank_account" : "card",
     })) ?? [];
-  const plaidConfigured = !("error" in getPlaidConfig());
+  const stripePaymentMethods = savedPaymentMethods.filter((method) => method.paymentProvider === "stripe");
 
   const allPayments =
     tenant?.lease_tenants.flatMap((lt) => lt.leases.payments) ?? [];
@@ -121,18 +106,21 @@ export default async function RenterPaymentsPage() {
   const pendingPayments = allPayments.filter((p) => p.status === "pending");
   const totalPaid = paidPayments.reduce((sum, p) => sum + Number(p.amount), 0);
   const totalPending = pendingPayments.reduce((sum, p) => sum + Number(p.amount), 0);
-  const defaultMethod = savedPaymentMethods.find((method) => method.isDefault) ?? null;
+  const defaultPaymentMethodId = paymentProfile?.renter_payment_settings?.default_payment_method_id ?? null;
+  const defaultMethod =
+    stripePaymentMethods.find((method) => method.id === defaultPaymentMethodId) ??
+    stripePaymentMethods.find((method) => method.isDefault) ??
+    null;
   const latestMethod = defaultMethod
     ? formatSavedMethodLabel(defaultMethod)
     : allPayments.find((payment) => payment.payment_method)?.payment_method ?? null;
   const nextPending = pendingPayments.find((payment) => payment.due_date) ?? pendingPayments[0] ?? null;
   return (
-    <RenterShell user={shellUser}>
-      <PaymentsClient
+    <PaymentsClient
         currentBalance={totalPending}
         totalPaid={totalPaid}
         autopayEnabled={paymentProfile?.renter_payment_settings?.autopay_enabled ?? false}
-        defaultPaymentMethodId={paymentProfile?.renter_payment_settings?.default_payment_method_id ?? null}
+        defaultPaymentMethodId={defaultMethod?.id ?? null}
         paymentMethod={latestMethod}
         nextDueDate={nextPending?.due_date?.toISOString() ?? null}
         payments={allPayments.map((payment) => ({
@@ -146,8 +134,7 @@ export default async function RenterPaymentsPage() {
           notes: payment.notes ?? null,
         }))}
         savedPaymentMethods={savedPaymentMethods}
-        plaidConfigured={plaidConfigured}
-      />
-    </RenterShell>
+        stripePublishableKey={process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? null}
+    />
   );
 }

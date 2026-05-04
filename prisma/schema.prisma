@@ -86,6 +86,9 @@ model organizations {
   city                              String?
   state                             String?
   zip                               String?
+  stripe_account_id                 String?                             @unique
+  stripe_charges_enabled            Boolean                             @default(false)
+  stripe_payouts_enabled            Boolean                             @default(false)
   created_at                        DateTime                            @default(now()) @db.Timestamptz(6)
   updated_at                        DateTime                            @default(now()) @db.Timestamptz(6)
   maintenance_requests              maintenance_requests[]
@@ -106,6 +109,7 @@ model organizations {
   tenants                           tenants[]
   users                             users[]
   vendors                           vendors[]
+  memberships                       memberships[]
   @@schema("public")
 }
 
@@ -210,6 +214,7 @@ model organization_payment_destinations {
   bank_institution_name     String
   is_active                 Boolean       @default(true)
   plaid_funding_account_id  String?
+  stripe_external_account_id String?
   created_at                DateTime      @default(now()) @db.Timestamptz(6)
   updated_at                DateTime      @default(now()) @db.Timestamptz(6)
   organizations             organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
@@ -357,6 +362,7 @@ model properties {
   deleted_at           DateTime?              @db.Timestamptz(6)
   organizations        organizations          @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
   property_assignments property_assignments[]
+  memberships          memberships[]
   property_ownerships  property_ownerships[]
   units                units[]
 
@@ -376,6 +382,26 @@ model property_assignments {
   @@unique([user_id, property_id])
   @@index([property_id], map: "idx_property_assignments_property")
   @@index([user_id], map: "idx_property_assignments_user")
+  @@schema("public")
+}
+
+model memberships {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  user_id         String        @db.Uuid
+  organization_id String        @db.Uuid
+  role            String
+  property_id     String?       @db.Uuid
+  is_active       Boolean       @default(true)
+  created_at      DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime      @default(now()) @db.Timestamptz(6)
+  users           users         @relation(fields: [user_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  organizations   organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  properties      properties?   @relation(fields: [property_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@index([organization_id], map: "idx_memberships_org")
+  @@index([property_id], map: "idx_memberships_property")
+  @@index([role], map: "idx_memberships_role")
+  @@index([user_id], map: "idx_memberships_user")
   @@schema("public")
 }
 
@@ -489,6 +515,7 @@ model users {
   rental_applications  rental_applications[]
   renter_payment_methods renter_payment_methods[]
   renter_payment_settings renter_payment_settings[]
+  memberships          memberships[]
   organizations        organizations?         @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
 
   @@index([clerk_user_id], map: "idx_users_clerk")

@@ -1,8 +1,6 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
-import { RenterShell } from "@/components/RenterShell";
-import { getPortalAccessState } from "@/lib/portal-access";
 import { getRenterSupportContact } from "@/lib/renter-portal";
 import { resolveSharedUserIdentity } from "@/lib/renter-auth";
 import { LeaseActions } from "./LeaseActions";
@@ -77,7 +75,7 @@ function Icon({ name, className = "" }: { name: string; className?: string }) {
 }
 
 export default async function RenterLeasePage() {
-  const { userId, orgId } = await auth();
+  const { userId } = await auth();
   if (!userId) redirect("/login");
 
   const identity = await resolveSharedUserIdentity(userId);
@@ -103,6 +101,7 @@ export default async function RenterLeasePage() {
                 end_date: true,
                 rent_amount: true,
                 security_deposit: true,
+                document_url: true,
                 status: true,
                 units: {
                   select: {
@@ -129,18 +128,6 @@ export default async function RenterLeasePage() {
     })
     : null;
 
-  const shellUser = {
-    email: identity.sharedUser?.email ?? identity.clerkUser?.primaryEmailAddress?.emailAddress ?? null,
-    firstName: identity.sharedUser?.first_name ?? identity.clerkUser?.firstName ?? tenant?.first_name ?? null,
-    imageUrl: identity.clerkUser?.imageUrl ?? null,
-    portal: "renter" as const,
-    ...(await getPortalAccessState({
-      userId,
-      orgId,
-      email: identity.sharedUser?.email ?? identity.clerkUser?.primaryEmailAddress?.emailAddress ?? null,
-    })),
-  };
-
   if (!tenant) {
     redirect("/renter");
   }
@@ -154,11 +141,8 @@ export default async function RenterLeasePage() {
   const support = await getRenterSupportContact(tenant.organization_id);
   const unit = lease.units;
   const property = unit.properties;
-  const renewalEligible = Boolean(lease.end_date && lease.status === "active");
-
   return (
-    <RenterShell user={shellUser}>
-      <div className="space-y-8">
+    <div className="space-y-8">
         <header>
           <h1 className="text-3xl font-bold tracking-tight text-slate-900">Lease</h1>
           <p className="mt-1 text-slate-500">View and manage your current lease agreement.</p>
@@ -205,7 +189,7 @@ export default async function RenterLeasePage() {
               <h2 className="text-lg font-semibold text-slate-900">Current Lease Agreement</h2>
               <p className="mt-1 text-sm text-slate-500">Your active rental agreement and key details.</p>
             </div>
-            <LeaseActions />
+            <LeaseActions hasDocument={Boolean(lease.document_url)} />
           </div>
 
           <div className="mt-5 grid gap-6 lg:grid-cols-[1.35fr_1fr]">
@@ -277,23 +261,6 @@ export default async function RenterLeasePage() {
           </div>
         </section>
 
-        <section className="rounded-xl border border-slate-200 bg-white p-6 shadow-sm">
-          <h2 className="text-lg font-semibold text-slate-900">Ready to renew?</h2>
-          <p className="mt-2 max-w-2xl text-sm text-slate-500">
-            {renewalEligible
-              ? "Your lease is within the renewal window. Reach out to your manager to confirm next steps."
-              : "Renewal usually opens about 60 days before the lease expires. We’ll keep the current terms visible here in the meantime."}
-          </p>
-          <div className="mt-4 flex flex-wrap gap-3">
-            <a
-              href={`mailto:${support.managerEmail ?? support.organizationEmail ?? ""}?subject=${encodeURIComponent("Lease renewal question")}`}
-              className="inline-flex items-center justify-center rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-emerald-700"
-            >
-              Contact About Renewal
-            </a>
-          </div>
-        </section>
-      </div>
-    </RenterShell>
+    </div>
   );
 }

@@ -1,9 +1,7 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
-import { RenterShell } from "@/components/RenterShell";
 import Link from "next/link";
-import { getPortalAccessState } from "@/lib/portal-access";
 import { getRenterSupportContact } from "@/lib/renter-portal";
 import { resolveSharedUserIdentity } from "@/lib/renter-auth";
 
@@ -107,7 +105,7 @@ const paymentStatusColors: Record<string, string> = {
 };
 
 export default async function RenterPage() {
-  const { userId, orgId } = await auth();
+  const { userId } = await auth();
   if (!userId) redirect("/login");
 
   const identity = await resolveSharedUserIdentity(userId);
@@ -178,22 +176,9 @@ export default async function RenterPage() {
     })
     : null;
 
-  const shellUser = {
-    email: identity.sharedUser?.email ?? identity.clerkUser?.primaryEmailAddress?.emailAddress ?? null,
-    firstName: identity.sharedUser?.first_name ?? identity.clerkUser?.firstName ?? tenant?.first_name ?? null,
-    imageUrl: identity.clerkUser?.imageUrl ?? null,
-    portal: "renter" as const,
-    ...(await getPortalAccessState({
-      userId,
-      orgId,
-      email: identity.sharedUser?.email ?? identity.clerkUser?.primaryEmailAddress?.emailAddress ?? null,
-    })),
-  };
-
   if (!tenant) {
     return (
-      <RenterShell user={shellUser}>
-        <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 text-center">
+      <div className="flex min-h-[60vh] flex-col items-center justify-center gap-4 text-center">
           <div className="rounded-full bg-amber-50 p-4">
             <Icon name="building" className="h-8 w-8 text-amber-500" />
           </div>
@@ -202,8 +187,7 @@ export default async function RenterPage() {
             Your account isn&apos;t linked to a tenant record yet. Please contact your property
             manager to complete your setup.
           </p>
-        </div>
-      </RenterShell>
+      </div>
     );
   }
 
@@ -226,11 +210,10 @@ export default async function RenterPage() {
   const recentMaintenance = tenant.maintenance_requests;
   const support = await getRenterSupportContact(tenant.organization_id);
 
-  const firstName = shellUser.firstName ?? tenant.first_name;
+  const firstName = identity.sharedUser?.first_name ?? identity.clerkUser?.firstName ?? tenant.first_name;
 
   return (
-    <RenterShell user={shellUser}>
-      <div className="space-y-8">
+    <div className="space-y-8">
         {/* Header */}
         <header>
           <h1 className="text-3xl font-bold tracking-tight text-slate-900">
@@ -442,7 +425,7 @@ export default async function RenterPage() {
               <div className="p-4 pt-0">
                 <Link
                   href="/renter/maintenance"
-                  className="flex items-center justify-center gap-2 rounded-lg bg-sky-600 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-sky-700"
+                  className="flex items-center justify-center gap-2 rounded-lg bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-slate-800"
                 >
                   <Icon name="wrench" className="h-4 w-4" />
                   Submit a request
@@ -485,7 +468,6 @@ export default async function RenterPage() {
             </div>
           </section>
         </div>
-      </div>
-    </RenterShell>
+    </div>
   );
 }

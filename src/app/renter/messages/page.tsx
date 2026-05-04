@@ -1,14 +1,12 @@
 import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
-import { RenterShell } from "@/components/RenterShell";
-import { getPortalAccessState } from "@/lib/portal-access";
 import { getRenterSupportContact } from "@/lib/renter-portal";
 import { resolveSharedUserIdentity } from "@/lib/renter-auth";
 import { MessagesClient } from "./MessagesClient";
 
 export default async function RenterMessagesPage() {
-  const { userId, orgId } = await auth();
+  const { userId } = await auth();
   if (!userId) redirect("/login");
 
   const identity = await resolveSharedUserIdentity(userId);
@@ -47,18 +45,6 @@ export default async function RenterMessagesPage() {
       },
     })
     : null;
-
-  const shellUser = {
-    email: identity.sharedUser?.email ?? identity.clerkUser?.primaryEmailAddress?.emailAddress ?? null,
-    firstName: identity.sharedUser?.first_name ?? identity.clerkUser?.firstName ?? tenant?.first_name ?? null,
-    imageUrl: identity.clerkUser?.imageUrl ?? null,
-    portal: "renter" as const,
-    ...(await getPortalAccessState({
-      userId,
-      orgId,
-      email: identity.sharedUser?.email ?? identity.clerkUser?.primaryEmailAddress?.emailAddress ?? null,
-    })),
-  };
 
   if (!tenant) {
     redirect("/renter");
@@ -108,15 +94,13 @@ export default async function RenterMessagesPage() {
   );
 
   return (
-    <RenterShell user={shellUser}>
-      <MessagesClient
+    <MessagesClient
         initialMessages={seededMessages}
         managerName={support.managerName ?? support.organizationName ?? "Property Manager"}
         organizationName={support.organizationName}
         emergencyPhone={support.organizationPhone}
         managerPhone={support.organizationPhone}
         managerEmail={support.managerEmail ?? support.organizationEmail}
-      />
-    </RenterShell>
+    />
   );
 }

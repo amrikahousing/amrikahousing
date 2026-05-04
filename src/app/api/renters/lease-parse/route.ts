@@ -48,6 +48,20 @@ const leaseTool: AnthropicTool = {
       lastName: { type: "string", description: "Primary tenant last name. Empty string if not found." },
       email: { type: "string", description: "Primary tenant email. Empty string if not found." },
       phone: { type: "string", description: "Primary tenant phone number. Empty string if not found." },
+      additionalTenants: {
+        type: "array",
+        description: "All other tenants listed on the lease besides the primary tenant. Empty array if none.",
+        items: {
+          type: "object",
+          properties: {
+            firstName: { type: "string", description: "Tenant first name. Empty string if not found." },
+            lastName: { type: "string", description: "Tenant last name. Empty string if not found." },
+            email: { type: "string", description: "Tenant email. Empty string if not found." },
+            phone: { type: "string", description: "Tenant phone number. Empty string if not found." },
+          },
+          required: ["firstName", "lastName", "email", "phone"],
+        },
+      },
       startDate: { type: "string", description: "Lease start date in YYYY-MM-DD format. Empty string if not found." },
       endDate: { type: "string", description: "Lease end date in YYYY-MM-DD format. Empty string if month-to-month or not found." },
       rentAmount: { type: "number", description: "Monthly rent amount as a number. Use 0 if not found." },
@@ -60,6 +74,7 @@ const leaseTool: AnthropicTool = {
       "lastName",
       "email",
       "phone",
+      "additionalTenants",
       "startDate",
       "endDate",
       "rentAmount",
@@ -199,7 +214,7 @@ export async function POST(request: NextRequest) {
       system:
         "You extract facts from residential lease documents for renter onboarding. " +
         "Only use values visibly present in the document. Do not guess. " +
-        "If multiple tenants appear, extract the first or primary tenant. " +
+        "Extract the primary tenant in the top-level fields and all additional tenants in the additionalTenants array. " +
         "Dates must be YYYY-MM-DD. Amounts must be numeric without currency symbols.",
       messages: [
         {
@@ -252,6 +267,13 @@ export async function POST(request: NextRequest) {
   }
 
   const extracted = toolUse.input as Record<string, unknown>;
+  const rawAdditional = Array.isArray(extracted.additionalTenants) ? extracted.additionalTenants : [];
+  const additionalTenants = rawAdditional.map((t: Record<string, unknown>) => ({
+    firstName: normalizeText(t.firstName),
+    lastName: normalizeText(t.lastName),
+    email: normalizeText(t.email),
+    phone: normalizeText(t.phone),
+  }));
   return Response.json({
     propertyAddress: normalizeText(extracted.propertyAddress),
     unitNumber: normalizeText(extracted.unitNumber),
@@ -259,6 +281,7 @@ export async function POST(request: NextRequest) {
     lastName: normalizeText(extracted.lastName),
     email: normalizeText(extracted.email),
     phone: normalizeText(extracted.phone),
+    additionalTenants,
     startDate: normalizeDate(extracted.startDate),
     endDate: normalizeDate(extracted.endDate),
     rentAmount: normalizeAmount(extracted.rentAmount),
