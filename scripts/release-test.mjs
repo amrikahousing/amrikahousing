@@ -12,11 +12,9 @@ import {
   assertDatabaseUrlHost,
   ensureBranchPushed,
   ensureVercelProject,
-  hostnameFromUrl,
   installDependencies,
   pullVercelEnv,
   run,
-  runAndCapture,
   syncPrismaSchema,
   waitForVercelGitDeployment,
 } from "./deploy-workflow-utils.mjs";
@@ -71,10 +69,7 @@ const deployment = waitForVercelGitDeployment({
 });
 const deploymentUrl = `https://${deployment.url}`;
 
-console.log(`Assigning stable test alias https://${TEST_DEPLOYMENT_ALIAS}.`);
-runAndCapture("npx", ["vercel", "alias", "set", hostnameFromUrl(deploymentUrl), TEST_DEPLOYMENT_ALIAS], {
-  cwd: root,
-});
+console.log(`Test alias https://${TEST_DEPLOYMENT_ALIAS} is managed automatically by Vercel's git-branch integration.`);
 
 if (skipE2e) {
   console.log("\nSkipping E2E smoke tests (--skip-e2e).");
