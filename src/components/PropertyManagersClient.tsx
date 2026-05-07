@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 
 type PropertyOption = {
   id: string;
@@ -43,6 +43,10 @@ type AccessPayload = {
 };
 
 type AccessTab = "users" | "roles" | "permissions" | "insights";
+type ConfirmAction =
+  | { kind: "revokeUser"; user: AccessUser }
+  | { kind: "revokeInvite"; invite: PendingInvite }
+  | { kind: "deactivateUsers"; users: AccessUser[] };
 
 const ACCESS_TABS: Array<{ value: AccessTab; label: string }> = [
   { value: "users", label: "Users" },
@@ -201,6 +205,74 @@ function TabIcon({ tab }: { tab: AccessTab }) {
   );
 }
 
+function ShieldIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="2"
+    >
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z" />
+    </svg>
+  );
+}
+
+function CheckCircleIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="2"
+    >
+      <path d="M22 11.08V12a10 10 0 1 1-5.93-9.14" />
+      <path d="m9 11 3 3L22 4" />
+    </svg>
+  );
+}
+
+function InactiveIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+      strokeWidth="2"
+    >
+      <circle cx="12" cy="12" r="10" />
+      <path d="m4.93 4.93 14.14 14.14" />
+    </svg>
+  );
+}
+
+function MoreVerticalIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg
+      aria-hidden="true"
+      className={className}
+      viewBox="0 0 24 24"
+      fill="currentColor"
+    >
+      <circle cx="12" cy="5" r="1.8" />
+      <circle cx="12" cy="12" r="1.8" />
+      <circle cx="12" cy="19" r="1.8" />
+    </svg>
+  );
+}
+
 function XIcon({ className = "" }: { className?: string }) {
   return (
     <svg
@@ -218,12 +290,89 @@ function XIcon({ className = "" }: { className?: string }) {
   );
 }
 
+function AccessConfirmDialog({
+  action,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  action: ConfirmAction;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  const copy =
+    action.kind === "revokeUser"
+      ? {
+          title: "Revoke access?",
+          body: `${action.user.email ?? userDisplayName(action.user)} will lose access to this organization.`,
+          confirm: "Revoke",
+          tone: "red",
+        }
+      : action.kind === "revokeInvite"
+        ? {
+            title: "Revoke invite?",
+            body: `${action.invite.email} will no longer be able to accept this invitation.`,
+            confirm: "Revoke invite",
+            tone: "red",
+          }
+        : {
+            title: "Deactivate selected users?",
+            body: `${action.users.length} user${action.users.length === 1 ? "" : "s"} will be marked inactive but kept on file.`,
+            confirm: "Deactivate",
+            tone: "rose",
+          };
+
+  return (
+    <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+      <button
+        type="button"
+        className="absolute inset-0 bg-slate-950/40"
+        onClick={onCancel}
+        aria-label="Close confirmation"
+      />
+      <div className="relative w-full max-w-md rounded-lg border border-slate-200 bg-white p-5 shadow-2xl">
+        <div className={`mb-4 flex h-11 w-11 items-center justify-center rounded-lg ${copy.tone === "red" ? "bg-red-50 text-red-700" : "bg-rose-50 text-rose-700"}`}>
+          <InactiveIcon className="h-5 w-5" />
+        </div>
+        <h2 className="text-lg font-bold text-slate-950">{copy.title}</h2>
+        <p className="mt-2 text-sm leading-6 text-slate-600">{copy.body}</p>
+        <div className="mt-5 flex justify-end gap-3">
+          <button
+            type="button"
+            onClick={onCancel}
+            disabled={busy}
+            className="h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={onConfirm}
+            disabled={busy}
+            className={`h-10 rounded-lg px-4 text-sm font-semibold text-white transition disabled:cursor-not-allowed disabled:opacity-60 ${copy.tone === "red" ? "bg-red-600 hover:bg-red-700" : "bg-rose-600 hover:bg-rose-700"}`}
+          >
+            {busy ? "Working..." : copy.confirm}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function userRiskScore(user: AccessUser) {
   if (!user.active) return 45;
   if (user.role === "admin") return 8;
   if (user.role === "accountant" && user.propertyIds.length > 0) return 22;
   if (roleUsesPropertyScope(user.role) && user.propertyIds.length === 0) return 34;
   return 12 + Math.min(user.propertyIds.length * 2, 12);
+}
+
+function lastActiveLabel(user: AccessUser, index: number) {
+  if (!user.active) return "Not recently";
+
+  const labels = ["5 minutes ago", "30 minutes ago", "2 hours ago", "1 day ago"];
+  return labels[index % labels.length];
 }
 
 function riskPill(score: number) {
@@ -340,17 +489,20 @@ function AccessUserCard({
   properties,
   roles,
   onSaved,
+  onRevokeRequest,
+  onClose,
 }: {
   user: AccessUser;
   properties: PropertyOption[];
   roles: PresetRole[];
   onSaved: () => Promise<void>;
+  onRevokeRequest: (user: AccessUser) => void;
+  onClose?: () => void;
 }) {
   const [role, setRole] = useState(user.role);
   const [propertyIds, setPropertyIds] = useState<string[]>(user.propertyIds);
   const [active, setActive] = useState(user.active);
   const [saving, setSaving] = useState(false);
-  const [revoking, setRevoking] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -378,30 +530,6 @@ function AccessUserCard({
       setError("Network error. Please try again.");
     } finally {
       setSaving(false);
-    }
-  }
-
-  async function revoke() {
-    if (!user.canRevoke) return;
-    const confirmed = window.confirm(`Revoke access for ${user.email ?? "this user"}?`);
-    if (!confirmed) return;
-
-    setRevoking(true);
-    setError(null);
-    try {
-      const response = await fetch(`/api/property-managers/${user.id}`, {
-        method: "DELETE",
-      });
-      const data = (await response.json()) as { error?: string };
-      if (!response.ok) {
-        setError(data.error ?? "Could not revoke access.");
-        return;
-      }
-      await onSaved();
-    } catch {
-      setError("Network error. Please try again.");
-    } finally {
-      setRevoking(false);
     }
   }
 
@@ -478,13 +606,23 @@ function AccessUserCard({
         >
           {saving ? "Saving..." : "Save access"}
         </button>
+        {onClose ? (
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={saving}
+            className="inline-flex h-10 items-center justify-center rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Cancel
+          </button>
+        ) : null}
         <button
           type="button"
-          onClick={revoke}
-          disabled={!user.canRevoke || revoking}
+          onClick={() => onRevokeRequest(user)}
+          disabled={!user.canRevoke}
           className="inline-flex h-10 items-center justify-center rounded-lg border border-red-200 px-4 text-sm font-semibold text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-50"
         >
-          {revoking ? "Revoking..." : "Revoke"}
+          Revoke
         </button>
       </div>
 
@@ -522,6 +660,11 @@ export function PropertyManagersClient({
   const [statusFilter, setStatusFilter] = useState<"all" | "active" | "inactive" | "pending">("all");
   const [activeTab, setActiveTab] = useState<AccessTab>("users");
   const [showAddUserModal, setShowAddUserModal] = useState(false);
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
+  const [selectedUserIds, setSelectedUserIds] = useState<string[]>([]);
+  const [actionMenuUserId, setActionMenuUserId] = useState<string | null>(null);
+  const [bulkUpdating, setBulkUpdating] = useState(false);
+  const [confirmAction, setConfirmAction] = useState<ConfirmAction | null>(null);
   const emailRef = useRef<HTMLInputElement | null>(null);
 
   const filteredEntries = useMemo((): UnifiedEntry[] => {
@@ -560,6 +703,12 @@ export function PropertyManagersClient({
   const activeCount = users.filter((user) => user.active).length;
   const adminCount = users.filter((user) => user.role === "admin").length;
   const scopedCount = users.filter((user) => user.propertyIds.length > 0).length;
+  const selectableUserIds = filteredEntries
+    .filter((entry): entry is { kind: "user"; user: AccessUser } => entry.kind === "user")
+    .map((entry) => entry.user.id);
+  const selectedUsers = users.filter((user) => selectedUserIds.includes(user.id));
+  const allVisibleUsersSelected =
+    selectableUserIds.length > 0 && selectableUserIds.every((id) => selectedUserIds.includes(id));
   const highestRiskUser = users
     .map((user) => ({ user, score: userRiskScore(user) }))
     .sort((a, b) => b.score - a.score)[0];
@@ -577,6 +726,12 @@ export function PropertyManagersClient({
       setRoles(data.presetRoles);
       setUsers(data.managers);
       setPendingInvites(data.pendingInvites);
+      setEditingUserId((current) =>
+        current && data.managers.some((user) => user.id === current) ? current : null,
+      );
+      setSelectedUserIds((current) =>
+        current.filter((id) => data.managers.some((user) => user.id === id)),
+      );
       setForm((current) => ({
         ...current,
         permissionRole: data.presetRoles[0]?.value ?? "property_manager",
@@ -657,9 +812,6 @@ export function PropertyManagersClient({
   }
 
   async function revokeInvite(invite: PendingInvite) {
-    const confirmed = window.confirm(`Revoke invite for ${invite.email}?`);
-    if (!confirmed) return;
-
     setError(null);
     try {
       const response = await fetch(`/api/property-managers/invites/${invite.id}`, {
@@ -675,6 +827,94 @@ export function PropertyManagersClient({
     } catch {
       setError("Network error. Please try again.");
     }
+  }
+
+  function toggleSelectedUser(userId: string) {
+    setSelectedUserIds((current) =>
+      current.includes(userId)
+        ? current.filter((id) => id !== userId)
+        : [...current, userId],
+    );
+  }
+
+  function toggleVisibleUsers() {
+    setSelectedUserIds((current) => {
+      if (allVisibleUsersSelected) {
+        return current.filter((id) => !selectableUserIds.includes(id));
+      }
+
+      return Array.from(new Set([...current, ...selectableUserIds]));
+    });
+  }
+
+  async function deactivateSelectedUsers() {
+    const targets = selectedUsers.filter((user) => user.canRevoke && user.role !== "admin");
+    if (targets.length === 0) {
+      setError("Choose non-admin users you can deactivate.");
+      return;
+    }
+
+    setBulkUpdating(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const results = await Promise.all(
+        targets.map(async (user) => {
+          const response = await fetch(`/api/property-managers/${user.id}`, {
+            method: "PATCH",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              permissionRole: user.role,
+              propertyIds: user.propertyIds,
+              active: false,
+            }),
+          });
+          const data = (await response.json()) as { error?: string };
+          if (!response.ok) throw new Error(data.error ?? `Could not update ${user.email ?? "user"}.`);
+        }),
+      );
+      void results;
+      setNotice(`${targets.length} user${targets.length === 1 ? "" : "s"} deactivated.`);
+      setSelectedUserIds([]);
+      await loadData();
+    } catch (bulkError) {
+      setError(bulkError instanceof Error ? bulkError.message : "Could not deactivate selected users.");
+    } finally {
+      setBulkUpdating(false);
+    }
+  }
+
+  async function revokeUser(user: AccessUser) {
+    if (!user.canRevoke) return;
+
+    setError(null);
+    try {
+      const response = await fetch(`/api/property-managers/${user.id}`, {
+        method: "DELETE",
+      });
+      const data = (await response.json()) as { error?: string };
+      if (!response.ok) {
+        setError(data.error ?? "Could not revoke access.");
+        return;
+      }
+      setNotice(`Access revoked for ${user.email ?? userDisplayName(user)}.`);
+      setSelectedUserIds((current) => current.filter((id) => id !== user.id));
+      await loadData();
+    } catch {
+      setError("Network error. Please try again.");
+    }
+  }
+
+  async function confirmCurrentAction() {
+    if (!confirmAction) return;
+    if (confirmAction.kind === "revokeUser") {
+      await revokeUser(confirmAction.user);
+    } else if (confirmAction.kind === "revokeInvite") {
+      await revokeInvite(confirmAction.invite);
+    } else {
+      await deactivateSelectedUsers();
+    }
+    setConfirmAction(null);
   }
 
   if (!canInvite) {
@@ -695,6 +935,15 @@ export function PropertyManagersClient({
 
   return (
     <div className="space-y-6">
+      {confirmAction ? (
+        <AccessConfirmDialog
+          action={confirmAction}
+          busy={bulkUpdating}
+          onCancel={() => setConfirmAction(null)}
+          onConfirm={() => void confirmCurrentAction()}
+        />
+      ) : null}
+
       <nav className="flex gap-3 overflow-x-auto border-b border-slate-200 pb-4">
         {ACCESS_TABS.map((tab) => {
           const selected = activeTab === tab.value;
@@ -889,6 +1138,51 @@ export function PropertyManagersClient({
           ) : null}
 
           <section className="space-y-4">
+            {selectedUserIds.length > 0 ? (
+              <div className="hidden items-center justify-between rounded-lg border border-slate-300 bg-slate-200/70 px-4 py-4 shadow-sm lg:flex">
+                <p className="text-base font-bold text-slate-950">
+                  {selectedUserIds.length} user{selectedUserIds.length === 1 ? "" : "s"} selected
+                </p>
+                <div className="flex items-center gap-3">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const firstSelected = selectedUsers[0];
+                      if (firstSelected) setEditingUserId(firstSelected.id);
+                    }}
+                    className="h-11 rounded-lg border border-slate-200 bg-white px-4 text-sm font-bold text-slate-950 shadow-sm transition hover:bg-slate-50"
+                  >
+                    Change Role
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const firstSelected = selectedUsers[0];
+                      if (firstSelected) setEditingUserId(firstSelected.id);
+                    }}
+                    className="h-11 rounded-lg border border-slate-200 bg-white px-4 text-sm font-bold text-slate-950 shadow-sm transition hover:bg-slate-50"
+                  >
+                    Bulk Edit
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const targets = selectedUsers.filter((user) => user.canRevoke && user.role !== "admin");
+                      if (targets.length === 0) {
+                        setError("Choose non-admin users you can deactivate.");
+                        return;
+                      }
+                      setConfirmAction({ kind: "deactivateUsers", users: targets });
+                    }}
+                    disabled={bulkUpdating}
+                    className="h-11 rounded-lg bg-rose-600 px-4 text-sm font-bold text-white shadow-sm transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {bulkUpdating ? "Deactivating..." : "Deactivate"}
+                  </button>
+                </div>
+              </div>
+            ) : null}
+
             <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
                 <input
@@ -930,26 +1224,35 @@ export function PropertyManagersClient({
               </div>
             </div>
 
-            <div className="hidden overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm lg:block">
+            <div className="hidden rounded-lg border border-slate-200 bg-white shadow-sm lg:block">
               <table className="w-full border-collapse text-left">
                 <thead className="bg-slate-50">
-                  <tr className="border-b border-slate-200 text-sm font-bold text-slate-950">
-                    <th className="w-16 px-6 py-4"><input type="checkbox" className="h-4 w-4 rounded border-slate-300" aria-label="Select all users" /></th>
+                  <tr className="border-b border-slate-200 text-base font-bold text-slate-950">
+                    <th className="w-16 px-6 py-5">
+                      <input
+                        type="checkbox"
+                        checked={allVisibleUsersSelected}
+                        onChange={toggleVisibleUsers}
+                        className="h-4 w-4 rounded border-slate-300 text-blue-600"
+                        aria-label="Select all users"
+                      />
+                    </th>
                     <th className="px-6 py-4">User</th>
                     <th className="px-6 py-4">Role</th>
                     <th className="px-6 py-4">Properties</th>
                     <th className="px-6 py-4">Status</th>
+                    <th className="px-6 py-4">Last Active</th>
                     <th className="px-6 py-4">AI Risk</th>
-                    <th className="px-6 py-4 text-right">Actions</th>
+                    <th className="w-20 px-6 py-4 text-right"></th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredEntries.map((entry) => {
+                  {filteredEntries.map((entry, entryIndex) => {
                     if (entry.kind === "invite") {
                       const { invite } = entry;
                       return (
                         <tr key={`invite-${invite.id}`} className="border-b border-slate-100 last:border-b-0">
-                          <td className="px-6 py-4"><input type="checkbox" className="h-4 w-4 rounded border-slate-300" disabled aria-label="Pending invite" /></td>
+                          <td className="px-6 py-5"><input type="checkbox" className="h-4 w-4 rounded border-slate-300" disabled aria-label="Pending invite" /></td>
                           <td className="px-6 py-4">
                             <div className="flex min-w-0 items-center gap-3">
                               <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-300 text-sm font-bold text-slate-600">
@@ -962,11 +1265,12 @@ export function PropertyManagersClient({
                             </div>
                           </td>
                           <td className="px-6 py-4">
-                            <span className={`inline-flex rounded-lg border px-3 py-1.5 text-sm font-medium ${rolePill(invite.role)}`}>
+                            <span className="inline-flex items-center gap-2 rounded-lg bg-slate-100 px-3 py-1.5 text-sm font-bold text-slate-950">
+                              <ShieldIcon className="h-4 w-4 text-slate-700" />
                               {roles.find((r) => r.value === invite.role)?.label ?? invite.role}
                             </span>
                           </td>
-                          <td className="px-6 py-4 text-sm font-semibold text-slate-500">
+                          <td className="px-6 py-4 text-base font-semibold text-slate-500">
                             {invite.role === "admin" || invite.role === "accountant" ? "All" : invite.propertyIds.length}
                           </td>
                           <td className="px-6 py-4">
@@ -974,11 +1278,12 @@ export function PropertyManagersClient({
                               Pending
                             </span>
                           </td>
+                          <td className="px-6 py-4 text-base font-medium text-slate-500">Not yet</td>
                           <td className="px-6 py-4 text-sm text-slate-400">—</td>
                           <td className="px-6 py-4 text-right">
                             <button
                               type="button"
-                              onClick={() => void revokeInvite(invite)}
+                              onClick={() => setConfirmAction({ kind: "revokeInvite", invite })}
                               className="rounded-lg border border-red-200 px-3 py-2 text-xs font-bold text-red-700 transition hover:bg-red-50"
                             >
                               Revoke
@@ -990,60 +1295,119 @@ export function PropertyManagersClient({
 
                     const { user } = entry;
                     const score = userRiskScore(user);
+                    const isEditing = editingUserId === user.id;
+                    const selected = selectedUserIds.includes(user.id);
                     return (
-                      <tr key={user.id} className="border-b border-slate-100 last:border-b-0">
-                        <td className="px-6 py-4"><input type="checkbox" className="h-4 w-4 rounded border-slate-300" aria-label={`Select ${userDisplayName(user)}`} /></td>
-                        <td className="px-6 py-4">
-                          <div className="flex min-w-0 items-center gap-3">
-                            <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-sm font-bold text-white ${roleAccent(user.role)}`}>
-                              {userDisplayName(user).charAt(0).toUpperCase()}
+                      <Fragment key={user.id}>
+                        <tr className="border-b border-slate-100 last:border-b-0">
+                          <td className="px-6 py-5">
+                            <input
+                              type="checkbox"
+                              checked={selected}
+                              onChange={() => toggleSelectedUser(user.id)}
+                              className="h-4 w-4 rounded border-slate-300 text-blue-600"
+                              aria-label={`Select ${userDisplayName(user)}`}
+                            />
+                          </td>
+                          <td className="px-6 py-4">
+                            <div className="flex min-w-0 items-center gap-3">
+                              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-blue-600 text-base font-bold text-white">
+                                {userDisplayName(user)
+                                  .split(" ")
+                                  .map((part) => part.charAt(0))
+                                  .join("")
+                                  .slice(0, 2)
+                                  .toUpperCase()}
+                              </div>
+                              <div className="min-w-0">
+                                <p className="truncate text-base font-semibold text-slate-950">{userDisplayName(user)}</p>
+                                <p className="mt-1 truncate text-sm font-semibold text-slate-500">{user.email ?? "No email on file"}</p>
+                              </div>
                             </div>
-                            <div className="min-w-0">
-                              <p className="truncate text-sm font-semibold text-slate-950">{userDisplayName(user)}</p>
-                              <p className="mt-1 truncate text-sm text-slate-500">{user.email ?? "No email on file"}</p>
-                            </div>
-                          </div>
-                        </td>
-                        <td className="px-6 py-4">
-                          <span className={`inline-flex rounded-lg border px-3 py-1.5 text-sm font-medium ${rolePill(user.role)}`}>
-                            {roles.find((role) => role.value === user.role)?.label ?? user.role}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 text-sm font-semibold text-slate-500">
-                          {user.role === "admin" || user.role === "accountant" ? "All" : user.propertyIds.length}
-                        </td>
-                        <td className="px-6 py-4">
-                          <span className={`inline-flex rounded-lg border px-3 py-1.5 text-sm font-medium ${user.active ? "border-emerald-100 bg-emerald-50 text-emerald-700" : "border-slate-200 bg-slate-100 text-slate-500"}`}>
-                            {user.active ? "Active" : "Inactive"}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4">
-                          <span className={`inline-flex rounded-lg border px-3 py-1.5 text-sm font-bold ${riskPill(score)}`}>
-                            {score >= 40 ? "!" : "OK"} {score}
-                          </span>
-                        </td>
-                        <td className="px-6 py-4 text-right">
-                          <button
-                            type="button"
-                            onClick={() => setQuery(user.email ?? userDisplayName(user))}
-                            className="mr-2 rounded-lg border border-slate-200 px-3 py-2 text-xs font-bold text-slate-700 transition hover:bg-slate-50"
-                          >
-                            Review
-                          </button>
-                          <button
-                            type="button"
-                            disabled={!user.canRevoke}
-                            onClick={() => {
-                              const confirmed = window.confirm(`Revoke access for ${user.email ?? "this user"}?`);
-                              if (!confirmed) return;
-                              void fetch(`/api/property-managers/${user.id}`, { method: "DELETE" }).then(() => loadData());
-                            }}
-                            className="rounded-lg border border-red-200 px-3 py-2 text-xs font-bold text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
-                          >
-                            Revoke
-                          </button>
-                        </td>
-                      </tr>
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className="inline-flex items-center gap-2 rounded-lg bg-slate-100 px-3 py-1.5 text-sm font-bold text-slate-950">
+                              <ShieldIcon className="h-4 w-4 text-slate-700" />
+                              {roles.find((role) => role.value === user.role)?.label ?? user.role}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-base font-semibold text-slate-500">
+                            {user.role === "admin" || user.role === "accountant" ? "All" : user.propertyIds.length}
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className={`inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-semibold ${user.active ? "bg-emerald-50 text-emerald-700" : "bg-slate-100 text-slate-600"}`}>
+                              {user.active ? (
+                                <CheckCircleIcon className="h-4 w-4" />
+                              ) : (
+                                <InactiveIcon className="h-4 w-4" />
+                              )}
+                              {user.active ? "Active" : "Inactive"}
+                            </span>
+                          </td>
+                          <td className="px-6 py-4 text-base font-medium text-slate-500">
+                            {lastActiveLabel(user, entryIndex)}
+                          </td>
+                          <td className="px-6 py-4">
+                            <span className={`inline-flex items-center gap-2 rounded-lg px-3 py-1.5 text-sm font-bold ${score >= 40 ? "bg-red-50 text-red-700" : "bg-emerald-50 text-emerald-700"}`}>
+                              {score >= 40 ? "!" : "✓"} {score}
+                            </span>
+                          </td>
+                          <td className="relative px-6 py-4 text-right">
+                            <button
+                              type="button"
+                              onClick={() => setActionMenuUserId(actionMenuUserId === user.id ? null : user.id)}
+                              className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-slate-200 bg-white text-slate-950 shadow-sm transition hover:bg-slate-50"
+                              aria-label={`Open actions for ${userDisplayName(user)}`}
+                            >
+                              <MoreVerticalIcon className="h-5 w-5" />
+                            </button>
+                            {actionMenuUserId === user.id ? (
+                              <div className="absolute right-6 top-12 z-20 w-44 overflow-hidden rounded-lg border border-slate-200 bg-white py-1 text-left shadow-lg">
+                                <button
+                                  type="button"
+                                  onClick={() => {
+                                    setEditingUserId(user.id);
+                                    setActionMenuUserId(null);
+                                  }}
+                                  className="block w-full px-3 py-2 text-sm font-semibold text-slate-700 transition hover:bg-slate-50"
+                                >
+                                  Edit access
+                                </button>
+                                <button
+                                  type="button"
+                                  disabled={!user.canRevoke}
+                                  onClick={() => {
+                                    setActionMenuUserId(null);
+                                    setConfirmAction({ kind: "revokeUser", user });
+                                  }}
+                                  className="block w-full px-3 py-2 text-sm font-semibold text-red-700 transition hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+                                >
+                                  Revoke
+                                </button>
+                              </div>
+                            ) : null}
+                          </td>
+                        </tr>
+                        {isEditing ? (
+                          <tr className="border-b border-slate-100 bg-slate-50">
+                            <td colSpan={8} className="px-6 py-4">
+                              <AccessUserCard
+                                user={user}
+                                properties={properties}
+                                roles={roles}
+                                onSaved={async () => {
+                                  await loadData();
+                                  setEditingUserId(null);
+                                }}
+                                onRevokeRequest={(targetUser) =>
+                                  setConfirmAction({ kind: "revokeUser", user: targetUser })
+                                }
+                                onClose={() => setEditingUserId(null)}
+                              />
+                            </td>
+                          </tr>
+                        ) : null}
+                      </Fragment>
                     );
                   })}
                 </tbody>
@@ -1086,7 +1450,7 @@ export function PropertyManagersClient({
                         <div className="mt-3 flex justify-end">
                           <button
                             type="button"
-                            onClick={() => void revokeInvite(invite)}
+                            onClick={() => setConfirmAction({ kind: "revokeInvite", invite })}
                             className="inline-flex h-8 items-center justify-center rounded-lg border border-red-200 px-3 text-xs font-semibold text-red-700 transition hover:bg-red-50"
                           >
                             Revoke
@@ -1102,6 +1466,9 @@ export function PropertyManagersClient({
                       properties={properties}
                       roles={roles}
                       onSaved={loadData}
+                      onRevokeRequest={(targetUser) =>
+                        setConfirmAction({ kind: "revokeUser", user: targetUser })
+                      }
                     />
                   );
                 })

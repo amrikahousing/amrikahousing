@@ -432,6 +432,7 @@ export function TransactionsLedger({
   const [editingCategory, setEditingCategory] = useState("");
   const [ruleUpdateStatus, setRuleUpdateStatus] = useState<Record<string, "saving" | "error">>({});
   const [ruleDeleteStatus, setRuleDeleteStatus] = useState<Record<string, "deleting" | "error">>({});
+  const [pendingRuleDelete, setPendingRuleDelete] = useState<VendorRule | null>(null);
   const [pendingRuleApply, setPendingRuleApply] = useState<{
     ruleId: string;
     category: string;
@@ -949,11 +950,6 @@ export function TransactionsLedger({
   }
 
   async function handleDeleteRule(rule: VendorRule) {
-    const confirmed = window.confirm(
-      `Delete the mapping for ${rule.vendor_name || rule.vendor_key}?`,
-    );
-    if (!confirmed) return;
-
     setRuleDeleteStatus((current) => ({ ...current, [rule.id]: "deleting" }));
     try {
       const res = await fetch("/api/accounting/vendor-category-rules", {
@@ -973,8 +969,11 @@ export function TransactionsLedger({
       if (editingRuleId === rule.id) {
         setEditingRuleId(null);
       }
+      setPendingRuleDelete(null);
+      toast.success("Vendor mapping deleted.", { title: "Accounting Rules" });
     } catch {
       setRuleDeleteStatus((current) => ({ ...current, [rule.id]: "error" }));
+      toast.error("Could not delete vendor mapping.", { title: "Accounting Rules" });
     }
   }
 
@@ -2377,7 +2376,7 @@ export function TransactionsLedger({
                               <button
                                 type="button"
                                 title="Delete mapping"
-                                onClick={() => handleDeleteRule(rule)}
+                                onClick={() => setPendingRuleDelete(rule)}
                                 disabled={deleteStatus === "deleting"}
                                 className="inline-flex h-7 w-7 items-center justify-center rounded-lg text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:text-slate-400"
                               >
@@ -2520,6 +2519,43 @@ export function TransactionsLedger({
                 className="h-10 rounded-lg bg-red-600 px-4 text-sm font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-slate-300"
               >
                 {deletingManualId === pendingManualDelete.transaction.id ? "Deleting..." : "Delete"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
+      {pendingRuleDelete ? (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-slate-950/35 px-4"
+          onClick={() => setPendingRuleDelete(null)}
+        >
+          <div
+            className="w-full max-w-md rounded-2xl border border-slate-200 bg-white shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="border-b border-slate-200 px-5 py-4">
+              <h3 className="text-base font-semibold text-slate-950">Delete vendor mapping?</h3>
+              <p className="mt-1 text-sm text-slate-500">
+                The mapping for {pendingRuleDelete.vendor_name || pendingRuleDelete.vendor_key} will no longer be applied automatically.
+              </p>
+            </div>
+            <div className="flex items-center justify-end gap-3 px-5 py-4">
+              <button
+                type="button"
+                onClick={() => setPendingRuleDelete(null)}
+                disabled={ruleDeleteStatus[pendingRuleDelete.id] === "deleting"}
+                className="h-10 rounded-lg px-4 text-sm font-semibold text-slate-600 hover:bg-slate-100 disabled:opacity-60"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => void handleDeleteRule(pendingRuleDelete)}
+                disabled={ruleDeleteStatus[pendingRuleDelete.id] === "deleting"}
+                className="h-10 rounded-lg bg-red-600 px-4 text-sm font-semibold text-white hover:bg-red-700 disabled:cursor-not-allowed disabled:bg-slate-300"
+              >
+                {ruleDeleteStatus[pendingRuleDelete.id] === "deleting" ? "Deleting..." : "Delete"}
               </button>
             </div>
           </div>

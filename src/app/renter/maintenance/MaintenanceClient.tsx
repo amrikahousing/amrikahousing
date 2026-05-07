@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useToast } from "@/components/ToastProvider";
 
 type MaintenanceRequest = {
   id: string;
@@ -94,6 +95,7 @@ function Icon({ name, className = "" }: { name: string; className?: string }) {
 
 export function MaintenanceClient({ requests, hasActiveLease, unitLabel }: Props) {
   const router = useRouter();
+  const toast = useToast();
 
   const [freeformInput, setFreeformInput] = useState("");
   const [isParsing, setIsParsing] = useState(false);
@@ -119,12 +121,14 @@ export function MaintenanceClient({ requests, hasActiveLease, unitLabel }: Props
   const [pendingCancelId, setPendingCancelId] = useState<string | null>(null);
   const [cancelReason, setCancelReason] = useState<string | null>(null);
   const [cancelOther, setCancelOther] = useState("");
+  const [cancelError, setCancelError] = useState<string | null>(null);
   const [isClosing, setIsClosing] = useState(false);
 
   function openCancelPrompt(id: string) {
     setPendingCancelId(id);
     setCancelReason(null);
     setCancelOther("");
+    setCancelError(null);
   }
 
   async function confirmCancel() {
@@ -142,10 +146,13 @@ export function MaintenanceClient({ requests, hasActiveLease, unitLabel }: Props
       });
       if (!res.ok) {
         const data = (await res.json()) as { error?: string };
-        alert(data.error ?? "Could not cancel the request.");
+        const message = data.error ?? "Could not cancel the request.";
+        setCancelError(message);
+        toast.error(message, { title: "Maintenance" });
         return;
       }
       setPendingCancelId(null);
+      setCancelError(null);
       router.refresh();
     } finally {
       setIsClosing(false);
@@ -267,6 +274,11 @@ export function MaintenanceClient({ requests, hasActiveLease, unitLabel }: Props
                 className="mt-3 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20 disabled:opacity-60"
               />
             )}
+            {cancelError ? (
+              <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {cancelError}
+              </p>
+            ) : null}
             <div className="mt-5 flex justify-end gap-3">
               <button
                 type="button"
