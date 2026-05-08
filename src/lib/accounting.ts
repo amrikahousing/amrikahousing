@@ -1042,7 +1042,7 @@ export async function getAccountingData(orgId: string): Promise<AccountingData> 
       category,
       isIncome:
         transaction.isIncome ||
-        (transaction.source === "plaid" && isIncomeAccountingCategory(category)),
+        (transaction.source !== "rent" && isIncomeAccountingCategory(category)),
       categoryAudit: {
         source: auditSource,
         updatedAt: manualOverride?.updated_at ?? vendorRule?.updated_at ?? null,
@@ -1232,7 +1232,7 @@ export async function getAccountingData(orgId: string): Promise<AccountingData> 
       account: transaction.account_label,
       bank: "Manual",
       amount: Math.abs(Number(transaction.amount)),
-      isIncome: transaction.is_income,
+      isIncome: transaction.is_income || isIncomeAccountingCategory(transaction.category),
       source: "manual",
     };
   });
