@@ -1172,40 +1172,41 @@ export async function getAccountingData(orgId: string): Promise<AccountingData> 
     }
   }
 
-  const rentTransactions: AccountingTransaction[] = payments.map((payment) => {
-    const tenantName = payment.tenants
-      ? `${payment.tenants.first_name} ${payment.tenants.last_name}`
-      : "Tenant";
-    const unit = payment.leases.units;
-    const property = unit.properties;
-    const isIncome = isPaidStatus(payment.status);
+  const rentTransactions: AccountingTransaction[] = payments
+    .filter((payment) => isPaidStatus(payment.status))
+    .map((payment) => {
+      const tenantName = payment.tenants
+        ? `${payment.tenants.first_name} ${payment.tenants.last_name}`
+        : "Tenant";
+      const unit = payment.leases.units;
+      const property = unit.properties;
 
-    return {
-      id: payment.id,
-      date: payment.paid_at ?? payment.due_date,
-      description:
-        payment.type === "rent"
-          ? `Tenant Payment - ${tenantName}`
-          : `${payment.type} - ${tenantName}`,
-      merchantName: tenantName,
-      merchantEntityId: null,
-      merchantLogoUrl: null,
-      merchantWebsite: null,
-      categoryIconUrl: null,
-      counterpartyType: null,
-      category: payment.type === "rent" ? "Income" : payment.type,
-      categoryAudit: {
-        source: null,
-        updatedAt: null,
-        updatedBy: null,
-      },
-      account: `${property.name}${unit.unit_number ? ` Unit ${unit.unit_number}` : ""}`,
-      bank: "Amrika Housing",
-      amount: Number(payment.amount ?? 0),
-      isIncome,
-      source: "rent",
-    };
-  });
+      return {
+        id: payment.id,
+        date: payment.paid_at ?? payment.due_date,
+        description:
+          payment.type === "rent"
+            ? `Tenant Payment - ${tenantName}`
+            : `${payment.type} - ${tenantName}`,
+        merchantName: tenantName,
+        merchantEntityId: null,
+        merchantLogoUrl: null,
+        merchantWebsite: null,
+        categoryIconUrl: null,
+        counterpartyType: null,
+        category: payment.type === "rent" ? "Income" : payment.type,
+        categoryAudit: {
+          source: null,
+          updatedAt: null,
+          updatedBy: null,
+        },
+        account: `${property.name}${unit.unit_number ? ` Unit ${unit.unit_number}` : ""}`,
+        bank: "Amrika Housing",
+        amount: Number(payment.amount ?? 0),
+        isIncome: true,
+        source: "rent",
+      };
+    });
 
   const manualTransactions: AccountingTransaction[] = manualRows.map((transaction) => {
     const merchant = manualMerchantMetadata(transaction.description);
