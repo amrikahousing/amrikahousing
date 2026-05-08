@@ -169,6 +169,12 @@ function normalizeCategory(value: unknown) {
   return "uncategorized";
 }
 
+function isIncomeAccountingCategory(category: string) {
+  const normalized = category.trim().replace(/\s+/g, " ").toLowerCase();
+
+  return normalized === "income" || normalized === "transfer in";
+}
+
 function amountBucket(amount: number) {
   if (amount < 25) return "under $25";
   if (amount < 100) return "$25-$99";
@@ -361,7 +367,7 @@ function buildSyncRuleCandidates(
   const candidates = new Map<string, SyncRuleCandidate>();
 
   for (const row of rows) {
-    if (row.is_income) continue;
+    if (row.is_income || isIncomeAccountingCategory(row.category)) continue;
     const bank = item.institution_name ?? "Plaid";
     const account = row.account_name ?? item.institution_name ?? "Plaid account";
     const existingRule = findVendorRuleForTransaction(
@@ -555,7 +561,7 @@ function mapPlaidTxToRow(
       category_icon_url: categoryIconUrl,
       counterparty_type: counterpartyType,
       amount: Math.abs(amount),
-      is_income: amount < 0,
+      is_income: amount < 0 || isIncomeAccountingCategory(category),
       category,
     },
     item,
@@ -1029,9 +1035,14 @@ export async function getAccountingData(orgId: string): Promise<AccountingData> 
         ? "vendor_rule"
         : null;
 
+    const category = manualOverride?.category ?? vendorRule?.category ?? transaction.category;
+
     return {
       ...transaction,
-      category: manualOverride?.category ?? vendorRule?.category ?? transaction.category,
+      category,
+      isIncome:
+        transaction.isIncome ||
+        (transaction.source === "plaid" && isIncomeAccountingCategory(category)),
       categoryAudit: {
         source: auditSource,
         updatedAt: manualOverride?.updated_at ?? vendorRule?.updated_at ?? null,
@@ -1059,7 +1070,7 @@ export async function getAccountingData(orgId: string): Promise<AccountingData> 
     account: row.account_name ?? row.plaid_items.institution_name ?? "Plaid account",
     bank: row.plaid_items.institution_name ?? "Plaid",
     amount: Math.abs(Number(row.amount)),
-    isIncome: row.is_income,
+    isIncome: row.is_income || isIncomeAccountingCategory(row.category),
     source: "plaid",
   }));
 
@@ -1095,7 +1106,8 @@ export async function getAccountingData(orgId: string): Promise<AccountingData> 
     }
     const summary = plaidAccountSummaries.get(key)!;
     const amt = Math.abs(Number(row.amount));
-    summary.balance += row.is_income ? amt : -amt;
+    summary.balance +=
+      row.is_income || isIncomeAccountingCategory(row.category) ? amt : -amt;
   }
 
   // Ensure items with no transactions still appear so they can be removed
