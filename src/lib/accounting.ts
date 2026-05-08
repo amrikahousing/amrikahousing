@@ -183,10 +183,6 @@ function amountBucket(amount: number) {
   return "$1,000+";
 }
 
-function isPaidStatus(status: string) {
-  return status === "paid" || status === "completed";
-}
-
 function displayActorName(
   actorId: string | null | undefined,
   actorsByClerkId: Map<string, string>,
@@ -883,35 +879,8 @@ async function plaidItemsQuery(orgId: string) {
 }
 
 export async function getAccountingData(orgId: string): Promise<AccountingData> {
-  const [payments, manualRows, initialPlaidTxRows, categoryOverrides, vendorRules, plaidItems, hiddenAccountLogs] =
+  const [manualRows, initialPlaidTxRows, categoryOverrides, vendorRules, plaidItems, hiddenAccountLogs] =
     await Promise.all([
-    prisma.payments.findMany({
-      where: {
-        leases: {
-          units: {
-            deleted_at: null,
-            properties: {
-              deleted_at: null,
-              organizations: { clerk_org_id: orgId },
-            },
-          },
-        },
-      },
-      include: {
-        tenants: true,
-        leases: {
-          include: {
-            units: {
-              include: {
-                properties: true,
-              },
-            },
-          },
-        },
-      },
-      orderBy: [{ paid_at: "desc" }, { due_date: "desc" }, { created_at: "desc" }],
-      take: 250,
-    }),
     prisma.manual_transactions.findMany({
       where: {
         organizations: { clerk_org_id: orgId },
@@ -1172,41 +1141,7 @@ export async function getAccountingData(orgId: string): Promise<AccountingData> 
     }
   }
 
-  const rentTransactions: AccountingTransaction[] = payments
-    .filter((payment) => isPaidStatus(payment.status))
-    .map((payment) => {
-      const tenantName = payment.tenants
-        ? `${payment.tenants.first_name} ${payment.tenants.last_name}`
-        : "Tenant";
-      const unit = payment.leases.units;
-      const property = unit.properties;
-
-      return {
-        id: payment.id,
-        date: payment.paid_at ?? payment.due_date,
-        description:
-          payment.type === "rent"
-            ? `Tenant Payment - ${tenantName}`
-            : `${payment.type} - ${tenantName}`,
-        merchantName: tenantName,
-        merchantEntityId: null,
-        merchantLogoUrl: null,
-        merchantWebsite: null,
-        categoryIconUrl: null,
-        counterpartyType: null,
-        category: payment.type === "rent" ? "Income" : payment.type,
-        categoryAudit: {
-          source: null,
-          updatedAt: null,
-          updatedBy: null,
-        },
-        account: `${property.name}${unit.unit_number ? ` Unit ${unit.unit_number}` : ""}`,
-        bank: "Amrika Housing",
-        amount: Number(payment.amount ?? 0),
-        isIncome: true,
-        source: "rent",
-      };
-    });
+  const rentTransactions: AccountingTransaction[] = [];
 
   const manualTransactions: AccountingTransaction[] = manualRows.map((transaction) => {
     const merchant = manualMerchantMetadata(transaction.description);
