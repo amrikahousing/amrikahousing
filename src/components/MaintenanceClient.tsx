@@ -218,19 +218,9 @@ function Toggle({
       <button
         type="button"
         aria-pressed={checked}
-        className={[
-          "relative h-6 w-11 rounded-full transition-colors",
-          checked ? "bg-emerald-600" : "bg-slate-300",
-        ].join(" ")}
+        className={checked ? "ui-switch ui-switch-on" : "ui-switch"}
         onClick={() => onChange(!checked)}
-      >
-        <span
-          className={[
-            "absolute top-1 h-4 w-4 rounded-full bg-white transition-transform",
-            checked ? "translate-x-5" : "translate-x-1",
-          ].join(" ")}
-        />
-      </button>
+      />
     </label>
   );
 }

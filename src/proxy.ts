@@ -6,6 +6,7 @@ const isPublicRoute = createRouteMatcher([
   "/login(.*)",
   "/signup(.*)",
   "/onboard(.*)",
+  "/api/webhooks(.*)",
 ]);
 
 // Routes that require an active org (not just authentication)
@@ -46,7 +47,9 @@ export default clerkMiddleware(async (auth, request) => {
 
   if (isPublicRoute(request)) return;
 
-  const { orgId } = await auth.protect();
+  const { orgId } = await auth.protect({
+    unauthenticatedUrl: new URL("/login", request.url).toString(),
+  });
 
   // Authenticated but no active org — redirect to onboard
   if (isOrgRoute(request) && !orgId) {

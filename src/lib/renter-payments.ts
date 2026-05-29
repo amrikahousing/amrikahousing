@@ -2,28 +2,8 @@ import type Stripe from "stripe";
 import type { Prisma } from "../generated/prisma/client";
 import type { TenantContext } from "@/lib/renter-auth";
 import { prisma } from "@/lib/db";
-import {
-  createPlaidTransfer,
-  createPlaidTransferAuthorization,
-  createPlaidTransferLinkToken,
-  decryptPlaidAccessToken,
-  encryptPlaidAccessToken,
-  exchangePlaidPublicToken,
-  getPlaidTransferCapabilities,
-  syncPlaidTransferEvents,
-  type PlaidLinkSuccessMetadata,
-} from "@/lib/plaid";
-import {
-  requireOrganizationRentCollectionFundingAccount,
-  requireOrganizationStripeRentDestination,
-} from "@/lib/organization-payment-destinations";
+import { requireOrganizationStripeRentDestination } from "@/lib/organization-payment-destinations";
 import { getStripeServer } from "@/lib/stripe";
-
-const IN_FLIGHT_PLAID_ATTEMPT_STATUSES = [
-  "authorized",
-  "pending",
-  "posted",
-] as const;
 
 function roundCurrency(value: number) {
   return Math.round((value + Number.EPSILON) * 100) / 100;
@@ -115,7 +95,7 @@ export async function getTenantPaymentProfile(ctx: TenantContext) {
           deleted_at: null,
           is_active: true,
         },
-        orderBy: [{ is_default: "desc" }, { created_at: "desc" }],
+        orderBy: { created_at: "desc" },
         select: {
           id: true,
           payment_provider: true,
@@ -520,8 +500,36 @@ export async function removePaymentMethodForTenant(ctx: TenantContext, methodId:
   });
 }
 
-export async function setAutopayEnabledForTenant(ctx: TenantContext, enabled: boolean) {
-  const defaultMethod = await prisma.renter_payment_methods.findFirst({
+export async function setAutopayEnabledForTenant(
+  ctx: TenantContext,
+  enabled: boolean,
+  defaultPaymentMethodId?: string,
+) {
+  const settings = await prisma.renter_payment_settings.findUnique({
+    where: { tenant_id: ctx.tenantId },
+    select: {
+      default_payment_method_id: true,
+    },
+  });
+  const resolvedDefaultPaymentMethodId =
+    defaultPaymentMethodId ?? settings?.default_payment_method_id ?? null;
+
+  const defaultMethod = resolvedDefaultPaymentMethodId
+    ? await prisma.renter_payment_methods.findFirst({
+      where: {
+        id: resolvedDefaultPaymentMethodId,
+        tenant_id: ctx.tenantId,
+        is_active: true,
+        deleted_at: null,
+      },
+      select: {
+        id: true,
+        payment_provider: true,
+        stripe_customer_id: true,
+        stripe_payment_method_id: true,
+      },
+    })
+    : await prisma.renter_payment_methods.findFirst({
     where: {
       tenant_id: ctx.tenantId,
       is_default: true,
@@ -555,7 +563,7 @@ export async function setAutopayEnabledForTenant(ctx: TenantContext, enabled: bo
     update: {
       user_id: ctx.sharedUserId,
       organization_id: ctx.organizationId,
-      default_payment_method_id: defaultMethod?.id ?? null,
+      ...(defaultMethod ? { default_payment_method_id: defaultMethod.id } : {}),
       autopay_enabled: enabled,
       updated_at: new Date(),
     },
@@ -563,7 +571,7 @@ export async function setAutopayEnabledForTenant(ctx: TenantContext, enabled: bo
       tenant_id: ctx.tenantId,
       user_id: ctx.sharedUserId,
       organization_id: ctx.organizationId,
-      default_payment_method_id: defaultMethod?.id ?? null,
+      default_payment_method_id: defaultMethod?.id ?? resolvedDefaultPaymentMethodId,
       autopay_enabled: enabled,
     },
   });
@@ -716,407 +724,6 @@ export async function createPaymentAttempt(
     clientSecret: paymentIntent.client_secret,
     status: paymentIntent.status,
   };
-}
-
-export async function createPlaidLinkTokenForTenant(ctx: TenantContext) {
-  const result = await createPlaidTransferLinkToken({
-    userId: ctx.userId,
-    clientName: "Amrika Housing",
-  });
-
-  if ("error" in result) {
-    throw new Error(result.error);
-  }
-
-  return result;
-}
-
-export async function savePlaidBankAccountForTenant(
-  ctx: TenantContext,
-  args: {
-    publicToken: string;
-    metadata: PlaidLinkSuccessMetadata | null;
-  },
-) {
-  const exchange = await exchangePlaidPublicToken(args.publicToken);
-  if ("error" in exchange) {
-    throw new Error(exchange.error);
-  }
-
-  const selectedAccount = args.metadata?.accounts?.[0];
-  const accountId = selectedAccount?.id?.trim();
-  const accountMask = selectedAccount?.mask?.trim();
-
-  if (!accountId || !accountMask) {
-    throw new Error("Plaid did not return a bank account that can be saved.");
-  }
-
-  const capabilities = await getPlaidTransferCapabilities({
-    accessToken: exchange.accessToken,
-    accountId,
-  });
-  if ("error" in capabilities) {
-    throw new Error(capabilities.error);
-  }
-
-  const existingDefault = await prisma.renter_payment_settings.findUnique({
-    where: { tenant_id: ctx.tenantId },
-    select: {
-      default_payment_method_id: true,
-    },
-  });
-
-  const encryptedAccessToken = encryptPlaidAccessToken(exchange.accessToken);
-  const paymentMethod = await prisma.renter_payment_methods.create({
-    data: {
-      tenant_id: ctx.tenantId,
-      user_id: ctx.sharedUserId,
-      organization_id: ctx.organizationId,
-      payment_provider: "plaid",
-      payment_type: "us_bank_account",
-      plaid_access_token: encryptedAccessToken,
-      plaid_item_id: exchange.itemId,
-      plaid_account_id: accountId,
-      plaid_institution_id: args.metadata?.institution?.institution_id ?? null,
-      plaid_link_session_id: args.metadata?.link_session_id ?? null,
-      plaid_transfer_eligible: capabilities.institutionSupported,
-      bank_name: args.metadata?.institution?.name ?? "Bank account",
-      bank_account_type: selectedAccount?.subtype ?? selectedAccount?.type ?? null,
-      last4: accountMask,
-      billing_name: null,
-      is_default: !existingDefault?.default_payment_method_id,
-    },
-    select: {
-      id: true,
-      payment_provider: true,
-      payment_type: true,
-      brand: true,
-      bank_name: true,
-      last4: true,
-      plaid_transfer_eligible: true,
-      is_default: true,
-    },
-  });
-
-  if (paymentMethod.is_default) {
-    await prisma.renter_payment_settings.upsert({
-      where: { tenant_id: ctx.tenantId },
-      update: {
-        user_id: ctx.sharedUserId,
-        organization_id: ctx.organizationId,
-        default_payment_method_id: paymentMethod.id,
-        updated_at: new Date(),
-      },
-      create: {
-        tenant_id: ctx.tenantId,
-        user_id: ctx.sharedUserId,
-        organization_id: ctx.organizationId,
-        default_payment_method_id: paymentMethod.id,
-      },
-    });
-
-    await prisma.payments.updateMany({
-      where: {
-        tenant_id: ctx.tenantId,
-        status: "pending",
-        due_date: {
-          gte: todayDateOnly(),
-        },
-      },
-      data: {
-        payment_method: formatStoredPaymentMethodLabel(paymentMethod),
-        updated_at: new Date(),
-      },
-    });
-  }
-
-  return paymentMethod;
-}
-
-async function getPlaidTransferContext(
-  ctx: TenantContext,
-  args: {
-    paymentId: string;
-    renterPaymentMethodId: string;
-    amount: string;
-  },
-) {
-  const payment = await prisma.payments.findFirst({
-    where: {
-      id: args.paymentId,
-      tenant_id: ctx.tenantId,
-      status: "pending",
-    },
-    select: {
-      id: true,
-      amount: true,
-      currency: true,
-      type: true,
-      due_date: true,
-      tenants: {
-        select: {
-          first_name: true,
-          last_name: true,
-          email: true,
-        },
-      },
-    },
-  });
-
-  if (!payment) {
-    throw new Error("Payment charge not found.");
-  }
-
-  const method = await prisma.renter_payment_methods.findFirst({
-    where: {
-      id: args.renterPaymentMethodId,
-      tenant_id: ctx.tenantId,
-      is_active: true,
-      deleted_at: null,
-      payment_provider: "plaid",
-      payment_type: "us_bank_account",
-    },
-    select: {
-      id: true,
-      plaid_access_token: true,
-      plaid_account_id: true,
-      plaid_transfer_eligible: true,
-      bank_name: true,
-      last4: true,
-    },
-  });
-
-  if (!method || !method.plaid_access_token || !method.plaid_account_id) {
-    throw new Error("Saved Plaid bank account not found.");
-  }
-
-  if (!method.plaid_transfer_eligible) {
-    throw new Error("This bank account is not eligible for ACH rent payments.");
-  }
-
-  const normalizedAmount = payment.amount.toFixed(2);
-  if (normalizedAmount !== args.amount) {
-    throw new Error("Payment amount does not match the current charge.");
-  }
-
-  const rentCollectionAccount = await requireOrganizationRentCollectionFundingAccount(
-    ctx.organizationId,
-  );
-
-  return {
-    payment,
-    method: {
-      ...method,
-      plaid_access_token: method.plaid_access_token,
-      plaid_account_id: method.plaid_account_id,
-    },
-    rentCollectionAccount,
-  };
-}
-
-function getPlaidConsentText(amount: string) {
-  return `I authorize Amrika Housing to debit my bank account one time for $${amount} via ACH for rent and related housing charges.`;
-}
-
-export async function authorizePlaidPaymentAttempt(
-  ctx: TenantContext,
-  args: {
-    paymentId: string;
-    renterPaymentMethodId: string;
-    amount: string;
-    ipAddress: string | null;
-    userAgent: string | null;
-  },
-) {
-  const { payment, method, rentCollectionAccount } = await getPlaidTransferContext(ctx, args);
-  const existingAttempt = await prisma.payment_attempts.findFirst({
-    where: {
-      payment_id: payment.id,
-      tenant_id: ctx.tenantId,
-      renter_payment_method_id: method.id,
-      payment_provider: "plaid",
-      status: {
-        in: [...IN_FLIGHT_PLAID_ATTEMPT_STATUSES],
-      },
-    },
-    orderBy: { created_at: "desc" },
-    select: {
-      id: true,
-      plaid_authorization_id: true,
-      plaid_transfer_id: true,
-      status: true,
-    },
-  });
-
-  if (existingAttempt) {
-    return existingAttempt;
-  }
-
-  const idempotencyKey = `${payment.id}:${method.id}:plaid`;
-  const legalName = [payment.tenants?.first_name, payment.tenants?.last_name]
-    .filter(Boolean)
-    .join(" ")
-    .trim();
-
-  if (!legalName) {
-    throw new Error("The tenant record is missing the legal name required for ACH authorization.");
-  }
-
-  const authorization = await createPlaidTransferAuthorization({
-    accessToken: decryptPlaidAccessToken(method.plaid_access_token),
-    accountId: method.plaid_account_id,
-    legalName,
-    amount: args.amount,
-    idempotencyKey,
-    emailAddress: payment.tenants?.email ?? null,
-    fundingAccountId: rentCollectionAccount.plaidFundingAccountId,
-  });
-
-  if ("error" in authorization) {
-    throw new Error(authorization.error);
-  }
-
-  const attempt = await prisma.payment_attempts.create({
-    data: {
-      payment_id: payment.id,
-      tenant_id: ctx.tenantId,
-      user_id: ctx.sharedUserId,
-      organization_id: ctx.organizationId,
-      renter_payment_method_id: method.id,
-      payment_provider: "plaid",
-      plaid_authorization_id: authorization.authorizationId,
-      idempotency_key: idempotencyKey,
-      amount: payment.amount,
-      currency: payment.currency,
-      status: authorization.decision === "approved" ? "authorized" : "failed",
-      failure_code: authorization.decisionRationale?.code ?? null,
-      failure_message:
-        authorization.decision === "approved"
-          ? null
-          : authorization.decisionRationale?.description ?? "ACH authorization was declined.",
-      consent_text: getPlaidConsentText(args.amount),
-      consent_accepted_at: new Date(),
-      consent_ip_address: args.ipAddress,
-      consent_user_agent: args.userAgent,
-    },
-    select: {
-      id: true,
-      plaid_authorization_id: true,
-      plaid_transfer_id: true,
-      status: true,
-      failure_code: true,
-      failure_message: true,
-    },
-  });
-
-  return attempt;
-}
-
-export async function createPlaidTransferForAttempt(
-  ctx: TenantContext,
-  args: {
-    paymentId: string;
-    renterPaymentMethodId: string;
-    amount: string;
-  },
-) {
-  const { payment, method, rentCollectionAccount } = await getPlaidTransferContext(ctx, args);
-  const attempt = await prisma.payment_attempts.findFirst({
-    where: {
-      payment_id: payment.id,
-      tenant_id: ctx.tenantId,
-      renter_payment_method_id: method.id,
-      payment_provider: "plaid",
-    },
-    orderBy: { created_at: "desc" },
-    select: {
-      id: true,
-      plaid_authorization_id: true,
-      plaid_transfer_id: true,
-      status: true,
-    },
-  });
-
-  if (!attempt?.plaid_authorization_id) {
-    throw new Error("Authorize the ACH debit before creating the transfer.");
-  }
-
-  if (attempt.plaid_transfer_id) {
-    return attempt;
-  }
-
-  if (attempt.status === "failed") {
-    throw new Error("The ACH authorization was declined.");
-  }
-
-  const transfer = await createPlaidTransfer({
-    authorizationId: attempt.plaid_authorization_id,
-    accessToken: decryptPlaidAccessToken(method.plaid_access_token),
-    accountId: method.plaid_account_id,
-    amount: args.amount,
-    description: "RENT",
-    fundingAccountId: rentCollectionAccount.plaidFundingAccountId,
-    metadata: {
-      paymentId: payment.id,
-      renterPaymentMethodId: method.id,
-      tenantId: ctx.tenantId,
-      organizationRentCollectionItemId: rentCollectionAccount.plaidItemId,
-      organizationRentCollectionAccountId: rentCollectionAccount.plaidAccountId ?? "",
-    },
-  });
-
-  if ("error" in transfer) {
-    throw new Error(transfer.error);
-  }
-
-  return prisma.payment_attempts.update({
-    where: { id: attempt.id },
-    data: {
-      plaid_transfer_id: transfer.transferId,
-      status: transfer.status,
-      updated_at: new Date(),
-    },
-    select: {
-      id: true,
-      plaid_authorization_id: true,
-      plaid_transfer_id: true,
-      status: true,
-    },
-  });
-}
-
-export async function handlePlaidTransferWebhookEvent(payload: {
-  webhook_type?: string;
-  webhook_code?: string;
-}) {
-  if (
-    payload.webhook_type !== "TRANSFER" ||
-    payload.webhook_code !== "TRANSFER_EVENTS_UPDATE"
-  ) {
-    return;
-  }
-
-  let afterId = 0;
-  while (true) {
-    const synced = await syncPlaidTransferEvents(afterId);
-    if ("error" in synced) {
-      throw new Error(synced.error);
-    }
-
-    const events = synced.transferEvents;
-    if (events.length === 0) {
-      break;
-    }
-
-    for (const event of events) {
-      await applyPlaidTransferEvent(event);
-      afterId = Math.max(afterId, event.event_id);
-    }
-
-    if (events.length < 200) {
-      break;
-    }
-  }
 }
 
 export async function getVerifiedSetupIntent(
@@ -1273,115 +880,6 @@ function formatStoredPaymentMethodLabel(method: {
   }
 
   return `${capitalizeCardBrand(method.brand ?? "")} ending in ${method.last4}`;
-}
-
-async function applyPlaidTransferEvent(event: {
-  event_id: number;
-  event_type: string;
-  transfer_id?: string | null;
-  authorization_id?: string | null;
-  failure_reason?: {
-    failure_code?: string | null;
-    description?: string | null;
-  } | null;
-}) {
-  const plaidWhere: Array<
-    | { plaid_transfer_id: string }
-    | { plaid_authorization_id: string }
-  > = [];
-
-  if (event.transfer_id) {
-    plaidWhere.push({ plaid_transfer_id: event.transfer_id });
-  }
-
-  if (event.authorization_id) {
-    plaidWhere.push({ plaid_authorization_id: event.authorization_id });
-  }
-
-  if (plaidWhere.length === 0) {
-    return;
-  }
-
-  const attempt = await prisma.payment_attempts.findFirst({
-    where: {
-      payment_provider: "plaid",
-      OR: plaidWhere,
-    },
-    select: {
-      id: true,
-      payment_id: true,
-      renter_payment_method_id: true,
-      plaid_last_event_id: true,
-      plaid_transfer_id: true,
-    },
-  });
-
-  if (!attempt) {
-    return;
-  }
-
-  if (attempt.plaid_last_event_id !== null && attempt.plaid_last_event_id >= BigInt(event.event_id)) {
-    return;
-  }
-
-  const method = attempt.renter_payment_method_id
-    ? await prisma.renter_payment_methods.findUnique({
-        where: { id: attempt.renter_payment_method_id },
-        select: {
-          payment_type: true,
-          brand: true,
-          bank_name: true,
-          last4: true,
-        },
-      })
-    : null;
-
-  const now = new Date();
-  const isPaidEvent = event.event_type === "funds_available";
-  const isFailureEvent =
-    event.event_type === "failed" ||
-    event.event_type === "returned" ||
-    event.event_type === "cancelled";
-
-  await prisma.$transaction(async (tx) => {
-    await tx.payment_attempts.update({
-      where: { id: attempt.id },
-      data: {
-        status: event.event_type,
-        plaid_last_event_id: BigInt(event.event_id),
-        failure_code: event.failure_reason?.failure_code ?? null,
-        failure_message: event.failure_reason?.description ?? null,
-        paid_at: isPaidEvent ? now : undefined,
-        updated_at: now,
-      },
-    });
-
-    if (isPaidEvent) {
-      await tx.payments.update({
-        where: { id: attempt.payment_id },
-        data: {
-          status: "paid",
-          paid_at: now,
-          reference: attempt.plaid_transfer_id ?? event.transfer_id ?? null,
-          payment_method: method
-            ? formatStoredPaymentMethodLabel(method)
-            : "ACH payment",
-          updated_at: now,
-        },
-      });
-    }
-
-    if (isFailureEvent) {
-      await tx.payments.update({
-        where: { id: attempt.payment_id },
-        data: {
-          status: "pending",
-          paid_at: null,
-          updated_at: now,
-        },
-      });
-    }
-  });
 }
 
 async function markPaymentIntentSucceeded(paymentIntent: Stripe.PaymentIntent) {

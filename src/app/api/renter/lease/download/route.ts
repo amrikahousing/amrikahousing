@@ -3,14 +3,7 @@ import { auth } from "@clerk/nextjs/server";
 import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { resolveSharedUserIdentity } from "@/lib/renter-auth";
-
-function blobToken() {
-  return process.env.VERCEL_ENV === "production"
-    ? process.env.BLOB_READ_WRITE_TOKEN
-    : process.env.VERCEL_ENV === "preview"
-      ? process.env.TEST_BLOB_READ_WRITE_TOKEN
-      : process.env.DEV_BLOB_READ_WRITE_TOKEN;
-}
+import { getBlobToken } from "@/lib/blob-token";
 
 function fileNameFromUrl(url: string) {
   const pathname = new URL(url).pathname;
@@ -56,7 +49,7 @@ export async function GET() {
 
   const blob = await get(lease.document_url, {
     access: "private",
-    token: blobToken(),
+    token: getBlobToken(),
     useCache: false,
   });
 

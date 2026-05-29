@@ -1,6 +1,11 @@
 import { NextRequest } from "next/server";
 import { prisma } from "@/lib/db";
 import {
+  buildLeaseOnboardingSystemPrompt,
+  buildLeaseOnboardingUserPrompt,
+  leaseOnboardingTool,
+} from "@/lib/lease-extract-prompt";
+import {
   getOrgPermissionContext,
   requirePropertyPermission,
 } from "@/lib/org-authorization";
@@ -9,12 +14,6 @@ const ALLOWED_MIME = new Set(["application/pdf", "image/jpeg", "image/png", "ima
 const ALLOWED_RENDERED_IMAGE_MIME = new Set(["image/jpeg", "image/png"]);
 const MAX_BYTES = 20 * 1024 * 1024;
 const MAX_RENDERED_PAGES = 5;
-
-type AnthropicTool = {
-  name: string;
-  description: string;
-  input_schema: Record<string, unknown>;
-};
 
 type AnthropicContentBlock =
   | { type: "text"; text: string }
@@ -28,59 +27,6 @@ type AnthropicErrorResponse = {
   error?: {
     message?: string;
   };
-};
-
-const leaseTool: AnthropicTool = {
-  name: "extract_lease_onboarding_details",
-  description: "Extract structured renter onboarding details from a residential lease document.",
-  input_schema: {
-    type: "object",
-    properties: {
-      propertyAddress: {
-        type: "string",
-        description: "The full leased property address as written in the lease. Empty string if not found.",
-      },
-      unitNumber: {
-        type: "string",
-        description: "The leased unit/apartment number only. Empty string if not found.",
-      },
-      firstName: { type: "string", description: "Primary tenant first name. Empty string if not found." },
-      lastName: { type: "string", description: "Primary tenant last name. Empty string if not found." },
-      email: { type: "string", description: "Primary tenant email. Empty string if not found." },
-      phone: { type: "string", description: "Primary tenant phone number. Empty string if not found." },
-      additionalTenants: {
-        type: "array",
-        description: "All other tenants listed on the lease besides the primary tenant. Empty array if none.",
-        items: {
-          type: "object",
-          properties: {
-            firstName: { type: "string", description: "Tenant first name. Empty string if not found." },
-            lastName: { type: "string", description: "Tenant last name. Empty string if not found." },
-            email: { type: "string", description: "Tenant email. Empty string if not found." },
-            phone: { type: "string", description: "Tenant phone number. Empty string if not found." },
-          },
-          required: ["firstName", "lastName", "email", "phone"],
-        },
-      },
-      startDate: { type: "string", description: "Lease start date in YYYY-MM-DD format. Empty string if not found." },
-      endDate: { type: "string", description: "Lease end date in YYYY-MM-DD format. Empty string if month-to-month or not found." },
-      rentAmount: { type: "number", description: "Monthly rent amount as a number. Use 0 if not found." },
-      securityDeposit: { type: "number", description: "Security deposit amount as a number. Use 0 if not found." },
-    },
-    required: [
-      "propertyAddress",
-      "unitNumber",
-      "firstName",
-      "lastName",
-      "email",
-      "phone",
-      "additionalTenants",
-      "startDate",
-      "endDate",
-      "rentAmount",
-      "securityDeposit",
-    ],
-  },
 };
 
 function normalizeDate(value: unknown) {
@@ -209,13 +155,9 @@ export async function POST(request: NextRequest) {
     body: JSON.stringify({
       model: process.env.ANTHROPIC_MODEL ?? "claude-haiku-4-5-20251001",
       max_tokens: 2048,
-      tools: [leaseTool],
-      tool_choice: { type: "tool", name: leaseTool.name },
-      system:
-        "You extract facts from residential lease documents for renter onboarding. " +
-        "Only use values visibly present in the document. Do not guess. " +
-        "Extract the primary tenant in the top-level fields and all additional tenants in the additionalTenants array. " +
-        "Dates must be YYYY-MM-DD. Amounts must be numeric without currency symbols.",
+      tools: [leaseOnboardingTool],
+      tool_choice: { type: "tool", name: leaseOnboardingTool.name },
+      system: buildLeaseOnboardingSystemPrompt(),
       messages: [
         {
           role: "user",
@@ -223,9 +165,7 @@ export async function POST(request: NextRequest) {
             ...documentBlocks,
             {
               type: "text",
-              text:
-                "Extract the lease details needed for renter onboarding. " +
-                "Pay special attention to the leased property address and unit/apartment number.",
+              text: buildLeaseOnboardingUserPrompt(),
             },
           ],
         },
@@ -276,15 +216,28 @@ export async function POST(request: NextRequest) {
   }));
   return Response.json({
     propertyAddress: normalizeText(extracted.propertyAddress),
+    propertyAddressConfidence: normalizeText(extracted.propertyAddressConfidence),
+    propertyAddressEvidence: normalizeText(extracted.propertyAddressEvidence),
     unitNumber: normalizeText(extracted.unitNumber),
+    unitNumberConfidence: normalizeText(extracted.unitNumberConfidence),
+    unitNumberEvidence: normalizeText(extracted.unitNumberEvidence),
     firstName: normalizeText(extracted.firstName),
     lastName: normalizeText(extracted.lastName),
     email: normalizeText(extracted.email),
     phone: normalizeText(extracted.phone),
+    tenantEvidence: normalizeText(extracted.tenantEvidence),
     additionalTenants,
     startDate: normalizeDate(extracted.startDate),
+    startDateConfidence: normalizeText(extracted.startDateConfidence),
+    startDateEvidence: normalizeText(extracted.startDateEvidence),
     endDate: normalizeDate(extracted.endDate),
+    endDateConfidence: normalizeText(extracted.endDateConfidence),
+    endDateEvidence: normalizeText(extracted.endDateEvidence),
     rentAmount: normalizeAmount(extracted.rentAmount),
+    rentAmountConfidence: normalizeText(extracted.rentAmountConfidence),
+    rentAmountEvidence: normalizeText(extracted.rentAmountEvidence),
     securityDeposit: normalizeAmount(extracted.securityDeposit),
+    securityDepositConfidence: normalizeText(extracted.securityDepositConfidence),
+    securityDepositEvidence: normalizeText(extracted.securityDepositEvidence),
   });
 }

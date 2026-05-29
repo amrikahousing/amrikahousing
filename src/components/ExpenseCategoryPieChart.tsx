@@ -83,8 +83,6 @@ export function ExpenseCategoryPieChart({
                 dur="650ms"
                 begin={`${index * 90}ms`}
                 fill="freeze"
-                calcMode="spline"
-                keySplines="0.2 0.8 0.2 1"
               />
             </circle>
           ))}

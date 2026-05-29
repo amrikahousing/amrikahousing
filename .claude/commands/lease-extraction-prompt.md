@@ -1,0 +1,1 @@
+Read `/Users/rayansh/Documents/amrikahousing/src/lib/fill-lease.ts` and print the current `SUBSTITUTION_SYSTEM` constant and `TOKEN_LIST` constant exactly as they appear in the file, formatted as code blocks. Label them clearly: "Token list:" and "System prompt:".

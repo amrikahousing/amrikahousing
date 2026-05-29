@@ -6,7 +6,7 @@ generator client {
 
 datasource db {
   provider = "postgresql"
-  schemas  = ["public", "renter"]
+  schemas  = ["public", "renter", "lease"]
 }
 
 model lease_tenants {
@@ -35,6 +35,7 @@ model leases {
   updated_at       DateTime       @default(now()) @db.Timestamptz(6)
   deleted_at       DateTime?      @db.Timestamptz(6)
   lease_tenants    lease_tenants?
+  lease_signature_requests lease_signature_requests[]
   units            units          @relation(fields: [unit_id], references: [id], onUpdate: NoAction)
   payments         payments[]
 
@@ -102,7 +103,9 @@ model organizations {
   plaid_data_deletion_requests      plaid_data_deletion_requests[]
   plaid_transactions                plaid_transactions[]
   organization_payment_destinations organization_payment_destinations?
+  lease_template_clauses            lease_template_clauses[]
   manual_transactions               manual_transactions[]
+  lease_templates                    lease_templates[]
   payment_attempts                  payment_attempts[]
   renter_payment_methods            renter_payment_methods[]
   renter_payment_settings           renter_payment_settings[]
@@ -356,11 +359,23 @@ model properties {
   zip                  String
   country              String                 @default("US")
   description          String?
+  landlord_name        String?
+  landlord_signatory   String?
+  property_manager_name  String?
+  property_manager_email String?
+  property_manager_phone String?
+  includes_electricity Boolean                @default(false)
+  includes_laundry     Boolean                @default(false)
+  has_pet_fee          Boolean                @default(false)
+  includes_parking     Boolean                @default(false)
+  includes_internet    Boolean                @default(false)
   is_active            Boolean                @default(true)
   created_at           DateTime               @default(now()) @db.Timestamptz(6)
   updated_at           DateTime               @default(now()) @db.Timestamptz(6)
   deleted_at           DateTime?              @db.Timestamptz(6)
   organizations        organizations          @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  lease_template_clauses lease_template_clauses[]
+  lease_templates      lease_templates[]
   property_assignments property_assignments[]
   memberships          memberships[]
   property_ownerships  property_ownerships[]
@@ -368,6 +383,77 @@ model properties {
 
   @@index([deleted_at], map: "idx_properties_deleted_at", where: raw("(deleted_at IS NULL)"))
   @@index([organization_id], map: "idx_properties_org")
+  @@schema("public")
+}
+
+model lease_state_specific_clauses {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id String   @db.Uuid
+  state           String
+  area            String
+  note            String
+  risk            String   @default("info")
+  source          String   @default("ai_review")
+  created_at      DateTime @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime @default(now()) @db.Timestamptz(6)
+
+  @@unique([organization_id, state, area], map: "lease_state_specific_clauses_org_state_area_key")
+  @@index([organization_id], map: "idx_lease_state_clauses_org")
+  @@index([state], map: "idx_lease_state_clauses_state")
+  @@index([risk], map: "idx_lease_state_clauses_risk")
+  @@schema("lease")
+}
+
+model lease_templates {
+  id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id String        @db.Uuid
+  property_id     String        @db.Uuid
+  name            String
+  file_name       String
+  content_type    String
+  blob_url             String
+  tokenized_content    String?
+  tokenized_docx_url   String?
+  lease_schema         Json?
+  review_data          Json?
+  is_active            Boolean       @default(true)
+  created_by      String?       @db.Uuid
+  created_at      DateTime      @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime      @default(now()) @db.Timestamptz(6)
+  organizations   organizations @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  properties      properties    @relation(fields: [property_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  lease_template_clauses lease_template_clauses[]
+  lease_signature_requests lease_signature_requests[]
+
+  @@index([organization_id], map: "idx_lease_templates_org")
+  @@index([property_id], map: "idx_lease_templates_property")
+  @@index([is_active], map: "idx_lease_templates_active")
+  @@schema("public")
+}
+
+model lease_template_clauses {
+  id                String          @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  lease_template_id String          @db.Uuid
+  organization_id   String          @db.Uuid
+  property_id       String          @db.Uuid
+  title             String
+  body              String?
+  summary           String?
+  risk_level        String?
+  explanation       String?
+  sort_order        Int             @default(0)
+  source            String          @default("extracted")
+  created_at        DateTime        @default(now()) @db.Timestamptz(6)
+  updated_at        DateTime        @default(now()) @db.Timestamptz(6)
+  lease_templates   lease_templates @relation(fields: [lease_template_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  organizations     organizations   @relation(fields: [organization_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  properties        properties      @relation(fields: [property_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+
+  @@unique([lease_template_id, sort_order], map: "lease_template_clauses_template_order_key")
+  @@index([lease_template_id], map: "idx_lease_template_clauses_template")
+  @@index([organization_id], map: "idx_lease_template_clauses_org")
+  @@index([property_id], map: "idx_lease_template_clauses_property")
+  @@index([risk_level], map: "idx_lease_template_clauses_risk")
   @@schema("public")
 }
 
@@ -469,6 +555,29 @@ model tenants {
   @@index([clerk_user_id], map: "idx_tenants_clerk")
   @@index([deleted_at], map: "idx_tenants_deleted_at", where: raw("(deleted_at IS NULL)"))
   @@index([organization_id], map: "idx_tenants_org")
+  @@schema("renter")
+}
+
+model lease_signature_requests {
+  id                   String           @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  lease_id             String           @db.Uuid
+  lease_template_id    String?          @db.Uuid
+  provider             String           @default("pandadoc")
+  provider_document_id String?
+  status               String           @default("creating")
+  recipients           Json
+  error                String?
+  sent_at              DateTime?        @db.Timestamptz(6)
+  completed_at         DateTime?        @db.Timestamptz(6)
+  last_synced_at       DateTime?        @db.Timestamptz(6)
+  created_at           DateTime         @default(now()) @db.Timestamptz(6)
+  updated_at           DateTime         @default(now()) @db.Timestamptz(6)
+  leases               leases           @relation(fields: [lease_id], references: [id], onDelete: Cascade, onUpdate: NoAction)
+  lease_templates      lease_templates? @relation(fields: [lease_template_id], references: [id], onDelete: SetNull, onUpdate: NoAction)
+
+  @@unique([lease_id], map: "lease_signature_requests_lease_unique")
+  @@index([provider_document_id], map: "idx_signature_requests_provider_doc")
+  @@index([status], map: "idx_signature_requests_status")
   @@schema("renter")
 }
 

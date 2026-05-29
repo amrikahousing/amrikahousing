@@ -43,7 +43,7 @@ export default async function PropertyDetailsPage({
         orderBy: { unit_number: "asc" },
         include: {
           leases: {
-            where: { status: "active", deleted_at: null },
+            where: { status: { in: ["active", "pending_signature"] }, deleted_at: null },
             include: {
               lease_tenants: {
                 include: {
@@ -113,7 +113,8 @@ export default async function PropertyDetailsPage({
         squareFeet: unit.square_feet,
         rentAmount: unit.rent_amount === null ? null : Number(unit.rent_amount),
         status: unit.status,
-        hasActiveLease: Boolean(unit.leases),
+        hasActiveLease: unit.leases?.status === "active",
+        pendingSignatureLeaseId: unit.leases?.status === "pending_signature" ? unit.leases.id : null,
         futurePaymentCount: unit.leases?.payments.length ?? 0,
         tenant: primaryTenant
           ? {
@@ -142,6 +143,7 @@ export default async function PropertyDetailsPage({
 
       <PropertyDetailsClient
         initialProperty={propertyDetails}
+        canManageProperties={access.permissions.manage_properties}
         canManageUnits={access.permissions.manage_units}
         canInviteRenters={access.permissions.invite_renters}
       />

@@ -44,63 +44,8 @@ type PlaidAccountsGetResponse = {
   request_id: string;
 };
 
-type PlaidTransferCapabilitiesResponse = {
-  institution_supported_networks?: {
-    rtp?: {
-      credit?: boolean;
-    } | null;
-    rfp?: {
-      debit?: boolean;
-      max_amount?: string | null;
-      iso_currency_code?: string | null;
-    } | null;
-  } | null;
-  request_id: string;
-};
-
-type PlaidTransferAuthorizationDecision = "approved" | "declined";
-
-type PlaidTransferAuthorizationResponse = {
-  authorization: {
-    id: string;
-    decision: PlaidTransferAuthorizationDecision;
-    decision_rationale?: {
-      code?: string | null;
-      description?: string | null;
-    } | null;
-  };
-  request_id: string;
-};
-
-type PlaidTransferCreateResponse = {
-  transfer: {
-    id: string;
-    status: string;
-    authorization_id: string;
-  };
-  request_id: string;
-};
-
-type PlaidTransferEvent = {
-  event_id: number;
-  event_type: string;
-  timestamp: string;
-  transfer_id?: string | null;
-  account_id?: string | null;
-  authorization_id?: string | null;
-  failure_reason?: {
-    failure_code?: string | null;
-    description?: string | null;
-  } | null;
-};
-
-type PlaidTransferEventSyncResponse = {
-  transfer_events: PlaidTransferEvent[];
-  request_id: string;
-};
-
-type PlaidTransferOriginatorFundingAccountCreateResponse = {
-  funding_account_id: string;
+type PlaidAuthGetResponse = {
+  accounts?: Array<Record<string, unknown>>;
   request_id: string;
 };
 
@@ -108,6 +53,9 @@ type PlaidStripeBankAccountTokenCreateResponse = {
   stripe_bank_account_token: string;
   request_id: string;
 };
+
+const PLAID_STRIPE_INTEGRATION_NOT_ENABLED_MESSAGE =
+  "Plaid's Stripe integration is not enabled for this Plaid app yet. Enable Stripe in the Plaid Dashboard integrations, then reconnect the bank account and try again.";
 
 export type PlaidLinkAccount = {
   id?: string | null;
@@ -159,6 +107,14 @@ function plaidErrorMessage(body: PlaidErrorResponse, fallback: string) {
   return body.display_message ?? body.error_message ?? body.error_code ?? fallback;
 }
 
+function isPlaidStripeIntegrationNotEnabledError(error: string) {
+  const normalizedError = error.toLowerCase();
+  return (
+    normalizedError.includes("api keys are not enabled") &&
+    normalizedError.includes("stripe")
+  );
+}
+
 async function plaidPost<TResponse extends object>(
   path: string,
   payload: Record<string, unknown>,
@@ -201,7 +157,7 @@ export async function createPlaidLinkToken({
       client_name: clientName,
       country_codes: ["US"],
       language: "en",
-      products: ["transactions"],
+      products: ["transactions", "auth"],
       user: {
         client_user_id: userId,
       },
@@ -217,12 +173,14 @@ export async function createPlaidLinkToken({
   };
 }
 
-export async function createPlaidTransferLinkToken({
+export async function createPlaidAuthUpdateLinkToken({
   userId,
   clientName,
+  accessToken,
 }: {
   userId: string;
   clientName: string;
+  accessToken: string;
 }) {
   const result = await plaidPost<PlaidLinkTokenResponse>(
     "/link/token/create",
@@ -230,12 +188,13 @@ export async function createPlaidTransferLinkToken({
       client_name: clientName,
       country_codes: ["US"],
       language: "en",
-      products: ["transfer"],
+      access_token: accessToken,
+      additional_consented_products: ["auth"],
       user: {
         client_user_id: userId,
       },
     },
-    "Could not create Plaid transfer link token.",
+    "Could not create Plaid update link token.",
   );
 
   if ("error" in result) return { error: result.error, status: result.status };
@@ -303,133 +262,23 @@ export async function getPlaidAccounts({
   };
 }
 
-export async function getPlaidTransferCapabilities(args: {
+export async function getPlaidAuthAccounts({
+  accessToken,
+}: {
   accessToken: string;
-  accountId: string;
 }) {
-  const result = await plaidPost<PlaidTransferCapabilitiesResponse>(
-    "/transfer/capabilities/get",
+  const result = await plaidPost<PlaidAuthGetResponse>(
+    "/auth/get",
     {
-      access_token: args.accessToken,
-      account_id: args.accountId,
+      access_token: accessToken,
     },
-    "Could not determine Plaid transfer eligibility.",
+    "Could not fetch Plaid Auth data.",
   );
 
   if ("error" in result) return { error: result.error, status: result.status };
 
   return {
-    institutionSupported: true,
-    institutionSupportedNetworks: result.data.institution_supported_networks ?? null,
-  };
-}
-
-export async function createPlaidTransferAuthorization(args: {
-  accessToken: string;
-  accountId: string;
-  legalName: string;
-  amount: string;
-  idempotencyKey: string;
-  emailAddress?: string | null;
-  fundingAccountId?: string | null;
-}) {
-  const result = await plaidPost<PlaidTransferAuthorizationResponse>(
-    "/transfer/authorization/create",
-    {
-      access_token: args.accessToken,
-      account_id: args.accountId,
-      funding_account_id: args.fundingAccountId ?? undefined,
-      type: "debit",
-      network: "ach",
-      ach_class: "web",
-      amount: args.amount,
-      user: {
-        legal_name: args.legalName,
-        email_address: args.emailAddress ?? undefined,
-      },
-      idempotency_key: args.idempotencyKey,
-    },
-    "Could not authorize the ACH transfer.",
-  );
-
-  if ("error" in result) return { error: result.error, status: result.status };
-
-  return {
-    authorizationId: result.data.authorization.id,
-    decision: result.data.authorization.decision,
-    decisionRationale: result.data.authorization.decision_rationale ?? null,
-  };
-}
-
-export async function createPlaidTransfer(args: {
-  authorizationId: string;
-  accessToken: string;
-  accountId: string;
-  amount: string;
-  description: string;
-  metadata?: Record<string, string>;
-  fundingAccountId?: string | null;
-}) {
-  const result = await plaidPost<PlaidTransferCreateResponse>(
-    "/transfer/create",
-    {
-      authorization_id: args.authorizationId,
-      access_token: args.accessToken,
-      account_id: args.accountId,
-      funding_account_id: args.fundingAccountId ?? undefined,
-      amount: args.amount,
-      description: args.description,
-      metadata: args.metadata,
-    },
-    "Could not create the ACH transfer.",
-  );
-
-  if ("error" in result) return { error: result.error, status: result.status };
-
-  return {
-    transferId: result.data.transfer.id,
-    authorizationId: result.data.transfer.authorization_id,
-    status: result.data.transfer.status,
-  };
-}
-
-export async function syncPlaidTransferEvents(afterId: number) {
-  const result = await plaidPost<PlaidTransferEventSyncResponse>(
-    "/transfer/event/sync",
-    { after_id: afterId, count: 200 },
-    "Could not sync Plaid transfer events.",
-  );
-
-  if ("error" in result) return { error: result.error, status: result.status };
-
-  return {
-    transferEvents: result.data.transfer_events ?? [],
-  };
-}
-
-export async function createPlaidOriginatorFundingAccount(args: {
-  originatorClientId: string;
-  accessToken: string;
-  accountId: string;
-  displayName?: string | null;
-}) {
-  const result = await plaidPost<PlaidTransferOriginatorFundingAccountCreateResponse>(
-    "/transfer/originator/funding_account/create",
-    {
-      originator_client_id: args.originatorClientId,
-      funding_account: {
-        access_token: args.accessToken,
-        account_id: args.accountId,
-        display_name: args.displayName ?? undefined,
-      },
-    },
-    "Could not connect this receiving account for Plaid Transfer.",
-  );
-
-  if ("error" in result) return { error: result.error, status: result.status };
-
-  return {
-    fundingAccountId: result.data.funding_account_id,
+    accounts: result.data.accounts ?? [],
   };
 }
 
@@ -446,7 +295,17 @@ export async function createPlaidStripeBankAccountToken(args: {
     "Could not create the Stripe payout token for this Plaid account.",
   );
 
-  if ("error" in result) return { error: result.error, status: result.status };
+  if ("error" in result) {
+    const errorMessage =
+      result.error ?? "Could not create the Stripe payout token for this Plaid account.";
+
+    return {
+      error: isPlaidStripeIntegrationNotEnabledError(errorMessage)
+        ? PLAID_STRIPE_INTEGRATION_NOT_ENABLED_MESSAGE
+        : errorMessage,
+      status: result.status,
+    };
+  }
 
   return {
     bankAccountToken: result.data.stripe_bank_account_token,

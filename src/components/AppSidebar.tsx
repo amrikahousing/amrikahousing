@@ -32,6 +32,7 @@ type IconName =
   | "dashboard"
   | "accounts"
   | "building"
+  | "lease"
   | "wrench"
   | "users"
   | "profile";
@@ -39,6 +40,7 @@ type IconName =
 const implementedRoutes = new Set([
   "/dashboard",
   "/properties",
+  "/leases",
   "/accounts",
   "/maintenance",
   "/team",
@@ -83,6 +85,15 @@ function Icon({ name, className = "" }: { name: IconName; className?: string }) 
           <path d="M4 21V5.5A1.5 1.5 0 0 1 5.5 4h9A1.5 1.5 0 0 1 16 5.5V21" />
           <path d="M16 9h2.5A1.5 1.5 0 0 1 20 10.5V21" />
           <path d="M8 8h4M8 12h4M8 16h4M3 21h18" />
+        </svg>
+      );
+    case "lease":
+      return (
+        <svg {...shared}>
+          <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z" />
+          <path d="M14 3v5h5" />
+          <path d="M8 13h8M8 17h5" />
+          <path d="m9 9 1.5 1.5L13.5 7" />
         </svg>
       );
     case "wrench":
@@ -130,6 +141,9 @@ export function AppSidebar({ user }: AppSidebarProps) {
     { name: "Dashboard", href: "/dashboard", icon: "dashboard" as const },
     ...(user.permissions.view_properties || user.permissions.create_properties
       ? [{ name: "Properties", href: "/properties", icon: "building" as const }]
+      : []),
+    ...(user.permissions.view_properties || user.permissions.create_properties
+      ? [{ name: "Leases", href: "/leases", icon: "lease" as const }]
       : []),
     ...(user.permissions.manage_accounting || user.permissions.manage_bank_accounts
       ? [{ name: "Accounts", href: "/accounts", icon: "accounts" as const }]
@@ -252,7 +266,7 @@ export function AppSidebar({ user }: AppSidebarProps) {
         ) : null}
 
         <button
-          onClick={() => signOut(() => router.push("/login"))}
+          onClick={() => signOut({ redirectUrl: "/login" })}
           className="flex w-full items-center justify-start gap-2 rounded-lg border border-slate-700 px-3 py-2 text-sm font-medium text-slate-400 transition-colors hover:bg-slate-800 hover:text-white"
         >
           <span aria-hidden="true">-&gt;</span>

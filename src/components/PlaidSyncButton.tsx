@@ -1,14 +1,100 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 
 type SyncStatus = "idle" | "syncing" | "done" | "error";
+
+let plaidScriptPromise: Promise<void> | null = null;
+
+function loadPlaidScript() {
+  if (typeof window === "undefined") return Promise.resolve();
+  if (window.Plaid) return Promise.resolve();
+  if (plaidScriptPromise) return plaidScriptPromise;
+
+  plaidScriptPromise = new Promise((resolve, reject) => {
+    const existing = document.querySelector<HTMLScriptElement>(
+      'script[src="https://cdn.plaid.com/link/v2/stable/link-initialize.js"]',
+    );
+
+    if (existing) {
+      existing.addEventListener("load", () => resolve(), { once: true });
+      existing.addEventListener("error", () => reject(new Error("Plaid Link failed to load.")), {
+        once: true,
+      });
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = "https://cdn.plaid.com/link/v2/stable/link-initialize.js";
+    script.async = true;
+    script.onload = () => resolve();
+    script.onerror = () => reject(new Error("Plaid Link failed to load."));
+    document.body.appendChild(script);
+  });
+
+  return plaidScriptPromise;
+}
 
 export function PlaidSyncButton() {
   const router = useRouter();
   const [status, setStatus] = useState<SyncStatus>("idle");
   const [summary, setSummary] = useState<string | null>(null);
+
+  useEffect(() => {
+    void loadPlaidScript();
+  }, []);
+
+  async function openAuthUpdateIfNeeded() {
+    await loadPlaidScript();
+    if (!window.Plaid) {
+      return false;
+    }
+
+    const tokenResponse = await fetch("/api/plaid/link-token", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ mode: "update_auth" }),
+    });
+    const tokenData = (await tokenResponse.json()) as {
+      linkToken?: string;
+      updateRequired?: boolean;
+      item?: { institutionName?: string | null };
+      error?: string;
+    };
+
+    if (!tokenResponse.ok) {
+      throw new Error(tokenData.error ?? "Could not start Plaid update mode.");
+    }
+
+    if (tokenData.updateRequired === false || !tokenData.linkToken) {
+      return false;
+    }
+
+    const institutionLabel = tokenData.item?.institutionName
+      ? ` for ${tokenData.item.institutionName}`
+      : "";
+
+    const handler = window.Plaid.create({
+      token: tokenData.linkToken,
+      onSuccess: async () => {
+        setSummary(`Permissions updated${institutionLabel}`);
+        setStatus("done");
+        await fetch("/api/plaid/transactions", { method: "POST" }).catch(() => null);
+        router.refresh();
+      },
+      onExit: (plaidError) => {
+        if (plaidError) {
+          setSummary("Plaid update was closed before permissions were updated.");
+          setStatus("error");
+        }
+      },
+    });
+
+    setSummary(`Update permissions${institutionLabel}`);
+    handler.open();
+    return true;
+  }
 
   async function handleSync() {
     setStatus("syncing");
@@ -32,6 +118,11 @@ export function PlaidSyncButton() {
       if ((result.added ?? 0) > 0) parts.push(`${result.added} added`);
       if ((result.modified ?? 0) > 0) parts.push(`${result.modified} updated`);
       if ((result.removed ?? 0) > 0) parts.push(`${result.removed} removed`);
+      const openedUpdate = await openAuthUpdateIfNeeded();
+      if (openedUpdate) {
+        return;
+      }
+
       setSummary(parts.length > 0 ? parts.join(", ") : "Already up to date");
       setStatus("done");
       router.refresh();

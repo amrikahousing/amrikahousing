@@ -331,7 +331,7 @@ function AccessConfirmDialog({
         onClick={onCancel}
         aria-label="Close confirmation"
       />
-      <div className="relative w-full max-w-md rounded-lg border border-slate-200 bg-white p-5 shadow-2xl">
+      <div className="ui-modal-panel relative w-full max-w-md p-5">
         <div className={`mb-4 flex h-11 w-11 items-center justify-center rounded-lg ${copy.tone === "red" ? "bg-red-50 text-red-700" : "bg-rose-50 text-rose-700"}`}>
           <InactiveIcon className="h-5 w-5" />
         </div>
@@ -342,7 +342,7 @@ function AccessConfirmDialog({
             type="button"
             onClick={onCancel}
             disabled={busy}
-            className="h-10 rounded-lg border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:opacity-60"
+            className="ui-btn ui-btn-secondary h-10 px-4 text-sm"
           >
             Cancel
           </button>
@@ -396,7 +396,7 @@ function PropertyChecklist({
 }) {
   if (disabled) {
     return (
-      <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+      <p className="ui-panel-soft px-3 py-2 text-sm text-slate-600">
         No property scope required.
       </p>
     );
@@ -404,7 +404,7 @@ function PropertyChecklist({
 
   if (properties.length === 0) {
     return (
-      <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+      <p className="ui-panel-soft px-3 py-2 text-sm text-slate-600">
         No properties exist yet. Access can be scoped later.
       </p>
     );
@@ -412,14 +412,14 @@ function PropertyChecklist({
 
   if (properties.length === 1) {
     return (
-      <p className="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-600">
+      <p className="ui-panel-soft px-3 py-2 text-sm text-slate-600">
         Assigned to <span className="font-medium text-slate-900">{properties[0].name}</span>.
       </p>
     );
   }
 
   return (
-    <div className="space-y-2 rounded-lg border border-slate-200 bg-slate-50 p-3">
+    <div className="ui-panel-soft space-y-2 p-3">
       <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
         Property scope{required ? " *" : ""}
       </p>
@@ -534,7 +534,7 @@ function AccessUserCard({
   }
 
   return (
-    <article className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm transition hover:border-slate-300 hover:shadow-md">
+    <article className="ui-card-interactive p-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div className="flex min-w-0 items-center gap-3">
           <div className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-lg text-sm font-bold text-white ${roleAccent(role)}`}>
@@ -568,7 +568,7 @@ function AccessUserCard({
               if (!roleUsesPropertyScope(nextRole)) setPropertyIds([]);
               if (nextRole === "admin") setActive(true);
             }}
-            className="h-10 w-full rounded-lg border border-slate-300 px-3 text-sm text-slate-900 outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20"
+            className="ui-input h-10 px-3 text-sm"
           >
             {roles.map((item) => (
               <option key={item.value} value={item.value}>
@@ -594,7 +594,7 @@ function AccessUserCard({
             checked={active}
             disabled={role === "admin"}
             onChange={(event) => setActive(event.target.checked)}
-            className="h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500 disabled:opacity-50"
+            className="ui-checkbox h-4 w-4 rounded border-slate-300 focus:ring-emerald-500 disabled:opacity-50"
           />
           Active access
         </label>
@@ -602,7 +602,7 @@ function AccessUserCard({
           type="button"
           onClick={save}
           disabled={saving}
-          className="inline-flex h-10 items-center justify-center rounded-lg bg-slate-900 px-4 text-sm font-semibold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+          className="ui-btn ui-btn-primary h-10 px-4 text-sm"
         >
           {saving ? "Saving..." : "Save access"}
         </button>
@@ -611,7 +611,7 @@ function AccessUserCard({
             type="button"
             onClick={onClose}
             disabled={saving}
-            className="inline-flex h-10 items-center justify-center rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-700 transition hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+            className="ui-btn ui-btn-secondary h-10 px-4 text-sm"
           >
             Cancel
           </button>
@@ -1032,7 +1032,7 @@ export function PropertyManagersClient({
           {showAddUserModal ? (
             <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
               <div className="absolute inset-0 bg-slate-950/40" onClick={() => setShowAddUserModal(false)} />
-              <div className="relative max-h-[90vh] w-full max-w-2xl overflow-y-auto rounded-xl border border-slate-200 bg-white p-6 shadow-2xl">
+              <div className="ui-modal-panel relative max-h-[90vh] w-full max-w-2xl overflow-y-auto p-6">
                 <div className="mb-5 flex items-start justify-between gap-4">
                   <div>
                     <h2 className="text-xl font-bold text-slate-900">Add user</h2>
@@ -1224,7 +1224,7 @@ export function PropertyManagersClient({
               </div>
             </div>
 
-            <div className="hidden rounded-lg border border-slate-200 bg-white shadow-sm lg:block">
+            <div className="ui-panel hidden lg:block">
               <table className="w-full border-collapse text-left">
                 <thead className="bg-slate-50">
                   <tr className="border-b border-slate-200 text-base font-bold text-slate-950">
@@ -1494,7 +1494,7 @@ export function PropertyManagersClient({
             {roles.map((role) => {
               const roleUsers = users.filter((user) => user.role === role.value);
               return (
-                <div key={role.value} className="rounded-lg border border-slate-200 bg-slate-50 p-5">
+                <div key={role.value} className="ui-panel-soft p-5">
                   <div className="flex items-center justify-between gap-3">
                     <div className={`flex h-11 w-11 items-center justify-center rounded-lg text-sm font-bold text-white ${roleAccent(role.value)}`}>
                       {roleInitial(role.value)}
@@ -1524,7 +1524,7 @@ export function PropertyManagersClient({
       ) : null}
 
       {activeTab === "permissions" ? (
-        <section className="overflow-hidden rounded-lg border border-slate-200 bg-white shadow-sm">
+        <section className="ui-panel overflow-hidden">
           <div className="border-b border-slate-200 p-5">
             <h2 className="text-lg font-semibold text-slate-900">Permissions</h2>
             <p className="mt-1 text-sm text-slate-500">Code-defined permissions by role, with property scope applied where relevant.</p>

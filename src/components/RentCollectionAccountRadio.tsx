@@ -2,6 +2,7 @@
 
 import { startTransition, useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useRentCollectionAccountSelection } from "./RentCollectionAccountSelectionProvider";
 import { useToast } from "./ToastProvider";
 
 type RentCollectionAccountRadioProps = {
@@ -17,19 +18,36 @@ export function RentCollectionAccountRadio({
 }: RentCollectionAccountRadioProps) {
   const router = useRouter();
   const toast = useToast();
+  const selection = useRentCollectionAccountSelection();
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [isAwaitingServerState, setIsAwaitingServerState] = useState(false);
-  const [optimisticChecked, setOptimisticChecked] = useState(checked);
+  const [localChecked, setLocalChecked] = useState(checked);
+  const optimisticChecked = selection
+    ? selection.selectedAccountId === connectedAccountId
+    : localChecked;
 
   useEffect(() => {
-    if (checked === optimisticChecked) {
-      setIsAwaitingServerState(false);
+    if (!selection && !isSubmitting) {
+      setLocalChecked(checked);
+    }
+  }, [checked, isSubmitting, selection]);
+
+  function setOptimisticSelection(accountId: string | null) {
+    if (selection) {
+      selection.setSelectedAccountId(accountId);
+      return;
     }
 
-    if (!isSubmitting && !isAwaitingServerState) {
-      setOptimisticChecked(checked);
+    setLocalChecked(accountId === connectedAccountId);
+  }
+
+  function resetOptimisticSelection() {
+    if (selection) {
+      selection.resetSelectedAccountId();
+      return;
     }
-  }, [checked, isSubmitting, isAwaitingServerState, optimisticChecked]);
+
+    setLocalChecked(checked);
+  }
 
   async function readErrorMessage(response: Response) {
     const contentType = response.headers.get("content-type") ?? "";
@@ -58,8 +76,7 @@ export function RentCollectionAccountRadio({
 
     const nextChecked = !optimisticChecked;
     setIsSubmitting(true);
-    setIsAwaitingServerState(false);
-    setOptimisticChecked(nextChecked);
+    setOptimisticSelection(nextChecked ? connectedAccountId : null);
 
     try {
       const response = await fetch("/api/accounts/rent-collection-account", {
@@ -69,26 +86,29 @@ export function RentCollectionAccountRadio({
       });
 
       if (!response.ok) {
-        setOptimisticChecked(checked);
-        setIsAwaitingServerState(false);
+        resetOptimisticSelection();
         toast.error(await readErrorMessage(response), { title: "Rent Collection" });
         return;
       }
 
+      const data = (await response.json().catch(() => null)) as {
+        needsOnboarding?: boolean;
+      } | null;
+
       toast.success(
-        nextChecked
-          ? "This account is now set to collect rent."
-          : "Rent collection was turned off for this account.",
+        nextChecked && data?.needsOnboarding
+          ? "This account is set for rent collection. Complete Stripe verification from the banner when you're ready."
+          : nextChecked
+            ? "This account is now set to collect rent."
+            : "Rent collection was turned off for this account.",
         { title: "Rent Collection" },
       );
 
-      setIsAwaitingServerState(true);
       startTransition(() => {
         router.refresh();
       });
     } catch (requestError) {
-      setOptimisticChecked(checked);
-      setIsAwaitingServerState(false);
+      resetOptimisticSelection();
       toast.error(
         requestError instanceof Error
           ? requestError.message
@@ -117,20 +137,14 @@ export function RentCollectionAccountRadio({
         />
         <span
           aria-hidden="true"
-          className={`relative inline-flex h-7 w-12 items-center rounded-full border transition sm:h-8 sm:w-14 ${
+          className={`ui-switch ${
             optimisticChecked
-              ? "border-emerald-500 bg-emerald-500"
+              ? "ui-switch-on"
               : disabled
-                ? "border-slate-200 bg-slate-100"
-                : "border-slate-300 bg-stone-100"
+                ? "ui-switch-disabled"
+                : ""
           }`}
-        >
-          <span
-            className={`inline-block h-5 w-5 rounded-full bg-white shadow-sm transition sm:h-6 sm:w-6 ${
-              optimisticChecked ? "translate-x-6 sm:translate-x-7" : "translate-x-1"
-            }`}
-          />
-        </span>
+        />
       </label>
       <p className="text-[11px] text-slate-500 sm:text-xs">
         {isSubmitting ? "Connecting..." : optimisticChecked ? "On" : disabled ? "Off" : "Off"}
