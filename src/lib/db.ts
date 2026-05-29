@@ -36,7 +36,6 @@ function hasCurrentAccountingDelegates(client: ReturnType<typeof createPrismaCli
     typeof client.accounting_transaction_categories?.findMany === "function" &&
     typeof client.accounting_vendor_category_rules?.findMany === "function" &&
     prismaModelHasField(client, "plaid_items", "sync_enabled") &&
-    prismaModelHasField(client, "organization_payment_destinations", "plaid_funding_account_id") &&
     prismaModelHasField(client, "organization_payment_destinations", "stripe_external_account_id") &&
     prismaModelHasField(client, "organizations", "stripe_account_id") &&
     prismaModelHasField(client, "plaid_items", "last_synced_at") &&
@@ -61,7 +60,15 @@ function hasCurrentRenterPaymentDelegates(client: ReturnType<typeof createPrisma
 }
 
 function hasCurrentAccessDelegates(client: ReturnType<typeof createPrismaClient>) {
-  return typeof client.memberships?.findMany === "function";
+  return (
+    typeof client.memberships?.findMany === "function" &&
+    typeof client.lease_templates?.findMany === "function" &&
+    typeof client.lease_state_specific_clauses?.findMany === "function" &&
+    typeof client.lease_signature_requests?.findMany === "function" &&
+    prismaModelHasField(client, "lease_templates", "lease_schema") &&
+    prismaModelHasField(client, "properties", "landlord_name") &&
+    prismaModelHasField(client, "properties", "landlord_signatory")
+  );
 }
 
 export const prisma =

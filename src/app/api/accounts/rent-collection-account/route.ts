@@ -40,7 +40,10 @@ export async function POST(request: Request) {
       connectedAccountId: body.connectedAccountId.trim(),
     });
 
-    return NextResponse.json({ destination });
+    return NextResponse.json({
+      destination,
+      needsOnboarding: destination.needsOnboarding,
+    });
   } catch (error) {
     console.error("[rent-collection-account]", {
       organizationId: access.orgDbId,

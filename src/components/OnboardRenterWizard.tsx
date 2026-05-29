@@ -13,7 +13,8 @@ export type WizardUnit = {
   rentAmount: number | null;
 };
 
-type Step = "select-unit" | "upload-lease" | "review" | "confirm" | "done";
+type Step = "select-unit" | "choose-path" | "upload-lease" | "review" | "preview-lease" | "confirm" | "done";
+type LeaseMode = "uploaded" | "generate";
 
 type AdditionalTenant = {
   firstName: string;
@@ -73,6 +74,16 @@ type LeaseParseResult = {
 type PasswordPromptState = {
   reason: "required" | "incorrect";
   resolve: (password: string | null) => void;
+};
+
+type LeaseTemplate = {
+  id: string;
+  name: string;
+  fileName: string;
+  contentType: string;
+  blobUrl: string;
+  isActive: boolean;
+  createdAt: string;
 };
 
 const SCAN_PHASES: ScanPhase[] = [
@@ -207,24 +218,31 @@ class PdfPasswordCancelledError extends Error {
 // ─── Step indicator ───────────────────────────────────────────────────────────
 
 const STEPS: { id: Step; label: string }[] = [
-  { id: "select-unit", label: "Select unit" },
-  { id: "upload-lease", label: "Upload lease" },
-  { id: "review", label: "Review details" },
-  { id: "confirm", label: "Confirm" },
-  { id: "done", label: "Done" },
+  { id: "select-unit",   label: "Select unit"    },
+  { id: "choose-path",   label: "Lease path"     },
+  { id: "upload-lease",  label: "Upload lease"   },
+  { id: "review",        label: "Review details" },
+  { id: "preview-lease", label: "Preview lease"  },
+  { id: "confirm",       label: "Confirm"        },
+  { id: "done",          label: "Done"           },
 ];
 
-function StepIndicator({ current, unitPreselected }: { current: Step; unitPreselected: boolean }) {
-  const visibleSteps = unitPreselected ? STEPS.filter((s) => s.id !== "select-unit") : STEPS;
+function StepIndicator({ current, unitPreselected, leaseMode }: { current: Step; unitPreselected: boolean; leaseMode: LeaseMode }) {
+  const visibleSteps = STEPS.filter((s) => {
+    if (unitPreselected && s.id === "select-unit") return false;
+    if (leaseMode === "generate" && s.id === "upload-lease") return false;
+    if (leaseMode !== "generate" && s.id === "preview-lease") return false;
+    return true;
+  });
   const rawIdx = visibleSteps.findIndex((s) => s.id === current);
   const idx = rawIdx >= 0 ? rawIdx : 0;
   return (
-    <div className="flex items-center gap-0">
+    <div className="flex items-start overflow-x-auto pb-1">
       {visibleSteps.map((s, i) => {
         const done = i < idx;
         const active = i === idx;
         return (
-          <div key={s.id} className="flex items-center">
+          <div key={s.id} className="flex min-w-fit items-center">
             <div className="flex flex-col items-center gap-1">
               <div
                 className={[
@@ -234,12 +252,12 @@ function StepIndicator({ current, unitPreselected }: { current: Step; unitPresel
               >
                 {done ? <CheckIcon className="h-3.5 w-3.5" /> : i + 1}
               </div>
-              <span className={["text-xs font-medium", active ? "text-emerald-700" : done ? "text-slate-500" : "text-slate-400"].join(" ")}>
+              <span className={["whitespace-nowrap text-[11px] font-medium sm:text-xs", active ? "text-emerald-700" : done ? "text-slate-500" : "text-slate-400"].join(" ")}>
                 {s.label}
               </span>
             </div>
             {i < visibleSteps.length - 1 && (
-              <div className={["mx-1.5 mb-4 h-0.5 w-8 flex-shrink-0 transition-colors", i < idx ? "bg-emerald-400" : "bg-slate-200"].join(" ")} />
+              <div className={["mx-1.5 mb-4 h-0.5 w-6 flex-shrink-0 transition-colors sm:w-8", i < idx ? "bg-emerald-400" : "bg-slate-200"].join(" ")} />
             )}
           </div>
         );
@@ -265,10 +283,11 @@ export function OnboardRenterWizard({
   vacantUnits: WizardUnit[];
   initialUnitId?: string | null;
   onClose: () => void;
-  onSuccess: (unitId: string) => void;
+  onSuccess: (unitId: string, options?: { pendingSignature?: boolean }) => void;
 }) {
   const { user: currentUser } = useUser();
-  const [step, setStep] = useState<Step>(initialUnitId ? "upload-lease" : "select-unit");
+  const [step, setStep] = useState<Step>(initialUnitId ? "choose-path" : "select-unit");
+  const [leaseMode, setLeaseMode] = useState<LeaseMode>("uploaded");
   const [selectedUnitId, setSelectedUnitId] = useState<string>(initialUnitId ?? vacantUnits[0]?.id ?? "");
 
   // Step 2 — lease upload + simulated extraction
@@ -304,6 +323,7 @@ export function OnboardRenterWizard({
   const [resultEmail, setResultEmail] = useState<string>("");
   const [resultLinked, setResultLinked] = useState(false);
   const [resultTestMode, setResultTestMode] = useState(false);
+  const [resultSentForSignature, setResultSentForSignature] = useState(false);
   const [completedActions, setCompletedActions] = useState(0);
   const [accountLookup, setAccountLookup] = useState<AccountLookup>({ status: "idle" });
   const [additionalLookups, setAdditionalLookups] = useState<AccountLookup[]>([]);
@@ -311,8 +331,43 @@ export function OnboardRenterWizard({
   const [skipLeaseMismatchValidation, setSkipLeaseMismatchValidation] = useState(false);
   const preMismatchOverrideFormRef = useRef<FormData | null>(null);
   const additionalTenantKeysRef = useRef<string[]>([]);
+  const [templates, setTemplates] = useState<LeaseTemplate[]>([]);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [templateError, setTemplateError] = useState<string | null>(null);
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
+
+  const [filledLeaseUrl, setFilledLeaseUrl] = useState<string | null>(null);
+  const [filledLeaseHtml, setFilledLeaseHtml] = useState<string | null>(null);
+  const [fillingLease, setFillingLease] = useState(false);
+  const [fillError, setFillError] = useState<string | null>(null);
 
   const selectedUnit = vacantUnits.find((u) => u.id === selectedUnitId) ?? null;
+
+  async function loadTemplates() {
+    setTemplatesLoading(true);
+    setTemplateError(null);
+    try {
+      const res = await fetch(`/api/properties/${propertyId}/lease-templates`);
+      const data = (await res.json()) as { error?: string; templates?: LeaseTemplate[] };
+      if (!res.ok) {
+        setTemplateError(data.error ?? "Could not load lease templates.");
+        return;
+      }
+      const nextTemplates = data.templates ?? [];
+      setTemplates(nextTemplates);
+      setSelectedTemplateId((current) => current || nextTemplates.find((t) => t.isActive)?.id || nextTemplates[0]?.id || "");
+    } catch {
+      setTemplateError("Could not load lease templates.");
+    } finally {
+      setTemplatesLoading(false);
+    }
+  }
+
+  useEffect(() => {
+    if (leaseMode !== "generate") return;
+    void loadTemplates();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leaseMode, propertyId]);
 
   // ── Step 2: simulate scan ──────────────────────────────────────────────────
 
@@ -683,6 +738,7 @@ export function OnboardRenterWizard({
       const body = new FormData();
       body.append("propertyId", propertyId);
       body.append("unitId", selectedUnitId);
+      body.append("leaseMode", leaseMode);
       body.append("firstName", form.firstName.trim());
       body.append("lastName", form.lastName.trim());
       body.append("email", form.email.trim());
@@ -691,7 +747,8 @@ export function OnboardRenterWizard({
       if (form.endDate) body.append("endDate", form.endDate);
       body.append("rentAmount", String(Number(form.rentAmount)));
       if (form.securityDeposit) body.append("securityDeposit", String(Number(form.securityDeposit)));
-      if (file) body.append("leaseFile", file);
+      if (leaseMode === "uploaded" && file) body.append("leaseFile", file);
+      if (leaseMode === "generate" && selectedTemplateId) body.append("templateId", selectedTemplateId);
       if (form.additionalTenants.length > 0) {
         body.append("additionalTenants", JSON.stringify(form.additionalTenants));
       }
@@ -705,6 +762,8 @@ export function OnboardRenterWizard({
         skippedInvite?: string;
         testMode?: boolean;
         tenantId?: string;
+        sentForSignature?: boolean;
+        docusealSubmissionId?: string;
       };
       if (!res.ok && res.status !== 207) {
         setError(data.error ?? "Something went wrong. Please try again.");
@@ -713,9 +772,10 @@ export function OnboardRenterWizard({
       setResultEmail(data.invited ?? data.linked ?? data.skippedInvite ?? form.email.trim());
       setResultLinked(!!data.linked);
       setResultTestMode(!!data.testMode);
+      setResultSentForSignature(!!data.sentForSignature || leaseMode === "generate");
       setCompletedActions(0);
       setStep("done");
-      onSuccess(selectedUnitId);
+      onSuccess(selectedUnitId, { pendingSignature: !!data.sentForSignature || leaseMode === "generate" });
     } catch {
       setError("Network error. Please try again.");
     } finally {
@@ -750,7 +810,7 @@ export function OnboardRenterWizard({
               <button
                 key={unit.id}
                 type="button"
-                onClick={() => setSelectedUnitId(unit.id)}
+                onClick={() => { setSelectedUnitId(unit.id); setStep("choose-path"); }}
                 className={[
                   "w-full rounded-xl border-2 px-4 py-3.5 text-left transition-all",
                   selected
@@ -783,16 +843,91 @@ export function OnboardRenterWizard({
             );
           })}
         </div>
-        <div className="flex justify-end pt-2">
-          <button
-            type="button"
-            disabled={!selectedUnitId}
-            onClick={() => setStep("upload-lease")}
-            className="h-11 rounded-lg bg-slate-950 px-4 text-sm font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            Continue
-          </button>
+      </div>
+    );
+  }
+
+  function renderChoosePath() {
+    const unit = selectedUnit;
+    const pathCards = [
+      {
+        id: "uploaded" as LeaseMode,
+        title: "Upload signed lease",
+        text: "Use this when the tenant already signed a lease. We will scan it and activate the lease now.",
+        icon: <UploadIcon className="h-5 w-5" />,
+      },
+      {
+        id: "generate" as LeaseMode,
+        title: "Generate lease for e-sign",
+        text: "Enter tenant details, choose a property template, and send the lease through DocuSeal.",
+        icon: <SparklesIcon className="h-5 w-5" />,
+      },
+    ];
+
+    return (
+      <div className="space-y-5">
+        <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+          <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Selected unit</p>
+          <div className="mt-2 flex items-center justify-between gap-3">
+            <div>
+              <p className="font-semibold text-slate-900">Unit {unit?.unitNumber}</p>
+              <p className="text-sm text-slate-500">
+                {unit?.bedrooms} bed · {unit?.bathrooms} bath
+              </p>
+            </div>
+            {unit?.rentAmount != null && (
+              <p className="text-sm font-semibold text-slate-800">{fmt(unit.rentAmount)}/mo</p>
+            )}
+          </div>
         </div>
+
+        <div className="grid gap-3 md:grid-cols-2">
+          {pathCards.map((card) => {
+            const selected = leaseMode === card.id;
+            return (
+              <button
+                key={card.id}
+                type="button"
+                onClick={() => {
+                  setLeaseMode(card.id);
+                  if (card.id === "generate") {
+                    setFile(null);
+                    setFileName(null);
+                    setScanDone(false);
+                    setExtractedAddress(null);
+                    setExtractedUnitNumber(null);
+                    patchForm({
+                      rentAmount: form.rentAmount || (selectedUnit?.rentAmount != null ? String(selectedUnit.rentAmount) : ""),
+                    });
+                    setStep("review");
+                  } else {
+                    setStep("upload-lease");
+                  }
+                }}
+                className={[
+                  "min-h-[148px] rounded-xl border-2 p-4 text-left transition",
+                  selected
+                    ? "border-emerald-500 bg-emerald-50 shadow-sm ring-2 ring-emerald-100"
+                    : "border-slate-200 bg-white hover:border-emerald-300",
+                ].join(" ")}
+              >
+                <div className={["mb-3 flex h-10 w-10 items-center justify-center rounded-lg", selected ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-500"].join(" ")}>
+                  {card.icon}
+                </div>
+                <p className="font-semibold text-slate-900">{card.title}</p>
+                <p className="mt-1 text-sm leading-5 text-slate-500">{card.text}</p>
+              </button>
+            );
+          })}
+        </div>
+
+        {!initialUnitId && (
+          <div className="border-t border-slate-100 pt-2">
+            <button type="button" onClick={() => setStep("select-unit")} className="text-sm text-slate-500 hover:text-slate-800">
+              ← Back
+            </button>
+          </div>
+        )}
       </div>
     );
   }
@@ -895,11 +1030,9 @@ export function OnboardRenterWizard({
         )}
 
         <div className="flex items-center justify-between pt-1">
-          {!initialUnitId ? (
-            <button type="button" onClick={() => setStep("select-unit")} className="text-sm text-slate-500 hover:text-slate-800">
+          <button type="button" onClick={() => setStep("choose-path")} className="text-sm text-slate-500 hover:text-slate-800">
               ← Back
-            </button>
-          ) : <div />}
+          </button>
           {!scanDone ? (
             <button
               type="button"
@@ -936,14 +1069,16 @@ export function OnboardRenterWizard({
   }
 
   function renderReview() {
-    const missingExtractedAddress = extractedAddress !== null && !extractedAddress.trim();
-    const missingExtractedUnit = extractedUnitNumber !== null && !extractedUnitNumber.trim();
+    const missingExtractedAddress = leaseMode === "uploaded" && extractedAddress !== null && !extractedAddress.trim();
+    const missingExtractedUnit = leaseMode === "uploaded" && extractedUnitNumber !== null && !extractedUnitNumber.trim();
     const addressMismatch = Boolean(
+      leaseMode === "uploaded" &&
       extractedAddress !== null &&
       extractedAddress.trim() &&
       normalizeAddressForMatch(extractedAddress) !== normalizeAddressForMatch(propertyAddress),
     );
     const unitMismatch = Boolean(
+      leaseMode === "uploaded" &&
       extractedUnitNumber !== null &&
       extractedUnitNumber.trim() &&
       normalizeUnitForMatch(extractedUnitNumber) !== normalizeUnitForMatch(selectedUnit?.unitNumber ?? ""),
@@ -1001,8 +1136,19 @@ export function OnboardRenterWizard({
           </label>
         )}
 
+        {leaseMode === "generate" && !templatesLoading && templates.length === 0 && (
+          <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+            No lease template uploaded for this property yet. Add one from the property edit screen before sending an e-sign lease.
+          </p>
+        )}
+        {leaseMode === "generate" && templateError && (
+          <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {templateError}
+          </p>
+        )}
+
         {/* ── Side-by-side: Primary tenant | Co-tenants ── */}
-        <div className="grid grid-cols-2 gap-4">
+        <div className="grid gap-4 md:grid-cols-2">
           {/* Left: Primary tenant */}
           <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
             <div className="flex items-center gap-2">
@@ -1015,7 +1161,7 @@ export function OnboardRenterWizard({
                 <p className="text-xs">{accountNotice.text}</p>
               </div>
             )}
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid gap-2 sm:grid-cols-2">
               <label className="block space-y-1 text-xs font-medium text-slate-700">
                 First name <span className="text-red-500">*</span>
                 <input className={inputClass} value={form.firstName} onChange={(e) => patchForm({ firstName: e.target.value })} placeholder="Jordan" />
@@ -1073,7 +1219,7 @@ export function OnboardRenterWizard({
                           <p className="text-xs">{cotenantNotice.text}</p>
                         </div>
                       )}
-                      <div className="grid grid-cols-2 gap-1.5">
+                      <div className="grid gap-1.5 sm:grid-cols-2">
                         <label className="block space-y-1 text-xs font-medium text-slate-700">
                           First name
                           <input className={inputClass} value={tenant.firstName} onChange={(e) => patchAdditional(i, { firstName: e.target.value })} placeholder="Alex" />
@@ -1109,7 +1255,7 @@ export function OnboardRenterWizard({
         </div>
 
         {/* ── Lease & Financial (full width, 2-col grid) ── */}
-        <div className="grid grid-cols-2 gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
+        <div className="grid gap-4 rounded-xl border border-slate-200 bg-slate-50 p-4 md:grid-cols-2">
           <div className="space-y-2">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Lease terms</p>
             <label className="block space-y-1 text-xs font-medium text-slate-700">
@@ -1117,7 +1263,7 @@ export function OnboardRenterWizard({
               <input className={inputClass} type="date" value={form.startDate} onChange={(e) => patchForm({ startDate: e.target.value })} />
             </label>
             <label className="block space-y-1 text-xs font-medium text-slate-700">
-              End date <span className="text-slate-400 font-normal">(optional)</span>
+              End date {leaseMode === "generate" ? <span className="text-red-500">*</span> : <span className="text-slate-400 font-normal">(optional)</span>}
               <input className={inputClass} type="date" value={form.endDate} onChange={(e) => patchForm({ endDate: e.target.value })} />
             </label>
           </div>
@@ -1140,8 +1286,8 @@ export function OnboardRenterWizard({
           </div>
         </div>
 
-        <div className="flex items-center justify-between border-t border-slate-100 pt-1">
-          <button type="button" onClick={() => setStep("upload-lease")} className="text-sm text-slate-500 hover:text-slate-800">
+        <div className="flex flex-col-reverse gap-2 border-t border-slate-100 pt-1 sm:flex-row sm:items-center sm:justify-between">
+          <button type="button" onClick={() => setStep(leaseMode === "generate" ? "preview-lease" : "upload-lease")} className="h-11 text-sm text-slate-500 hover:text-slate-800">
             ← Back
           </button>
           <button
@@ -1152,12 +1298,126 @@ export function OnboardRenterWizard({
               !form.lastName.trim() ||
               !form.email.trim() ||
               !form.startDate ||
-              !form.rentAmount
+              !form.rentAmount ||
+              (leaseMode === "generate" && (!form.endDate || !selectedTemplateId))
             }
-            onClick={() => setStep("confirm")}
+            onClick={async () => {
+              if (leaseMode !== "generate") { setStep("confirm"); return; }
+              if (filledLeaseUrl) { URL.revokeObjectURL(filledLeaseUrl); }
+              setFilledLeaseUrl(null);
+              setFilledLeaseHtml(null);
+              setFillError(null);
+              setFillingLease(true);
+              setStep("preview-lease");
+              try {
+                const res = await fetch("/api/leases/fill-template", {
+                  method: "POST",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({
+                    templateId: selectedTemplateId,
+                    propertyId,
+                    propertyName,
+                    propertyAddress,
+                    unitNumber: selectedUnit?.unitNumber ?? "",
+                    primaryTenant: { firstName: form.firstName, lastName: form.lastName, email: form.email },
+                    additionalTenants: form.additionalTenants.map((t) => ({
+                      firstName: t.firstName, lastName: t.lastName, email: t.email,
+                    })),
+                    startDate: form.startDate,
+                    endDate: form.endDate,
+                    rentAmount: form.rentAmount,
+                    securityDeposit: form.securityDeposit || undefined,
+                  }),
+                });
+                let data: { fileBase64?: string; previewHtml?: string; error?: string } = {};
+                try { data = await res.json(); } catch { /* non-JSON body */ }
+                if (!res.ok || !data.fileBase64) {
+                  throw new Error(data.error ?? `Server error ${res.status} — check template format.`);
+                }
+                const bytes = Uint8Array.from(atob(data.fileBase64), (c) => c.charCodeAt(0));
+                const mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+                const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
+                setFilledLeaseUrl(url);
+                setFilledLeaseHtml(data.previewHtml ?? null);
+              } catch (err) {
+                setFillError(err instanceof Error ? err.message : "Could not generate lease preview.");
+              } finally {
+                setFillingLease(false);
+              }
+            }}
             className="h-11 rounded-lg bg-slate-950 px-4 text-sm font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
           >
             Continue
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  function renderPreviewLease() {
+    return (
+      <div className="space-y-4">
+        <p className="text-sm text-slate-500">
+          Review the filled lease before sending it for e-signature.
+        </p>
+
+        {fillingLease ? (
+          <div className="flex flex-col items-center gap-3 rounded-xl border border-slate-200 bg-slate-50 py-10 text-sm text-slate-400">
+            <svg className="h-6 w-6 animate-spin text-emerald-500" viewBox="0 0 24 24" fill="none">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8z" />
+            </svg>
+            <span>Generating filled lease… (may take up to 60 s the first time)</span>
+          </div>
+        ) : fillError ? (
+          <div className="flex flex-col items-center gap-2 rounded-xl border border-red-100 bg-red-50 py-8 text-sm">
+            <p className="font-medium text-red-600">Could not generate lease</p>
+            <p className="text-slate-500">{fillError}</p>
+          </div>
+        ) : filledLeaseHtml ? (
+          <>
+            <div className="overflow-hidden rounded-xl border border-slate-200 shadow-sm">
+              <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-4 py-2">
+                <span className="text-xs font-medium text-slate-500">Lease preview</span>
+                <a
+                  href={filledLeaseUrl ?? "#"}
+                  download="lease-preview.docx"
+                  className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm transition hover:bg-slate-50"
+                >
+                  <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                  </svg>
+                  Download .docx
+                </a>
+              </div>
+              <div
+                className="lease-preview h-[480px] overflow-y-auto bg-white px-10 py-8 text-sm leading-relaxed text-slate-800"
+                dangerouslySetInnerHTML={{ __html: filledLeaseHtml }}
+              />
+            </div>
+            <style>{`
+              .lease-preview h1, .lease-preview h2 { font-weight: 700; margin: 1em 0 0.4em; }
+              .lease-preview h1 { font-size: 1.15em; text-align: center; }
+              .lease-preview h2 { font-size: 1em; }
+              .lease-preview p { margin: 0.5em 0; }
+              .lease-preview table { width: 100%; border-collapse: collapse; margin: 0.75em 0; }
+              .lease-preview td, .lease-preview th { border: 1px solid #e2e8f0; padding: 6px 10px; vertical-align: top; }
+              .lease-preview strong, .lease-preview b { font-weight: 600; }
+            `}</style>
+          </>
+        ) : null}
+
+        <div className="flex items-center justify-between border-t border-slate-100 pt-2">
+          <button type="button" onClick={() => setStep("review")} className="text-sm text-slate-500 hover:text-slate-800">
+            ← Back
+          </button>
+          <button
+            type="button"
+            disabled={fillingLease || !!fillError || !filledLeaseHtml}
+            onClick={() => setStep("confirm")}
+            className="h-11 rounded-lg bg-slate-950 px-4 text-sm font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            Looks good — continue →
           </button>
         </div>
       </div>
@@ -1168,19 +1428,29 @@ export function OnboardRenterWizard({
     const name = `${form.firstName.trim()} ${form.lastName.trim()}`;
     const unitNum = selectedUnit?.unitNumber ?? "";
     const coTenantCount = form.additionalTenants.length;
-    const actions = [
-      `Create a tenant account for ${form.email.trim()}`,
-      ...(coTenantCount > 0 ? [`Create ${coTenantCount} co-tenant account${coTenantCount > 1 ? "s" : ""}`] : []),
-      `Mark Unit ${unitNum} as occupied`,
-      `Create an active lease starting ${form.startDate}`,
-      `Create monthly rent charges from the lease dates`,
-      testMode
-        ? `Skip welcome email and Clerk account linking`
-        : coTenantCount > 0
-          ? `Send welcome & login emails to all ${1 + coTenantCount} tenants`
-          : `Send a welcome & login email to ${form.email.trim()}`,
-      testMode ? `Leave existing portal access unchanged` : `Grant immediate tenant portal access`,
-    ];
+    const actions =
+      leaseMode === "generate"
+        ? [
+            `Create a pending lease for Unit ${unitNum}`,
+            `Use the selected property lease template`,
+            `Send DocuSeal e-signature to ${1 + coTenantCount} tenant${coTenantCount > 0 ? "s" : ""} and manager`,
+            `Activate the lease only after all signatures are complete`,
+            `Create rent charges after signing`,
+            testMode ? `Skip welcome email and Clerk account linking` : `Send renter portal invite emails`,
+          ]
+        : [
+            `Create a tenant account for ${form.email.trim()}`,
+            ...(coTenantCount > 0 ? [`Create ${coTenantCount} co-tenant account${coTenantCount > 1 ? "s" : ""}`] : []),
+            `Mark Unit ${unitNum} as occupied`,
+            `Create an active lease starting ${form.startDate}`,
+            `Create monthly rent charges from the lease dates`,
+            testMode
+              ? `Skip welcome email and Clerk account linking`
+              : coTenantCount > 0
+                ? `Send welcome & login emails to all ${1 + coTenantCount} tenants`
+                : `Send a welcome & login email to ${form.email.trim()}`,
+            testMode ? `Leave existing portal access unchanged` : `Grant immediate tenant portal access`,
+          ];
 
     return (
       <div className="space-y-5">
@@ -1200,7 +1470,7 @@ export function OnboardRenterWizard({
           </ul>
         </div>
 
-        <div className="grid grid-cols-2 gap-3 text-sm">
+        <div className="grid gap-3 text-sm sm:grid-cols-2">
           <div className="rounded-lg border border-slate-200 bg-white p-3">
             <p className="text-xs text-slate-500">Primary tenant</p>
             <p className="mt-0.5 font-semibold text-slate-800">{name}</p>
@@ -1236,7 +1506,9 @@ export function OnboardRenterWizard({
           <span>
             <span className="font-semibold text-slate-900">Test onboarding, don&apos;t send invite</span>
             <span className="mt-0.5 block text-xs text-slate-500">
-              Creates the tenant, lease, document, and payment schedule, but skips invite email and Clerk account linking.
+              {leaseMode === "generate"
+                ? "Creates the pending lease and sends DocuSeal, but skips invite email and Clerk account linking."
+                : "Creates the tenant, lease, document, and payment schedule, but skips invite email and Clerk account linking."}
             </span>
           </span>
         </label>
@@ -1265,7 +1537,11 @@ export function OnboardRenterWizard({
                 Onboarding…
               </>
             ) : (
-              testMode ? "Run test onboarding" : `Onboard ${form.firstName.trim() || "tenant"} now`
+              testMode
+                ? "Run test onboarding"
+                : leaseMode === "generate"
+                  ? "Send lease for e-sign"
+                  : `Onboard ${form.firstName.trim() || "tenant"} now`
             )}
           </button>
         </div>
@@ -1276,6 +1552,15 @@ export function OnboardRenterWizard({
   function renderDone() {
     const name = `${form.firstName.trim()} ${form.lastName.trim()}`;
     const unitNum = selectedUnit?.unitNumber ?? "";
+    const doneActions =
+      resultSentForSignature
+        ? [
+            `Created tenant record for ${name}`,
+            `Created pending lease for Unit ${unitNum}`,
+            `Sent DocuSeal lease for e-signature`,
+            `Lease will activate after all signatures are complete`,
+          ]
+        : DONE_ACTIONS.map((getLabel) => getLabel({ name, unit: unitNum, email: resultEmail, testMode: resultTestMode }));
 
     return (
       <div className="space-y-6 py-2">
@@ -1285,7 +1570,9 @@ export function OnboardRenterWizard({
           </div>
           <h3 className="text-lg font-bold text-slate-900">{name} is onboarded!</h3>
           <p className="mt-1 text-sm text-slate-500">
-            {resultTestMode
+            {resultSentForSignature
+              ? `A DocuSeal signature request was sent for ${resultEmail}.`
+              : resultTestMode
               ? `Test onboarding completed for ${resultEmail}. No invite email was sent.`
               : resultLinked
               ? `${resultEmail} already had an account — tenant portal access granted instantly.`
@@ -1295,7 +1582,7 @@ export function OnboardRenterWizard({
 
         {/* Animated checklist */}
         <div className="space-y-2">
-          {DONE_ACTIONS.map((getLabel, i) => {
+          {doneActions.map((label, i) => {
             const visible = i < completedActions;
             return (
               <div
@@ -1308,26 +1595,42 @@ export function OnboardRenterWizard({
                 <div className={["flex h-5 w-5 shrink-0 items-center justify-center rounded-full transition-colors", visible ? "bg-emerald-500" : "bg-transparent"].join(" ")}>
                   {visible && <CheckIcon className="h-3 w-3 text-white" />}
                 </div>
-                {getLabel({ name, unit: unitNum, email: resultEmail, testMode: resultTestMode })}
+                {label}
               </div>
             );
           })}
         </div>
 
         {/* Time saved */}
-        {completedActions >= DONE_ACTIONS.length && (
+        {completedActions >= doneActions.length && (
           <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-            <div className="flex items-center justify-between">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">Time saved</p>
-                <p className="mt-0.5 text-2xl font-bold text-emerald-800">~45 min</p>
-                <p className="text-xs text-emerald-600">vs. manual data entry &amp; email follow-ups</p>
+                <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
+                  {resultSentForSignature ? "Next step" : "Time saved"}
+                </p>
+                <p className="mt-0.5 text-2xl font-bold text-emerald-800">
+                  {resultSentForSignature ? "Awaiting signatures" : "~45 min"}
+                </p>
+                <p className="text-xs text-emerald-600">
+                  {resultSentForSignature ? "DocuSeal will notify signers by email." : "vs. manual data entry & email follow-ups"}
+                </p>
               </div>
               <div className="text-right text-xs text-emerald-700">
-                <p className="font-semibold">What {form.firstName.trim()} sees next:</p>
-                <p className="mt-0.5">1. Login link in email</p>
-                <p>2. Sets up password</p>
-                <p>3. Immediate portal access</p>
+                <p className="font-semibold">What happens next:</p>
+                {resultSentForSignature ? (
+                  <>
+                    <p className="mt-0.5">1. Everyone signs in DocuSeal</p>
+                    <p>2. Webhook activates the lease</p>
+                    <p>3. Payments are created</p>
+                  </>
+                ) : (
+                  <>
+                    <p className="mt-0.5">1. Login link in email</p>
+                    <p>2. Sets up password</p>
+                    <p>3. Immediate portal access</p>
+                  </>
+                )}
               </div>
             </div>
           </div>
@@ -1344,26 +1647,30 @@ export function OnboardRenterWizard({
 
   const stepContent: Record<Step, () => React.ReactNode> = {
     "select-unit": renderSelectUnit,
+    "choose-path": renderChoosePath,
     "upload-lease": renderUploadLease,
     "review": renderReview,
+    "preview-lease": renderPreviewLease,
     "confirm": renderConfirm,
     "done": renderDone,
   };
 
   const stepTitles: Record<Step, string> = {
     "select-unit": "Select unit",
+    "choose-path": "Choose lease path",
     "upload-lease": "Upload lease",
-    "review": "Review extracted details",
-    "confirm": "Ready to onboard",
+    "review": leaseMode === "generate" ? "Enter lease details" : "Review extracted details",
+    "preview-lease": "Preview lease",
+    "confirm": leaseMode === "generate" ? "Ready to send" : "Ready to onboard",
     "done": "Onboarding complete",
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+    <div className="fixed inset-0 z-50 flex items-stretch justify-center p-0 sm:items-center sm:p-4">
       <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={step !== "done" ? onClose : undefined} />
-      <div className="relative w-full max-w-3xl rounded-2xl border border-slate-200 bg-white shadow-2xl">
+      <div className="relative flex w-full flex-col border border-slate-200 bg-white shadow-2xl sm:max-h-[calc(100dvh-2rem)] sm:max-w-3xl sm:rounded-2xl">
         {/* Header */}
-        <div className="border-b border-slate-100 px-6 pt-5 pb-4">
+        <div className="border-b border-slate-100 px-4 pb-4 pt-5 sm:px-6">
           <div className="flex items-start justify-between">
             <div>
               <p className="text-xs font-semibold uppercase tracking-wide text-emerald-700">
@@ -1389,13 +1696,13 @@ export function OnboardRenterWizard({
           </div>
           {step !== "done" && (
             <div className="mt-4">
-              <StepIndicator current={step} unitPreselected={!!initialUnitId} />
+              <StepIndicator current={step} unitPreselected={!!initialUnitId} leaseMode={leaseMode} />
             </div>
           )}
         </div>
 
         {/* Body */}
-        <div className="overflow-y-auto px-6 py-5" style={{ maxHeight: "calc(100dvh - 190px)" }}>
+        <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 sm:px-6" style={{ maxHeight: "calc(100dvh - 190px)" }}>
           {stepContent[step]()}
         </div>
       </div>

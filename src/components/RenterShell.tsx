@@ -23,6 +23,7 @@ type IconName = "home" | "wallet" | "lease" | "wrench" | "messages" | "profile";
 const navigation: Array<{ name: string; href: string; icon: IconName }> = [
   { name: "Overview", href: "/renter", icon: "home" },
   { name: "Payments", href: "/renter/payments", icon: "wallet" },
+  { name: "Payment Methods", href: "/renter/payment-methods", icon: "wallet" },
   { name: "Lease", href: "/renter/lease", icon: "lease" },
   { name: "Maintenance", href: "/renter/maintenance", icon: "wrench" },
 ];
@@ -204,7 +205,7 @@ export function RenterShell({ children, user }: RenterShellProps) {
   const { signOut } = useClerk();
   const [isOpen, setIsOpen] = useState(false);
 
-  const handleSignOut = () => signOut(() => router.push("/login"));
+  const handleSignOut = () => signOut({ redirectUrl: "/login" });
   const prefetchHrefs = useMemo(() => [
     ...navigation.map((item) => item.href),
     "/renter/profile",

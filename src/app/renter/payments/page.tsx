@@ -36,6 +36,73 @@ function formatSavedMethodLabel(method: {
   return `${brand} ending in ${method.last4}`;
 }
 
+function isSubmittedAttemptStatus(status: string | null | undefined) {
+  return Boolean(status && !["requires_payment_method", "canceled", "failed"].includes(status));
+}
+
+function isPaidAttemptStatus(status: string | null | undefined) {
+  return status === "succeeded";
+}
+
+function isPaidPayment(payment: {
+  status: string;
+  paid_at: Date | null;
+  payment_attempts: { status: string }[];
+}) {
+  return (
+    payment.status === "paid" ||
+    payment.status === "completed" ||
+    Boolean(payment.paid_at) ||
+    isPaidAttemptStatus(payment.payment_attempts[0]?.status)
+  );
+}
+
+function getChargeKey(payment: {
+  amount: { toFixed(scale?: number): string };
+  type: string;
+  due_date: Date | null;
+}) {
+  if (!payment.due_date) return null;
+  return `${payment.type}:${payment.due_date.toISOString().slice(0, 10)}:${payment.amount.toFixed(2)}`;
+}
+
+function getPaidChargeKeys<
+  T extends {
+    amount: { toFixed(scale?: number): string };
+    type: string;
+    status: string;
+    due_date: Date | null;
+    paid_at: Date | null;
+    payment_attempts: { status: string }[];
+  },
+>(payments: T[]) {
+  return new Set(
+    payments
+      .filter(isPaidPayment)
+      .map(getChargeKey)
+      .filter((key): key is string => Boolean(key)),
+  );
+}
+
+function isPayablePayment(
+  payment: {
+    amount: { toFixed(scale?: number): string };
+    type: string;
+    status: string;
+    due_date: Date | null;
+    paid_at: Date | null;
+    payment_attempts: { status: string }[];
+  },
+  paidChargeKeys: Set<string>,
+) {
+  if (payment.status !== "pending") return false;
+  if (isPaidPayment(payment)) return false;
+  if (isSubmittedAttemptStatus(payment.payment_attempts[0]?.status)) return false;
+
+  const chargeKey = getChargeKey(payment);
+  return !chargeKey || !paidChargeKeys.has(chargeKey);
+}
+
 export default async function RenterPaymentsPage() {
   const { userId } = await auth();
   if (!userId) redirect("/login");
@@ -71,6 +138,18 @@ export default async function RenterPaymentsPage() {
                     paid_at: true,
                     payment_method: true,
                     notes: true,
+                    payment_attempts: {
+                      orderBy: { created_at: "desc" },
+                      take: 1,
+                      select: {
+                        status: true,
+                        renter_payment_methods: {
+                          select: {
+                            payment_type: true,
+                          },
+                        },
+                      },
+                    },
                   },
                 },
               },
@@ -100,10 +179,9 @@ export default async function RenterPaymentsPage() {
   const allPayments =
     tenant?.lease_tenants.flatMap((lt) => lt.leases.payments) ?? [];
 
-  const paidPayments = allPayments.filter(
-    (p) => p.status === "paid" || p.status === "completed",
-  );
-  const pendingPayments = allPayments.filter((p) => p.status === "pending");
+  const paidPayments = allPayments.filter(isPaidPayment);
+  const paidChargeKeys = getPaidChargeKeys(allPayments);
+  const pendingPayments = allPayments.filter((payment) => isPayablePayment(payment, paidChargeKeys));
   const totalPaid = paidPayments.reduce((sum, p) => sum + Number(p.amount), 0);
   const totalPending = pendingPayments.reduce((sum, p) => sum + Number(p.amount), 0);
   const defaultPaymentMethodId = paymentProfile?.renter_payment_settings?.default_payment_method_id ?? null;
@@ -132,6 +210,13 @@ export default async function RenterPaymentsPage() {
           paidAt: payment.paid_at?.toISOString() ?? null,
           paymentMethod: payment.payment_method ?? null,
           notes: payment.notes ?? null,
+          latestAttemptStatus: payment.payment_attempts[0]?.status ?? null,
+          latestAttemptMethodType:
+            payment.payment_attempts[0]?.renter_payment_methods?.payment_type === "us_bank_account"
+              ? "us_bank_account"
+              : payment.payment_attempts[0]?.renter_payment_methods?.payment_type
+                ? "card"
+                : null,
         }))}
         savedPaymentMethods={savedPaymentMethods}
         stripePublishableKey={process.env.NEXT_PUBLIC_STRIPE_PUBLISHABLE_KEY ?? null}

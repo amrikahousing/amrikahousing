@@ -100,7 +100,7 @@ export async function AppShell({
   const shellUser = user ?? (await getAppShellUser());
 
   return (
-    <div className="min-h-dvh overflow-x-hidden bg-slate-50 text-slate-950">
+    <div className="min-h-dvh overflow-x-clip bg-slate-50 text-slate-950">
       <AppSidebar user={shellUser} />
       <main className="min-h-dvh min-w-0 p-4 pt-20 md:p-8 lg:ml-72 lg:pt-8">
         <div className="mx-auto max-w-6xl pb-20">{children}</div>

@@ -1,11 +1,15 @@
 import { getAccountingData } from "@/lib/accounting";
 import { prisma } from "@/lib/db";
 import {
-  createPlaidOriginatorFundingAccount,
   createPlaidStripeBankAccountToken,
   decryptPlaidAccessToken,
 } from "@/lib/plaid";
 import { getStripeServer } from "@/lib/stripe";
+
+const STRIPE_CONNECT_NOT_ENABLED_MESSAGE =
+  "Stripe Connect is not enabled for this Stripe account yet. Enable Connect in Stripe, then try turning on rent collection again.";
+const PLAID_STRIPE_ACCOUNT_MISMATCH_MESSAGE =
+  "Plaid created a Stripe bank token, but this Stripe account cannot use it. Link this Plaid app to the same Stripe account and mode used by STRIPE_SECRET_KEY, then try again.";
 
 export type OrganizationRentCollectionAccount = {
   id: string;
@@ -15,7 +19,6 @@ export type OrganizationRentCollectionAccount = {
   destinationAccountLabel: string;
   bankInstitutionName: string;
   isActive: boolean;
-  plaidFundingAccountId: string | null;
   stripeExternalAccountId: string | null;
   selectedConnectedAccountId: string;
   createdAt: Date;
@@ -69,7 +72,6 @@ function formatDestination(destination: {
   destination_account_label: string;
   bank_institution_name: string;
   is_active: boolean;
-  plaid_funding_account_id: string | null;
   stripe_external_account_id: string | null;
   created_at: Date;
   updated_at: Date;
@@ -82,12 +84,52 @@ function formatDestination(destination: {
     destinationAccountLabel: destination.destination_account_label,
     bankInstitutionName: destination.bank_institution_name,
     isActive: destination.is_active,
-    plaidFundingAccountId: destination.plaid_funding_account_id,
     stripeExternalAccountId: destination.stripe_external_account_id,
     selectedConnectedAccountId: toConnectedAccountId(destination),
     createdAt: destination.created_at,
     updatedAt: destination.updated_at,
   } satisfies OrganizationRentCollectionAccount;
+}
+
+function isStripeConnectNotEnabledError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const message = error.message.toLowerCase();
+  return (
+    message.includes("signed up for connect") ||
+    message.includes("dashboard.stripe.com/connect")
+  );
+}
+
+function isStripeBankTokenMismatchError(error: unknown) {
+  if (!(error instanceof Error)) {
+    return false;
+  }
+
+  const stripeError = error as Error & { code?: string; param?: string };
+  return (
+    stripeError.code === "resource_missing" &&
+    stripeError.param === "external_account" &&
+    error.message.toLowerCase().includes("no such token")
+  );
+}
+
+function normalizeStripeRentCollectionError(error: unknown, fallbackMessage: string) {
+  if (isStripeConnectNotEnabledError(error)) {
+    return new Error(STRIPE_CONNECT_NOT_ENABLED_MESSAGE, { cause: error });
+  }
+
+  if (isStripeBankTokenMismatchError(error)) {
+    return new Error(PLAID_STRIPE_ACCOUNT_MISMATCH_MESSAGE, { cause: error });
+  }
+
+  if (error instanceof Error) {
+    return new Error(fallbackMessage, { cause: error });
+  }
+
+  return new Error(fallbackMessage);
 }
 
 export async function getOrganizationRentCollectionAccount(organizationId: string) {
@@ -101,7 +143,6 @@ export async function getOrganizationRentCollectionAccount(organizationId: strin
       destination_account_label: true,
       bank_institution_name: true,
       is_active: true,
-      plaid_funding_account_id: true,
       stripe_external_account_id: true,
       created_at: true,
       updated_at: true,
@@ -122,24 +163,13 @@ export async function requireOrganizationRentCollectionAccount(organizationId: s
   return destination;
 }
 
-export async function requireOrganizationRentCollectionFundingAccount(organizationId: string) {
-  const destination = await requireOrganizationRentCollectionAccount(organizationId);
-
-  if (!destination.plaidFundingAccountId) {
-    throw new Error(
-      "This organization has not finished configuring the bank account that should receive rent. Ask your property manager to reconnect the rent collection account so ACH payments can settle to the correct bank account.",
-    );
-  }
-
-  return destination;
-}
-
 export async function requireOrganizationStripeRentDestination(organizationId: string) {
   const destination = await requireOrganizationRentCollectionAccount(organizationId);
   const organization = await prisma.organizations.findUnique({
     where: { id: organizationId },
     select: {
       stripe_account_id: true,
+      stripe_charges_enabled: true,
       stripe_payouts_enabled: true,
     },
   });
@@ -150,9 +180,16 @@ export async function requireOrganizationStripeRentDestination(organizationId: s
     );
   }
 
+  if (!organization.stripe_charges_enabled || !organization.stripe_payouts_enabled) {
+    throw new Error(
+      "This organization must finish Stripe onboarding before accepting online rent payments.",
+    );
+  }
+
   return {
     ...destination,
     stripeAccountId: organization.stripe_account_id,
+    stripeChargesEnabled: organization.stripe_charges_enabled,
     stripePayoutsEnabled: organization.stripe_payouts_enabled,
   };
 }
@@ -180,22 +217,29 @@ async function ensureOrganizationStripeConnectedAccount(args: {
   }
 
   const stripe = getStripeServer();
-  const account = await stripe.accounts.create({
-    type: "custom",
-    country: "US",
-    email: args.email ?? undefined,
-    business_profile: {
-      name: args.name,
-      product_description: "Rental housing rent collection",
-    },
-    capabilities: {
-      card_payments: { requested: true },
-      transfers: { requested: true },
-    },
-    metadata: {
-      organizationId: args.organizationId,
-    },
-  });
+  const account = await stripe.accounts
+    .create({
+      type: "custom",
+      country: "US",
+      email: args.email ?? undefined,
+      business_profile: {
+        name: args.name,
+        product_description: "Rental housing rent collection",
+      },
+      capabilities: {
+        card_payments: { requested: true },
+        transfers: { requested: true },
+      },
+      metadata: {
+        organizationId: args.organizationId,
+      },
+    })
+    .catch((error: unknown) => {
+      throw normalizeStripeRentCollectionError(
+        error,
+        "Stripe could not create the rent collection account. Check your Stripe Connect setup and try again.",
+      );
+    });
 
   await prisma.organizations.update({
     where: { id: args.organizationId },
@@ -219,6 +263,35 @@ async function attachPlaidAccountToStripeConnectedAccount(args: {
   accessToken: string;
   accountId: string;
 }) {
+  const stripe = getStripeServer();
+
+  // Plaid sandbox generates btok_ tokens on Plaid's own internal Stripe test
+  // account, which cannot be used with any other Stripe account. Use Stripe's
+  // test bank account data directly so the full rent-collection setup flow can
+  // be exercised in development without needing a real processor token.
+  if (process.env.PLAID_ENV === "sandbox") {
+    const externalAccount = await stripe.accounts
+      .createExternalAccount(args.stripeAccountId, {
+        external_account: {
+          object: "bank_account",
+          country: "US",
+          currency: "usd",
+          routing_number: "110000000",
+          account_number: "000123456789",
+          account_holder_name: "Sandbox Test Account",
+          account_holder_type: "individual",
+        } as Parameters<typeof stripe.accounts.createExternalAccount>[1]["external_account"],
+        default_for_currency: true,
+      })
+      .catch((error: unknown) => {
+        throw normalizeStripeRentCollectionError(
+          error,
+          "Stripe could not attach the sandbox test bank account. Check your Stripe Connect setup.",
+        );
+      });
+    return externalAccount.id;
+  }
+
   const token = await createPlaidStripeBankAccountToken({
     accessToken: args.accessToken,
     accountId: args.accountId,
@@ -228,14 +301,20 @@ async function attachPlaidAccountToStripeConnectedAccount(args: {
     throw new Error(token.error);
   }
 
-  const stripe = getStripeServer();
-  const externalAccount = await stripe.accounts.createExternalAccount(
-    args.stripeAccountId,
-    {
-      external_account: token.bankAccountToken,
-      default_for_currency: true,
-    },
-  );
+  const externalAccount = await stripe.accounts
+    .createExternalAccount(
+      args.stripeAccountId,
+      {
+        external_account: token.bankAccountToken,
+        default_for_currency: true,
+      },
+    )
+    .catch((error: unknown) => {
+      throw normalizeStripeRentCollectionError(
+        error,
+        "Stripe could not attach this bank account for rent collection. Reconnect the account or check your Stripe Connect setup.",
+      );
+    });
 
   return externalAccount.id;
 }
@@ -282,60 +361,8 @@ export async function setOrganizationRentCollectionAccount(args: {
     ? null
     : connectedAccount.plaidAccountId;
 
-  let resolvedFundingAccountId =
-    existingDestination?.selectedConnectedAccountId === connectedAccount.id
-      ? existingDestination.plaidFundingAccountId
-      : null;
-
-  if (!resolvedFundingAccountId) {
-    if (!connectedAccount.plaidAccountId) {
-      throw new Error("Choose a specific connected checking or savings account first.");
-    }
-
-    const originatorClientId =
-      process.env.PLAID_TRANSFER_ORIGINATOR_CLIENT_ID ??
-      process.env.PLAID_ORIGINATOR_CLIENT_ID ??
-      null;
-
-    if (!originatorClientId) {
-      throw new Error(
-        "Plaid Transfer funding-account setup is not enabled for this environment yet. Ask your Plaid account team to enable originator funding-account access, then try again.",
-      );
-    }
-
-    const plaidItem = await prisma.plaid_items.findUnique({
-      where: { id: connectedAccount.plaidItemId },
-      select: { access_token: true },
-    });
-
-    if (!plaidItem?.access_token) {
-      throw new Error("Reconnect this bank account before using it for rent collection.");
-    }
-
-    const fundingAccount = await createPlaidOriginatorFundingAccount({
-      originatorClientId,
-      accessToken: decryptPlaidAccessToken(plaidItem.access_token),
-      accountId: connectedAccount.plaidAccountId,
-      displayName: `${connectedAccount.name} - rent collection`,
-    });
-
-    if ("error" in fundingAccount) {
-      if (fundingAccount.status === 401 || fundingAccount.status === 403) {
-        throw new Error(
-          "Plaid has not enabled originator funding-account access for this environment yet. Ask your Plaid account team to enable Transfer for Platforms or originator funding-account routes, then try again.",
-        );
-      }
-
-      throw new Error(fundingAccount.error);
-    }
-
-    resolvedFundingAccountId = fundingAccount.fundingAccountId;
-  }
-
-  if (!resolvedFundingAccountId) {
-    throw new Error(
-      "Plaid could not finish connecting this receiving account for rent collection.",
-    );
+  if (!connectedAccount.plaidAccountId) {
+    throw new Error("Choose a specific connected checking or savings account first.");
   }
 
   if (!organization) {
@@ -378,7 +405,6 @@ export async function setOrganizationRentCollectionAccount(args: {
       destination_account_label: connectedAccount.name,
       bank_institution_name: connectedAccount.provider,
       is_active: true,
-      plaid_funding_account_id: resolvedFundingAccountId,
       stripe_external_account_id: resolvedStripeExternalAccountId,
       updated_at: new Date(),
     },
@@ -389,7 +415,6 @@ export async function setOrganizationRentCollectionAccount(args: {
       destination_account_label: connectedAccount.name,
       bank_institution_name: connectedAccount.provider,
       is_active: true,
-      plaid_funding_account_id: resolvedFundingAccountId,
       stripe_external_account_id: resolvedStripeExternalAccountId,
     },
     select: {
@@ -400,14 +425,40 @@ export async function setOrganizationRentCollectionAccount(args: {
       destination_account_label: true,
       bank_institution_name: true,
       is_active: true,
-      plaid_funding_account_id: true,
       stripe_external_account_id: true,
       created_at: true,
       updated_at: true,
     },
   });
 
-  return formatDestination(destination);
+  const needsOnboarding = !connectedStripeAccount.chargesEnabled;
+
+  return { ...formatDestination(destination), needsOnboarding };
+}
+
+export async function createStripeOnboardingLink(
+  organizationId: string,
+  baseUrl: string,
+) {
+  const organization = await prisma.organizations.findUnique({
+    where: { id: organizationId },
+    select: { stripe_account_id: true },
+  });
+
+  if (!organization?.stripe_account_id) {
+    throw new Error("No Stripe account found. Set up a rent collection account first.");
+  }
+
+  const accountsUrl = `${baseUrl}/accounts`;
+  const stripe = getStripeServer();
+  const accountLink = await stripe.accountLinks.create({
+    account: organization.stripe_account_id,
+    refresh_url: `${accountsUrl}?stripe_onboarding=refresh`,
+    return_url: `${accountsUrl}?stripe_onboarding=complete`,
+    type: "account_onboarding",
+  });
+
+  return { url: accountLink.url };
 }
 
 export async function clearOrganizationRentCollectionAccount(organizationId: string) {

@@ -8,7 +8,9 @@ import { ExpenseCategoryPieChart } from "@/components/ExpenseCategoryPieChart";
 import { PlaidLinkButton } from "@/components/PlaidLinkButton";
 import { PlaidRemoveButton } from "@/components/PlaidRemoveButton";
 import { RentCollectionAccountRadio } from "@/components/RentCollectionAccountRadio";
+import { RentCollectionAccountSelectionProvider } from "@/components/RentCollectionAccountSelectionProvider";
 import { PlaidSyncButton } from "@/components/PlaidSyncButton";
+import { StripeOnboardingBanner } from "@/components/StripeOnboardingBanner";
 import {
   getAccountingData,
   sortTransactionsByDate,
@@ -228,9 +230,12 @@ export default async function AccountsPage({
   const orgRecord = orgId
     ? await prisma.organizations.findUnique({
         where: { clerk_org_id: orgId },
-        select: { id: true },
+        select: { id: true, stripe_account_id: true, stripe_charges_enabled: true },
       })
     : null;
+  const stripeNeedsOnboarding = Boolean(
+    orgRecord?.stripe_account_id && !orgRecord.stripe_charges_enabled,
+  );
   const [accountingData, rentCollectionAccount] =
     orgId && orgRecord
       ? await Promise.all([
@@ -409,11 +414,13 @@ export default async function AccountsPage({
           </div>
           <Link
             href="/accounts/transactions"
-            className="inline-flex h-10 items-center justify-center rounded-lg bg-slate-950 px-4 text-sm font-semibold text-white hover:bg-slate-800"
+            className="ui-btn ui-btn-primary h-10 px-4 text-sm"
           >
             View all transactions
           </Link>
         </header>
+
+        <StripeOnboardingBanner needsOnboarding={stripeNeedsOnboarding} />
 
         <section
           aria-label="Financial summary"
@@ -422,7 +429,7 @@ export default async function AccountsPage({
           {metricCards.map((card) => (
             <article
               key={card.label}
-              className="rounded-lg border border-slate-200 bg-white p-5 shadow-sm"
+              className="ui-card-interactive p-5"
             >
               <div className="flex items-center justify-between gap-3">
                 <span className={cx("rounded-lg p-3", card.tone)}>
@@ -443,7 +450,7 @@ export default async function AccountsPage({
         </section>
 
         <section className="grid grid-cols-1 gap-5 xl:grid-cols-2">
-          <article className="rounded-lg border border-slate-200 bg-white shadow-sm">
+          <article className="ui-panel">
             <div className="flex flex-col gap-4 p-5 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <h2 className="text-xl font-semibold tracking-tight text-slate-950 sm:text-2xl">
@@ -522,8 +529,6 @@ export default async function AccountsPage({
                         dur="850ms"
                         begin="50ms"
                         fill="freeze"
-                        calcMode="spline"
-                        keySplines="0.2 0.8 0.2 1"
                       />
                     </polyline>
                     <polyline
@@ -543,8 +548,6 @@ export default async function AccountsPage({
                         dur="850ms"
                         begin="150ms"
                         fill="freeze"
-                        calcMode="spline"
-                        keySplines="0.2 0.8 0.2 1"
                       />
                     </polyline>
                     {revenueData.map((item, index) => (
@@ -642,8 +645,8 @@ export default async function AccountsPage({
             </div>
           </article>
 
-        <article className="rounded-lg border border-slate-200 bg-white shadow-sm">
-          <div className="flex flex-col gap-3 border-b border-slate-200 px-4 py-4 sm:flex-row sm:items-start sm:justify-between sm:px-5">
+        <article className="ui-panel">
+          <div className="ui-panel-section flex flex-col gap-3 px-4 py-4 sm:flex-row sm:items-start sm:justify-between sm:px-5">
             <div className="flex items-start gap-4">
               <div>
                 <h2 className="text-lg font-semibold tracking-tight text-slate-950">
@@ -685,6 +688,9 @@ export default async function AccountsPage({
                 <PlaidLinkButton />
               </div>
             ) : (
+              <RentCollectionAccountSelectionProvider
+                initialAccountId={activeRentCollectionAccountId}
+              >
               <div className="space-y-3">
                 {connectedAccounts.map((account) => {
                   const isRentCollectionAccount =
@@ -799,12 +805,13 @@ export default async function AccountsPage({
                   );
                 })}
               </div>
+              </RentCollectionAccountSelectionProvider>
             )}
           </div>
         </article>
 
-        <section className="rounded-lg border border-slate-200 bg-white shadow-sm xl:col-span-2">
-          <div className="flex flex-col gap-4 border-b border-slate-200 p-5 sm:flex-row sm:items-center sm:justify-between">
+        <section className="ui-panel xl:col-span-2">
+          <div className="ui-panel-section flex flex-col gap-4 p-5 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h2 className="text-lg font-semibold text-slate-950">
                 YTD Expenses by Category
@@ -821,7 +828,7 @@ export default async function AccountsPage({
           </div>
           <div className="p-5">
             {ytdExpenseCategories.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-8 text-center">
+              <div className="ui-empty-state p-8 text-center">
                 <p className="text-sm font-medium text-slate-700">
                   No expenses found for {selectedYear}.
                 </p>
@@ -840,8 +847,8 @@ export default async function AccountsPage({
         </section>
         </section>
 
-        <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
-          <div className="flex flex-col gap-3 border-b border-slate-200 p-5 sm:flex-row sm:items-center sm:justify-between">
+        <section className="ui-panel">
+          <div className="ui-panel-section flex flex-col gap-3 p-5 sm:flex-row sm:items-center sm:justify-between">
             <h2 className="text-lg font-semibold text-slate-950">
               Recent Transactions
             </h2>

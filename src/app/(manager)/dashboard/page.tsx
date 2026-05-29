@@ -237,8 +237,13 @@ export default async function DashboardPage() {
           },
           include: {
             units: {
-              include: {
-                properties: true,
+              select: {
+                unit_number: true,
+                properties: {
+                  select: {
+                    name: true,
+                  },
+                },
               },
             },
           },
@@ -250,10 +255,15 @@ export default async function DashboardPage() {
             organizations: { clerk_org_id: orgId },
             deleted_at: null,
           },
-          include: {
+          select: {
+            id: true,
+            name: true,
+            city: true,
+            state: true,
             units: {
               where: { deleted_at: null },
-              include: {
+              select: {
+                status: true,
                 leases: {
                   where: { deleted_at: null },
                   select: {
@@ -554,7 +564,7 @@ export default async function DashboardPage() {
               rental portfolio performance.
             </p>
           </div>
-          <div className="self-start rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-500 shadow-sm sm:self-auto">
+          <div className="ui-panel self-start px-3 py-2 text-sm text-slate-500 sm:self-auto">
             Last updated: {lastUpdated}
           </div>
         </header>
@@ -563,8 +573,8 @@ export default async function DashboardPage() {
           aria-label="Dashboard charts"
           className="grid grid-cols-1 gap-6 xl:grid-cols-3"
         >
-          <article className="rounded-lg border border-slate-200 bg-white shadow-sm xl:col-span-2">
-            <div className="flex flex-col gap-3 border-b border-slate-200 p-6 sm:flex-row sm:items-start sm:justify-between">
+          <article className="ui-panel xl:col-span-2">
+            <div className="ui-panel-section flex flex-col gap-3 p-6 sm:flex-row sm:items-start sm:justify-between">
               <div>
                 <h2 className="text-lg font-semibold text-slate-900">
                   Revenue Trend
@@ -603,8 +613,8 @@ export default async function DashboardPage() {
             </div>
           </article>
 
-          <article className="rounded-lg border border-slate-200 bg-white shadow-sm">
-            <div className="border-b border-slate-200 p-6">
+          <article className="ui-panel">
+            <div className="ui-panel-section p-6">
               <h2 className="text-lg font-semibold text-slate-900">
                 Apartment Mix
               </h2>
@@ -650,8 +660,8 @@ export default async function DashboardPage() {
           aria-label="Operational charts"
           className="grid grid-cols-1 gap-6 lg:grid-cols-2"
         >
-          <article className="rounded-lg border border-slate-200 bg-white shadow-sm">
-            <div className="flex items-start justify-between gap-4 border-b border-slate-200 p-6">
+          <article className="ui-panel">
+            <div className="ui-panel-section flex items-start justify-between gap-4 p-6">
               <div>
                 <h2 className="text-lg font-semibold text-slate-900">
                   Portfolio Health
@@ -666,7 +676,7 @@ export default async function DashboardPage() {
             </div>
             <div className="space-y-4 p-6">
               {strongestProperties.length === 0 ? (
-                <p className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm text-slate-500">
+                <p className="ui-empty-state p-6 text-center text-sm">
                   Add properties to start scoring performance.
                 </p>
               ) : (
@@ -692,8 +702,8 @@ export default async function DashboardPage() {
             </div>
           </article>
 
-          <article className="rounded-lg border border-slate-200 bg-white shadow-sm">
-            <div className="border-b border-slate-200 p-6">
+          <article className="ui-panel">
+            <div className="ui-panel-section p-6">
               <h2 className="text-lg font-semibold text-slate-900">
                 Maintenance Pressure
               </h2>
@@ -747,7 +757,7 @@ export default async function DashboardPage() {
           {stats.map((stat) => (
             <article
               key={stat.name}
-              className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm transition-shadow hover:shadow-md"
+              className="ui-card-interactive p-6"
             >
               <div className="flex items-center justify-between gap-3">
                 <h2 className="text-sm font-medium text-slate-500">
@@ -763,8 +773,8 @@ export default async function DashboardPage() {
           ))}
         </section>
 
-        <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
-          <div className="border-b border-slate-200 p-6">
+        <section className="ui-panel">
+          <div className="ui-panel-section p-6">
             <h2 className="text-lg font-semibold text-slate-900">
               Apartment Analytics
             </h2>
@@ -784,8 +794,8 @@ export default async function DashboardPage() {
           </div>
         </section>
 
-        <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
-          <div className="border-b border-slate-200 p-6">
+        <section className="ui-panel">
+          <div className="ui-panel-section p-6">
             <h2 className="flex items-center gap-2 text-lg font-semibold text-slate-900">
               <Icon name="alert" className="h-4 w-4 text-amber-600" />
               Smart Alerts Center
@@ -818,22 +828,22 @@ export default async function DashboardPage() {
           </div>
         </section>
 
-        <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
-          <div className="border-b border-slate-200 p-6">
+        <section className="ui-panel">
+          <div className="ui-panel-section p-6">
             <h2 className="text-lg font-semibold text-slate-900">
               Portfolio Health Score
             </h2>
           </div>
           <div className="space-y-3 p-6">
             {portfolioHealth.length === 0 ? (
-              <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-8 text-center text-sm text-slate-500">
+              <div className="ui-empty-state p-8 text-center text-sm">
                 Add properties to start tracking portfolio health.
               </div>
             ) : (
               portfolioHealth.map((item) => (
                 <article
                   key={item.propertyId}
-                  className="rounded-lg border border-slate-200 p-3"
+                  className="ui-panel-soft p-3"
                 >
                   <div className="flex items-center justify-between gap-3">
                     <div>

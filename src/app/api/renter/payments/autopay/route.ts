@@ -5,6 +5,7 @@ import { setAutopayEnabledForTenant } from "@/lib/renter-payments";
 
 const requestSchema = z.object({
   enabled: z.boolean(),
+  defaultPaymentMethodId: z.string().min(1).nullable().optional(),
 });
 
 export async function POST(request: Request) {
@@ -20,7 +21,11 @@ export async function POST(request: Request) {
   }
 
   try {
-    await setAutopayEnabledForTenant(ctx, parsed.data.enabled);
+    await setAutopayEnabledForTenant(
+      ctx,
+      parsed.data.enabled,
+      parsed.data.defaultPaymentMethodId ?? undefined,
+    );
     return NextResponse.json({ ok: true });
   } catch (error) {
     return NextResponse.json(

@@ -1,7 +1,14 @@
 import { put } from "@vercel/blob";
 import { clerkClient } from "@clerk/nextjs/server";
 import { NextRequest } from "next/server";
+import { getBlobToken } from "@/lib/blob-token";
 import { prisma } from "@/lib/db";
+import { buildRentPaymentDueDates } from "@/lib/lease-payments";
+import {
+  sendLeaseForSignature,
+  type LeaseSignatureRecipient,
+} from "@/lib/lease-signatures";
+import { extractLeaseSchema, generateLease, type ExtractedLeaseSchema } from "@/lib/fill-lease";
 import {
   getOrgPermissionContext,
   requirePropertyPermission,
@@ -10,35 +17,39 @@ import {
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 const ALLOWED_MIME = new Set(["application/pdf", "image/jpeg", "image/png", "image/jpg"]);
 const MAX_BYTES = 20 * 1024 * 1024;
-const OPEN_ENDED_PAYMENT_MONTHS = 12;
 
-function addMonthsClamped(date: Date, months: number) {
-  const year = date.getUTCFullYear();
-  const month = date.getUTCMonth() + months;
-  const day = date.getUTCDate();
-  const lastDayOfTargetMonth = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+type AdditionalTenantInput = {
+  firstName: string;
+  lastName: string;
+  email: string;
+  phone?: string;
+};
 
-  return new Date(Date.UTC(year, month, Math.min(day, lastDayOfTargetMonth)));
+function formatDateToken(date: Date | null) {
+  return date ? date.toISOString().slice(0, 10) : "";
 }
 
-function buildRentPaymentDueDates(startDate: Date, endDate: Date | null) {
-  const dates: Date[] = [];
-  const paymentCount = endDate
-    ? Math.max(
-        0,
-        (endDate.getUTCFullYear() - startDate.getUTCFullYear()) * 12 +
-          (endDate.getUTCMonth() - startDate.getUTCMonth()) +
-          1,
-      )
-    : OPEN_ENDED_PAYMENT_MONTHS;
+function fullName(firstName: string, lastName: string) {
+  return [firstName, lastName].filter(Boolean).join(" ").trim();
+}
 
-  for (let i = 0; i < paymentCount; i += 1) {
-    const dueDate = addMonthsClamped(startDate, i);
-    if (endDate && dueDate > endDate) break;
-    dates.push(dueDate);
+function parseAdditionalTenants(raw: string | null) {
+  if (!raw) return [];
+  try {
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((t): t is Record<string, unknown> => t !== null && typeof t === "object")
+      .map((t) => ({
+        firstName: typeof t.firstName === "string" ? t.firstName.trim() : "",
+        lastName: typeof t.lastName === "string" ? t.lastName.trim() : "",
+        email: typeof t.email === "string" ? t.email.trim().toLowerCase() : "",
+        phone: typeof t.phone === "string" ? t.phone.trim() : undefined,
+      }))
+      .filter((t) => EMAIL_PATTERN.test(t.email));
+  } catch {
+    return [];
   }
-
-  return dates;
 }
 
 export async function POST(request: NextRequest) {
@@ -59,6 +70,7 @@ export async function POST(request: NextRequest) {
     return typeof v === "string" ? v.trim() : null;
   };
 
+  const leaseMode = get("leaseMode") === "generate" ? "generate" : "uploaded";
   const email = get("email");
   const firstName = get("firstName");
   const lastName = get("lastName");
@@ -69,33 +81,10 @@ export async function POST(request: NextRequest) {
   const endDate = get("endDate");
   const rentAmountRaw = get("rentAmount");
   const securityDepositRaw = get("securityDeposit");
+  const templateId = get("templateId");
   const testMode = get("testMode") === "true";
   const leaseFile = form.get("leaseFile");
-
-  type AdditionalTenantInput = { firstName: string; lastName: string; email: string; phone?: string };
-  let parsedAdditional: AdditionalTenantInput[] = [];
-  const additionalTenantsRaw = get("additionalTenants");
-  if (additionalTenantsRaw) {
-    try {
-      const parsed = JSON.parse(additionalTenantsRaw);
-      if (Array.isArray(parsed)) {
-        parsedAdditional = parsed
-          .filter(
-            (t): t is Record<string, unknown> =>
-              t !== null && typeof t === "object",
-          )
-          .map((t) => ({
-            firstName: typeof t.firstName === "string" ? t.firstName.trim() : "",
-            lastName: typeof t.lastName === "string" ? t.lastName.trim() : "",
-            email: typeof t.email === "string" ? t.email.trim().toLowerCase() : "",
-            phone: typeof t.phone === "string" ? t.phone.trim() : undefined,
-          }))
-          .filter((t) => EMAIL_PATTERN.test(t.email));
-      }
-    } catch {
-      // ignore malformed — treat as no additional tenants
-    }
-  }
+  const parsedAdditional = parseAdditionalTenants(get("additionalTenants"));
 
   if (!email || !EMAIL_PATTERN.test(email)) {
     return Response.json({ error: "A valid email address is required." }, { status: 422 });
@@ -115,6 +104,10 @@ export async function POST(request: NextRequest) {
   if (!startDate) {
     return Response.json({ error: "Lease start date is required." }, { status: 422 });
   }
+  if (leaseMode === "generate" && !endDate) {
+    return Response.json({ error: "Lease end date is required for e-sign leases." }, { status: 422 });
+  }
+
   const parsedRent = Number(rentAmountRaw);
   if (!rentAmountRaw || isNaN(parsedRent) || parsedRent <= 0) {
     return Response.json({ error: "A valid rent amount is required." }, { status: 422 });
@@ -132,7 +125,28 @@ export async function POST(request: NextRequest) {
       deleted_at: null,
       properties: { organization_id: ctx.orgDbId, deleted_at: null },
     },
-    select: { id: true, unit_number: true, status: true },
+    select: {
+      id: true,
+      unit_number: true,
+      status: true,
+      rent_amount: true,
+      bedrooms: true,
+      bathrooms: true,
+      square_feet: true,
+      properties: {
+        select: {
+          id: true,
+          name: true,
+          address: true,
+          city: true,
+          state: true,
+          zip: true,
+          organizations: {
+            select: { name: true, email: true, phone: true },
+          },
+        },
+      },
+    },
   });
 
   if (!unit) {
@@ -144,8 +158,54 @@ export async function POST(request: NextRequest) {
     securityDepositRaw && !isNaN(Number(securityDepositRaw)) ? Number(securityDepositRaw) : null;
   const leaseStart = new Date(startDate);
   const leaseEnd = endDate ? new Date(endDate) : null;
+  if (Number.isNaN(leaseStart.getTime()) || (leaseEnd && Number.isNaN(leaseEnd.getTime()))) {
+    return Response.json({ error: "Lease dates are invalid." }, { status: 422 });
+  }
+  if (leaseEnd && leaseEnd < leaseStart) {
+    return Response.json({ error: "Lease end date must be after the start date." }, { status: 422 });
+  }
 
-  // Check for existing Clerk account unless this is a dry notification test.
+  const activeTemplate =
+    leaseMode === "generate"
+      ? await prisma.lease_templates.findFirst({
+          where: {
+            organization_id: ctx.orgDbId,
+            property_id: propertyId,
+            ...(templateId ? { id: templateId } : { is_active: true }),
+          },
+          orderBy: { created_at: "desc" },
+          select: {
+            id: true,
+            name: true,
+            file_name: true,
+            content_type: true,
+            blob_url: true,
+            lease_schema: true,
+          },
+        })
+      : null;
+
+  if (leaseMode === "generate" && !activeTemplate) {
+    return Response.json(
+      { error: "Upload or select a lease template before generating an e-sign lease." },
+      { status: 422 },
+    );
+  }
+
+  const manager = ctx.userDbId
+    ? await prisma.users.findUnique({
+        where: { id: ctx.userDbId },
+        select: { email: true, first_name: true, last_name: true },
+      })
+    : null;
+  const managerEmail = manager?.email ?? unit.properties.organizations.email;
+  if (leaseMode === "generate" && !managerEmail) {
+    return Response.json(
+      { error: "Add a manager or organization email before sending leases for e-signature." },
+      { status: 422 },
+    );
+  }
+
   const clerk = await clerkClient();
   const existingUsers = testMode
     ? null
@@ -153,7 +213,6 @@ export async function POST(request: NextRequest) {
   const existingClerkUser = existingUsers?.data[0] ?? null;
   const clerkUserIdToLink = testMode ? null : existingClerkUser?.id ?? null;
 
-  // Lookup existing Clerk accounts for additional tenants
   const additionalClerkUserMap = new Map<string, string | null>();
   if (!testMode && parsedAdditional.length > 0) {
     await Promise.all(
@@ -164,7 +223,6 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // Create tenant + lease in a transaction (no file I/O inside)
   const result = await prisma.$transaction(async (tx) => {
     const existingTenant = await tx.tenants.findUnique({
       where: { organization_id_email: { organization_id: ctx.orgDbId, email: normalizedEmail } },
@@ -228,7 +286,7 @@ export async function POST(request: NextRequest) {
         end_date: leaseEnd,
         rent_amount: parsedRent,
         security_deposit: parsedDeposit,
-        status: "active",
+        status: leaseMode === "generate" ? "pending_signature" : "active",
       },
       select: { id: true },
     });
@@ -237,23 +295,7 @@ export async function POST(request: NextRequest) {
       data: { lease_id: lease.id, tenant_id: tenant.id, is_primary: true },
     });
 
-    const rentPaymentDueDates = buildRentPaymentDueDates(leaseStart, leaseEnd);
-    if (rentPaymentDueDates.length > 0) {
-      await tx.payments.createMany({
-        data: rentPaymentDueDates.map((dueDate) => ({
-          lease_id: lease.id,
-          tenant_id: tenant.id,
-          amount: parsedRent,
-          type: "rent",
-          status: "pending",
-          due_date: dueDate,
-          notes: "Monthly rent",
-        })),
-      });
-    }
-
-    // Additional tenants — upsert and link to lease
-    const additionalTenantIds: string[] = [];
+    const additionalTenants: Array<AdditionalTenantInput & { id: string }> = [];
     for (const at of parsedAdditional) {
       const atClerkId = additionalClerkUserMap.get(at.email) ?? null;
       const existingAt = await tx.tenants.findUnique({
@@ -288,48 +330,163 @@ export async function POST(request: NextRequest) {
       await tx.lease_tenants.create({
         data: { lease_id: lease.id, tenant_id: atTenant.id, is_primary: false },
       });
-      additionalTenantIds.push(atTenant.id);
+      additionalTenants.push({ ...at, id: atTenant.id });
     }
 
-    await tx.units.update({
-      where: { id: unit.id },
-      data: { status: "occupied", updated_at: new Date() },
-    });
+    if (leaseMode === "uploaded") {
+      const rentPaymentDueDates = buildRentPaymentDueDates(leaseStart, leaseEnd);
+      if (rentPaymentDueDates.length > 0) {
+        await tx.payments.createMany({
+          data: rentPaymentDueDates.map((dueDate) => ({
+            lease_id: lease.id,
+            tenant_id: tenant.id,
+            amount: parsedRent,
+            type: "rent",
+            status: "pending",
+            due_date: dueDate,
+            notes: "Monthly rent",
+          })),
+        });
+      }
 
-    return { tenantId: tenant.id, leaseId: lease.id, additionalTenantIds };
+      await tx.units.update({
+        where: { id: unit.id },
+        data: { status: "occupied", updated_at: new Date() },
+      });
+    } else {
+      await tx.lease_signature_requests.create({
+        data: {
+          lease_id: lease.id,
+          lease_template_id: activeTemplate!.id,
+          status: "creating",
+          recipients: [],
+        },
+      });
+    }
+
+    return {
+      tenantId: tenant.id,
+      leaseId: lease.id,
+      additionalTenantIds: additionalTenants.map((t) => t.id),
+      additionalTenants,
+    };
   });
 
-  // Upload lease document now that we have the tenant ID
-  if (leaseFile instanceof File && leaseFile.size > 0) {
+  if (leaseMode === "uploaded" && leaseFile instanceof File && leaseFile.size > 0) {
     if (ALLOWED_MIME.has(leaseFile.type) && leaseFile.size <= MAX_BYTES) {
       try {
         const ext = leaseFile.name.split(".").pop() ?? "pdf";
         const dateStamp = new Date().toISOString().slice(0, 10);
         const path = `leases/${ctx.orgDbId}/${propertyId}/${unitId}/${result.tenantId}/lease-${dateStamp}.${ext}`;
-        const blobToken =
-          process.env.VERCEL_ENV === "production"
-            ? process.env.BLOB_READ_WRITE_TOKEN
-            : process.env.VERCEL_ENV === "preview"
-              ? process.env.TEST_BLOB_READ_WRITE_TOKEN
-              : process.env.DEV_BLOB_READ_WRITE_TOKEN;
-        const blob = await put(path, leaseFile, { access: "private", token: blobToken });
+        const blob = await put(path, leaseFile, { access: "private", token: getBlobToken() });
         await prisma.leases.update({
           where: { id: result.leaseId },
           data: { document_url: blob.url },
         });
       } catch {
-        // Non-fatal — lease is created, doc just won't be attached
+        // Non-fatal: the lease is created; managers can re-upload later.
       }
     }
   }
 
-  // Send invite
+  let docusealSubmissionId: string | null = null;
+  if (leaseMode === "generate") {
+    const tenantRecipients: LeaseSignatureRecipient[] = [
+      {
+        kind: "tenant",
+        tenantId: result.tenantId,
+        email: normalizedEmail,
+        firstName,
+        lastName,
+        role: "Tenant 1",
+      },
+      ...result.additionalTenants.map((tenant, index) => ({
+        kind: "tenant" as const,
+        tenantId: tenant.id,
+        email: tenant.email,
+        firstName: tenant.firstName,
+        lastName: tenant.lastName,
+        role: `Tenant ${index + 2}`,
+      })),
+    ];
+    const recipients: LeaseSignatureRecipient[] = [
+      ...tenantRecipients,
+      {
+        kind: "manager",
+        email: managerEmail!,
+        firstName: manager?.first_name ?? unit.properties.organizations.name ?? "Property",
+        lastName: manager?.last_name ?? "Manager",
+        role: "Manager",
+      },
+    ];
+
+    await prisma.lease_signature_requests.update({
+      where: { lease_id: result.leaseId },
+      data: { recipients: recipients as unknown as object, updated_at: new Date() },
+    });
+
+    try {
+      const prop = unit.properties;
+      const fullAddress = [prop.address, prop.city, prop.state, prop.zip].filter(Boolean).join(", ");
+      let schema: ExtractedLeaseSchema;
+      if (activeTemplate!.lease_schema) {
+        schema = activeTemplate!.lease_schema as unknown as ExtractedLeaseSchema;
+      } else {
+        schema = await extractLeaseSchema(activeTemplate!.blob_url);
+        await prisma.lease_templates.update({
+          where: { id: activeTemplate!.id },
+          data: { lease_schema: schema as object, updated_at: new Date() },
+        });
+      }
+      const leaseData = {
+        primaryTenant: { firstName, lastName, email: normalizedEmail },
+        additionalTenants: parsedAdditional.map((t) => ({
+          firstName: t.firstName,
+          lastName: t.lastName,
+          email: t.email,
+        })),
+        propertyName: prop.name,
+        propertyAddress: fullAddress,
+        unitNumber: unit.unit_number ?? "",
+        startDate: startDate!,
+        endDate: endDate ?? "",
+        rentAmount: String(parsedRent),
+        securityDeposit: parsedDeposit ? String(parsedDeposit) : undefined,
+      };
+      const docxBuffer = await generateLease(schema, leaseData, activeTemplate!.blob_url);
+
+      docusealSubmissionId = await sendLeaseForSignature({
+        leaseId: result.leaseId,
+        template: activeTemplate!,
+        recipients,
+        filledPdfBytes: docxBuffer,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : "Could not send the lease for e-signature.";
+      await prisma.lease_signature_requests.update({
+        where: { lease_id: result.leaseId },
+        data: { status: "error", error: message, last_synced_at: new Date(), updated_at: new Date() },
+      });
+      return Response.json(
+        {
+          error: `Tenant record created, but e-sign send failed: ${message}`,
+          tenantId: result.tenantId,
+          leaseId: result.leaseId,
+          additionalTenantIds: result.additionalTenantIds,
+        },
+        { status: 207 },
+      );
+    }
+  }
+
   if (testMode) {
     return Response.json(
       {
         tenantId: result.tenantId,
         leaseId: result.leaseId,
         additionalTenantIds: result.additionalTenantIds,
+        docusealSubmissionId,
+        leaseMode,
         testMode: true,
         skippedInvite: normalizedEmail,
       },
@@ -338,24 +495,16 @@ export async function POST(request: NextRequest) {
   }
 
   const redirectUrl = new URL("/login?renter=1", request.nextUrl.origin).toString();
-
-  // Collect all tenants that need a new Clerk invite (no existing account)
   const tenantsToInvite: string[] = [];
   const tenantsLinked: string[] = [];
 
-  if (existingClerkUser) {
-    tenantsLinked.push(normalizedEmail);
-  } else {
-    tenantsToInvite.push(normalizedEmail);
-  }
+  if (existingClerkUser) tenantsLinked.push(normalizedEmail);
+  else tenantsToInvite.push(normalizedEmail);
 
   for (const at of parsedAdditional) {
     const atClerkId = additionalClerkUserMap.get(at.email);
-    if (atClerkId) {
-      tenantsLinked.push(at.email);
-    } else {
-      tenantsToInvite.push(at.email);
-    }
+    if (atClerkId) tenantsLinked.push(at.email);
+    else tenantsToInvite.push(at.email);
   }
 
   if (tenantsToInvite.length > 0) {
@@ -386,22 +535,11 @@ export async function POST(request: NextRequest) {
           tenantId: result.tenantId,
           leaseId: result.leaseId,
           additionalTenantIds: result.additionalTenantIds,
+          docusealSubmissionId,
         },
         { status: 207 },
       );
     }
-  }
-
-  if (tenantsLinked.length > 0 && tenantsToInvite.length === 0) {
-    return Response.json(
-      {
-        tenantId: result.tenantId,
-        leaseId: result.leaseId,
-        additionalTenantIds: result.additionalTenantIds,
-        linked: normalizedEmail,
-      },
-      { status: 201 },
-    );
   }
 
   return Response.json(
@@ -409,7 +547,12 @@ export async function POST(request: NextRequest) {
       tenantId: result.tenantId,
       leaseId: result.leaseId,
       additionalTenantIds: result.additionalTenantIds,
-      invited: normalizedEmail,
+      docusealSubmissionId,
+      leaseMode,
+      sentForSignature: leaseMode === "generate",
+      ...(tenantsLinked.length > 0 && tenantsToInvite.length === 0
+        ? { linked: normalizedEmail }
+        : { invited: normalizedEmail }),
     },
     { status: 201 },
   );

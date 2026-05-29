@@ -3,7 +3,8 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getPropertyTypeLabel } from "@/lib/property-types";
+import { createPortal } from "react-dom";
+import { getPropertyTypeLabel, PROPERTY_TYPE_OPTIONS } from "@/lib/property-types";
 import { useToast } from "./ToastProvider";
 import { OnboardRenterWizard, type WizardUnit } from "./OnboardRenterWizard";
 
@@ -37,8 +38,52 @@ type UnitDetails = {
   rentAmount: number | null;
   status: string;
   hasActiveLease: boolean;
+  pendingSignatureLeaseId: string | null;
   futurePaymentCount: number;
   tenant: UnitTenant | null;
+};
+
+type PropertyFormState = {
+  name: string;
+  type: string;
+  address: string;
+  city: string;
+  state: string;
+  zip: string;
+  description: string;
+};
+
+type LeaseTemplate = {
+  id: string;
+  name: string;
+  fileName: string;
+  contentType: string;
+  blobUrl: string;
+  isActive: boolean;
+  createdAt: string;
+};
+
+type LeaseReview = {
+  extractedTerms: {
+    monthlyRent: number;
+    securityDeposit: number;
+    startDate: string;
+    endDate: string;
+    propertyAddress: string;
+    state: string;
+    landlordName: string;
+    leaseType: string;
+    gracePeriodDays: number;
+    lateFeeFlat: number;
+    lateFeePct: number;
+  };
+  clauseSummaries: Array<{ title: string; summary: string; riskLevel: "low" | "medium" | "high"; explanation: string }>;
+  missingConcepts: Array<{ concept: string; importance: "recommended" | "important" | "critical"; description: string }>;
+  inconsistencies: Array<{ description: string; severity: "low" | "medium" | "high" }>;
+  stateLawNotes: Array<{ area: string; note: string; risk: "info" | "caution" | "warning" }>;
+  readabilitySuggestions: Array<{ section: string; issue: string; suggestion: string }>;
+  overallRiskLevel: "low" | "medium" | "high";
+  executiveSummary: string;
 };
 
 // ─── Icons ────────────────────────────────────────────────────────────────────
@@ -154,6 +199,9 @@ function statusLabel(status: string) {
   return status.charAt(0).toUpperCase() + status.slice(1);
 }
 
+const modalInputClass =
+  "w-full rounded-md border border-slate-200 bg-white px-2.5 py-2 text-sm text-slate-900 placeholder:text-slate-400 focus:border-emerald-500 focus:outline-none focus:ring-2 focus:ring-emerald-500/20";
+
 function unitFormFromUnit(unit: UnitDetails) {
   return {
     unitNumber: unit.unitNumber,
@@ -173,6 +221,783 @@ const emptyUnitForm = {
   rentAmount: "",
   status: "vacant",
 };
+
+// ─── Lease Template Button ────────────────────────────────────────────────────
+
+function ChevronDownIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg aria-hidden="true" className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+      <path d="m6 9 6 6 6-6" />
+    </svg>
+  );
+}
+
+function DownloadIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg aria-hidden="true" className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="7 10 12 15 17 10" /><line x1="12" y1="15" x2="12" y2="3" />
+    </svg>
+  );
+}
+
+function TrashIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg aria-hidden="true" className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6" /><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" />
+    </svg>
+  );
+}
+
+function UploadIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg aria-hidden="true" className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" />
+    </svg>
+  );
+}
+
+const TOKEN_LABELS: Record<string, string> = {
+  "{{tenant_name}}": "Primary tenant name",
+  "{{tenant_email}}": "Tenant email",
+  "{{all_tenant_names}}": "All tenant names (primary + co-tenants)",
+  "{{co_tenant_names}}": "Co-tenant names only",
+  "{{property_name}}": "Property name",
+  "{{property_address}}": "Property address (full)",
+  "{{property_address_with_unit}}": "Property address + unit number",
+  "{{property_street}}": "Property street only",
+  "{{unit_number}}": "Unit number",
+  "{{lease_start}}": "Lease start date",
+  "{{lease_end}}": "Lease end date",
+  "{{rent_amount}}": "Monthly rent",
+  "{{security_deposit}}": "Security deposit",
+  "{{total_rent}}": "Total rent (words + figures)",
+  "{{organization_name}}": "Organization / landlord entity name",
+  "{{property_manager_name}}": "Property manager name",
+  "{{property_manager_email}}": "Property manager email",
+};
+
+const SIGNATURE_TAGS = [
+  { label: "Tenant 1 — signature", tag: "{{Sign;type=signature;role=Tenant 1}}" },
+  { label: "Tenant 1 — initials",  tag: "{{Initial;type=initials;role=Tenant 1}}" },
+  { label: "Tenant 1 — date",      tag: "{{Date;type=date;role=Tenant 1}}" },
+  { label: "Tenant 2 — signature", tag: "{{Sign;type=signature;role=Tenant 2}}" },
+  { label: "Tenant 2 — initials",  tag: "{{Initial;type=initials;role=Tenant 2}}" },
+  { label: "Tenant 2 — date",      tag: "{{Date;type=date;role=Tenant 2}}" },
+  { label: "Manager — signature",  tag: "{{Sign;type=signature;role=Manager}}" },
+  { label: "Manager — initials",   tag: "{{Initial;type=initials;role=Manager}}" },
+  { label: "Manager — date",       tag: "{{Date;type=date;role=Manager}}" },
+];
+
+function PlaceholdersModal({
+  propertyId,
+  template,
+  onClose,
+}: {
+  propertyId: string;
+  template: LeaseTemplate;
+  onClose: () => void;
+}) {
+  const [pairs, setPairs] = useState<Array<{ search: string; token: string }>>([]);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [copiedTag, setCopiedTag] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetch(`/api/properties/${propertyId}/lease-templates/${template.id}`)
+      .then((r) => r.json())
+      .then((data: { pairs?: Array<{ search: string; token: string }> | null }) => {
+        setPairs(data.pairs ?? []);
+      })
+      .catch(() => setPairs([]))
+      .finally(() => setLoading(false));
+  }, [propertyId, template.id]);
+
+  function updatePair(i: number, field: "search" | "token", value: string) {
+    setPairs((prev) => prev.map((p, j) => (j === i ? { ...p, [field]: value } : p)));
+  }
+
+  function removePair(i: number) {
+    setPairs((prev) => prev.filter((_, j) => j !== i));
+  }
+
+  function addPair() {
+    setPairs((prev) => [...prev, { search: "", token: "{{tenant_name}}" }]);
+  }
+
+  async function save() {
+    setSaving(true);
+    try {
+      const valid = pairs.filter((p) => p.search.trim() && p.token);
+      const res = await fetch(`/api/properties/${propertyId}/lease-templates/${template.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ pairs: valid }),
+      });
+      if (!res.ok) throw new Error("Save failed");
+      setPairs(valid);
+      onClose();
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" onClick={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+      <div className="flex w-full max-w-2xl flex-col rounded-xl bg-white shadow-xl" style={{ maxHeight: "85vh" }}>
+        {/* Header */}
+        <div className="flex items-center justify-between border-b border-gray-100 px-6 py-4">
+          <div>
+            <h2 className="text-base font-semibold text-gray-900">Lease placeholders</h2>
+            <p className="mt-0.5 text-sm text-gray-500">{template.name}</p>
+          </div>
+          <button type="button" onClick={onClose} className="rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600">
+            <svg className="h-5 w-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M18 6 6 18M6 6l12 12"/>
+            </svg>
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto px-6 py-4">
+          {loading ? (
+            <p className="py-8 text-center text-sm text-gray-400">Loading…</p>
+          ) : (
+            <>
+              {/* Column headers */}
+              <div className="mb-2 grid grid-cols-[1fr_200px_32px] gap-3 text-xs font-medium text-gray-500">
+                <span>Text in your template</span>
+                <span>Fill with</span>
+                <span />
+              </div>
+
+              {/* Rows */}
+              <div className="space-y-2">
+                {pairs.map((p, i) => (
+                  <div key={i} className="grid grid-cols-[1fr_200px_32px] items-center gap-3">
+                    <input
+                      type="text"
+                      value={p.search}
+                      placeholder="e.g. ____________ or [Tenant Name]"
+                      onChange={(e) => updatePair(i, "search", e.target.value)}
+                      className="w-full rounded-lg border border-gray-200 px-3 py-2 font-mono text-sm text-gray-700 placeholder:font-sans placeholder:text-gray-400 focus:border-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                    />
+                    <select
+                      value={p.token}
+                      onChange={(e) => updatePair(i, "token", e.target.value)}
+                      className="w-full rounded-lg border border-gray-200 px-3 py-2 text-sm text-gray-700 focus:border-emerald-400 focus:outline-none focus:ring-1 focus:ring-emerald-400"
+                    >
+                      <optgroup label="Lease data">
+                        {Object.entries(TOKEN_LABELS).map(([token, label]) => (
+                          <option key={token} value={token}>{label}</option>
+                        ))}
+                      </optgroup>
+                      <optgroup label="E-signature (DocuSeal)">
+                        {SIGNATURE_TAGS.map(({ label, tag }) => (
+                          <option key={tag} value={tag}>{label}</option>
+                        ))}
+                      </optgroup>
+                    </select>
+                    <button
+                      type="button"
+                      onClick={() => removePair(i)}
+                      className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-300 hover:bg-red-50 hover:text-red-500"
+                      aria-label="Remove"
+                    >
+                      <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M18 6 6 18M6 6l12 12"/>
+                      </svg>
+                    </button>
+                  </div>
+                ))}
+              </div>
+
+              {pairs.length === 0 && (
+                <p className="py-6 text-center text-sm text-gray-400">
+                  No placeholders yet. Add one below or re-upload the template to auto-detect.
+                </p>
+              )}
+
+              {/* Add row */}
+              <button
+                type="button"
+                onClick={addPair}
+                className="mt-4 flex items-center gap-1.5 text-sm font-medium text-emerald-700 hover:text-emerald-900"
+              >
+                <svg className="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M12 5v14M5 12h14"/>
+                </svg>
+                Add placeholder
+              </button>
+
+              {/* Signature tags reference */}
+              <div className="mt-6 rounded-xl border border-blue-100 bg-blue-50 p-4">
+                <p className="mb-1 text-xs font-semibold uppercase tracking-wide text-blue-700">
+                  E-signature tags
+                </p>
+                <p className="mb-3 text-xs text-blue-600">
+                  Paste these into your Word document where each person should sign. DocuSeal auto-places the signature field there.
+                </p>
+                <div className="space-y-1.5">
+                  {SIGNATURE_TAGS.map(({ label, tag }) => (
+                    <div key={tag} className="flex items-center gap-2">
+                      <code className="flex-1 rounded-md border border-blue-200 bg-white px-2 py-1 font-mono text-xs text-slate-700 select-all">
+                        {tag}
+                      </code>
+                      <span className="w-36 shrink-0 text-xs text-blue-600">{label}</span>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          navigator.clipboard.writeText(tag);
+                          setCopiedTag(tag);
+                          setTimeout(() => setCopiedTag(null), 1500);
+                        }}
+                        className="shrink-0 rounded-md border border-blue-200 bg-white px-2 py-1 text-xs font-medium text-blue-700 hover:bg-blue-100"
+                      >
+                        {copiedTag === tag ? "Copied!" : "Copy"}
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </>
+          )}
+        </div>
+
+        {/* Footer */}
+        <div className="flex items-center justify-end gap-3 border-t border-gray-100 px-6 py-4">
+          <button
+            type="button"
+            onClick={onClose}
+            disabled={saving}
+            className="rounded-lg border border-gray-200 px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50"
+          >
+            Cancel
+          </button>
+          <button
+            type="button"
+            onClick={() => void save()}
+            disabled={saving || loading}
+            className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white hover:bg-emerald-700 disabled:opacity-50"
+          >
+            {saving ? "Saving…" : "Save placeholders"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function LeaseTemplateButton({
+  propertyId,
+  templates,
+  uploading,
+  onUpload,
+  onUploadDirect,
+  onDelete,
+  onReview,
+}: {
+  propertyId: string;
+  templates: LeaseTemplate[];
+  uploading: boolean;
+  onUpload: () => void;
+  onUploadDirect: () => void;
+  onDelete: (id: string) => void;
+  onReview: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [menuStyle, setMenuStyle] = useState<React.CSSProperties>({});
+  const [modalOpen, setModalOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const activeTemplate = templates.find((t) => t.isActive) ?? templates[0] ?? null;
+
+  useEffect(() => {
+    if (!open) return;
+    function handleClick(e: MouseEvent) {
+      const target = e.target as Node;
+      if (
+        ref.current && !ref.current.contains(target) &&
+        menuRef.current && !menuRef.current.contains(target)
+      ) setOpen(false);
+    }
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || !triggerRef.current) return;
+    const rect = triggerRef.current.getBoundingClientRect();
+    const menuHeight = 280;
+    const spaceBelow = window.innerHeight - rect.bottom;
+    if (spaceBelow < menuHeight && rect.top > menuHeight) {
+      setMenuStyle({ position: "fixed", bottom: window.innerHeight - rect.top, left: rect.left, width: 208 });
+    } else {
+      setMenuStyle({ position: "fixed", top: rect.bottom + 4, left: rect.left, width: 208 });
+    }
+  }, [open]);
+
+  if (uploading) {
+    return (
+      <button disabled className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-400">
+        Reviewing template…
+      </button>
+    );
+  }
+
+  if (!activeTemplate) {
+    return (
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={onUpload}
+          className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50"
+        >
+          <UploadIcon className="h-4 w-4" />
+          Upload template
+        </button>
+        <button
+          type="button"
+          onClick={onUploadDirect}
+          className="text-xs text-slate-400 hover:text-slate-600 underline underline-offset-2"
+        >
+          Skip review
+        </button>
+      </div>
+    );
+  }
+
+  return (
+    <>
+      <div ref={ref} className="relative">
+        <button
+          ref={triggerRef}
+          type="button"
+          onClick={() => setOpen((v) => !v)}
+          className="inline-flex h-9 max-w-[200px] items-center gap-1.5 rounded-lg border border-emerald-200 bg-emerald-50 px-3 text-sm font-semibold text-emerald-800 transition-colors hover:bg-emerald-100"
+        >
+          <span className="truncate">{activeTemplate.name}</span>
+          <ChevronDownIcon className="h-3.5 w-3.5 shrink-0" />
+        </button>
+        {open && createPortal(
+          <div ref={menuRef} style={{ ...menuStyle, zIndex: 9999 }} className="overflow-hidden rounded-lg border border-gray-200 bg-white shadow-lg">
+            <a
+              href={`/api/properties/${propertyId}/lease-templates/${activeTemplate.id}/file`}
+              download={activeTemplate.fileName}
+              onClick={() => setOpen(false)}
+              className="flex w-full items-center gap-2 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50"
+            >
+              <DownloadIcon className="h-4 w-4 shrink-0" />
+              Download
+            </a>
+            <button
+              type="button"
+              onClick={() => { setOpen(false); setModalOpen(true); }}
+              className="flex w-full items-center gap-2 border-t border-gray-100 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50"
+            >
+              <svg className="h-4 w-4 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M9 5H7a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V7a2 2 0 0 0-2-2h-2"/>
+                <rect x="9" y="3" width="6" height="4" rx="1"/>
+                <path d="M9 12h6M9 16h4"/>
+              </svg>
+              Placeholders
+            </button>
+            <button
+              type="button"
+              onClick={() => { setOpen(false); onReview(); }}
+              className="flex w-full items-center gap-2 border-t border-gray-100 px-4 py-2.5 text-sm text-emerald-700 hover:bg-emerald-50"
+            >
+              <SparklesIcon className="h-4 w-4 shrink-0" />
+              AI Review
+            </button>
+            <button
+              type="button"
+              onClick={() => { setOpen(false); onUpload(); }}
+              className="flex w-full items-center gap-2 border-t border-gray-100 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50"
+            >
+              <UploadIcon className="h-4 w-4 shrink-0" />
+              Replace
+            </button>
+            <button
+              type="button"
+              onClick={() => { setOpen(false); onUploadDirect(); }}
+              className="flex w-full items-center gap-2 border-t border-gray-100 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50"
+            >
+              <UploadIcon className="h-4 w-4 shrink-0" />
+              Replace (skip review)
+            </button>
+            <button
+              type="button"
+              onClick={() => { setOpen(false); onDelete(activeTemplate.id); }}
+              className="flex w-full items-center gap-2 border-t border-gray-100 px-4 py-2.5 text-sm text-red-600 hover:bg-red-50"
+            >
+              <TrashIcon className="h-4 w-4 shrink-0" />
+              Delete
+            </button>
+          </div>,
+          document.body
+        )}
+      </div>
+      {modalOpen && (
+        <PlaceholdersModal
+          propertyId={propertyId}
+          template={activeTemplate}
+          onClose={() => setModalOpen(false)}
+        />
+      )}
+    </>
+  );
+}
+
+// ─── Lease Review Panel ───────────────────────────────────────────────────────
+
+const REVIEW_STATUS_MESSAGES = [
+  "Reading your lease…",
+  "Analyzing clauses…",
+  "Checking for gaps…",
+  "Reviewing state law…",
+  "Almost done…",
+];
+
+const RISK_COLORS = {
+  low: "bg-green-100 text-green-800",
+  medium: "bg-amber-100 text-amber-800",
+  high: "bg-red-100 text-red-800",
+};
+
+const IMPORTANCE_COLORS = {
+  critical: "bg-red-100 text-red-800",
+  important: "bg-amber-100 text-amber-800",
+  recommended: "bg-slate-100 text-slate-700",
+};
+
+const STATE_LAW_COLORS = {
+  info: "bg-blue-50 border-blue-200 text-blue-800",
+  caution: "bg-amber-50 border-amber-200 text-amber-800",
+  warning: "bg-red-50 border-red-200 text-red-800",
+};
+
+function ReviewAccordion({
+  title,
+  count,
+  defaultOpen = false,
+  children,
+}: {
+  title: string;
+  count?: number;
+  defaultOpen?: boolean;
+  children: React.ReactNode;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="border-b border-gray-100 last:border-0">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        className="flex w-full items-center justify-between px-6 py-4 text-left hover:bg-gray-50 transition-colors"
+      >
+        <span className="font-semibold text-gray-900 text-sm">{title}</span>
+        <div className="flex items-center gap-2 shrink-0">
+          {count !== undefined && (
+            <span className="rounded-full bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-600">{count}</span>
+          )}
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className={`h-4 w-4 text-gray-400 transition-transform ${open ? "rotate-180" : ""}`} aria-hidden="true">
+            <path d="m6 9 6 6 6-6" />
+          </svg>
+        </div>
+      </button>
+      {open && <div className="px-6 pb-5">{children}</div>}
+    </div>
+  );
+}
+
+function renderBold(text: string) {
+  const parts = text.split(/\*\*(.+?)\*\*/);
+  return parts.map((part, i) =>
+    i % 2 === 1
+      ? <mark key={i} className="rounded bg-amber-100 px-0.5 font-semibold text-amber-900 not-italic">{part}</mark>
+      : part,
+  );
+}
+
+function SummaryBody({ text }: { text: string }) {
+  const firstItem = text.indexOf("(1)");
+  if (firstItem === -1) {
+    return <p className="text-sm leading-relaxed text-gray-700">{renderBold(text)}</p>;
+  }
+  const intro = text.slice(0, firstItem).trim();
+  const itemsText = text.slice(firstItem).trim();
+  const items = itemsText
+    .split(/\s*\(\d+\)\s*/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return (
+    <div className="space-y-3">
+      {intro && <p className="text-sm leading-relaxed text-gray-700">{renderBold(intro)}</p>}
+      <ul className="space-y-1.5">
+        {items.map((item, i) => (
+          <li key={i} className="flex gap-2 text-sm text-gray-700">
+            <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-gray-200 text-xs font-semibold text-gray-600">{i + 1}</span>
+            <span className="leading-relaxed">{renderBold(item.replace(/[.;]\s*$/, ""))}</span>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
+
+
+
+function LeaseReviewPanel({
+  open,
+  loading,
+  error,
+  data,
+  templateName,
+  isPending,
+  confirming,
+  onClose,
+  onRetry,
+  onConfirm,
+  onDiscard,
+}: {
+  open: boolean;
+  loading: boolean;
+  error: string | null;
+  data: LeaseReview | null;
+  templateName: string;
+  isPending: boolean;
+  confirming: boolean;
+  onClose: () => void;
+  onRetry: () => void;
+  onConfirm: () => void;
+  onDiscard: () => void;
+}) {
+  const [statusIdx, setStatusIdx] = useState(0);
+
+  useEffect(() => {
+    if (!loading) return;
+    const iv = setInterval(() => {
+      setStatusIdx((i) => (i + 1) % REVIEW_STATUS_MESSAGES.length);
+    }, 2800);
+    return () => clearInterval(iv);
+  }, [loading]);
+
+  if (!open) return null;
+
+  const riskLabel = data?.overallRiskLevel ? data.overallRiskLevel.charAt(0).toUpperCase() + data.overallRiskLevel.slice(1) : null;
+
+  return (
+    <>
+      {/* Backdrop */}
+      <div className="fixed inset-0 z-40 bg-black/30 print:hidden" onClick={onClose} />
+      {/* Panel */}
+      <div className="fixed inset-y-0 right-0 z-50 flex w-full max-w-2xl flex-col bg-white shadow-2xl print:static print:shadow-none print:max-w-none">
+        {/* Disclaimer — always visible */}
+        <div className="shrink-0 border-b border-amber-200 bg-amber-50 px-5 py-3 text-xs text-amber-800 leading-snug">
+          <strong>AI-generated suggestions are informational only and are not legal advice.</strong> Please consult a qualified attorney for legal review.
+        </div>
+
+        {/* Header */}
+        <div className="flex shrink-0 items-center justify-between border-b border-gray-100 px-5 py-4 print:hidden">
+          <div className="flex items-center gap-2 min-w-0">
+            <SparklesIcon className="h-4 w-4 shrink-0 text-emerald-600" />
+            <span className="truncate text-sm font-semibold text-gray-900">{templateName}</span>
+            {riskLabel && (
+              <span className={`shrink-0 rounded-full px-2.5 py-0.5 text-xs font-semibold ${RISK_COLORS[data!.overallRiskLevel]}`}>
+                {riskLabel} risk
+              </span>
+            )}
+          </div>
+          <div className="flex shrink-0 items-center gap-2 ml-3">
+            {data && (
+              <button
+                type="button"
+                onClick={() => window.print()}
+                className="inline-flex h-8 items-center gap-1.5 rounded-lg border border-gray-200 px-3 text-xs font-semibold text-gray-600 hover:bg-gray-50 transition-colors"
+              >
+                Print
+              </button>
+            )}
+            <button type="button" onClick={onClose} className="flex h-8 w-8 items-center justify-center rounded-lg text-gray-400 hover:bg-gray-100 transition-colors" aria-label="Close review panel">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4" aria-hidden="true">
+                <path d="M18 6 6 18M6 6l12 12" />
+              </svg>
+            </button>
+          </div>
+        </div>
+
+        {/* Body */}
+        <div className="flex-1 overflow-y-auto">
+          {loading && (
+            <div className="flex flex-col items-center justify-center gap-4 py-20 px-6 text-center">
+              <svg className="h-8 w-8 animate-spin text-emerald-500" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 0 1 8-8V0C5.373 0 0 5.373 0 12h4z" />
+              </svg>
+              <p className="text-sm font-medium text-gray-600">{REVIEW_STATUS_MESSAGES[statusIdx]}</p>
+            </div>
+          )}
+
+          {!loading && error && (
+            <div className="m-6 rounded-xl border border-red-200 bg-red-50 p-5">
+              <p className="text-sm font-semibold text-red-800">Could not complete review</p>
+              <p className="mt-1 text-sm text-red-700">{error}</p>
+              <button
+                type="button"
+                onClick={onRetry}
+                className="mt-3 inline-flex h-8 items-center rounded-lg border border-red-300 bg-white px-3 text-xs font-semibold text-red-700 hover:bg-red-50 transition-colors"
+              >
+                Try again
+              </button>
+            </div>
+          )}
+
+          {!loading && data && (() => {
+            const riskOrder = { high: 0, medium: 1, low: 2 } as const;
+            const importanceOrder = { critical: 0, important: 1, recommended: 2 } as const;
+            const stateRiskOrder = { warning: 0, caution: 1, info: 2 } as const;
+            const clauseSummaries = (data.clauseSummaries ?? []).slice().sort((a, b) => (riskOrder[a.riskLevel] ?? 1) - (riskOrder[b.riskLevel] ?? 1));
+            const missingConcepts = (data.missingConcepts ?? []).slice().sort((a, b) => (importanceOrder[a.importance] ?? 1) - (importanceOrder[b.importance] ?? 1));
+            const inconsistencies = (data.inconsistencies ?? []).slice().sort((a, b) => (riskOrder[a.severity] ?? 1) - (riskOrder[b.severity] ?? 1));
+            const stateLawNotes = (data.stateLawNotes ?? []).slice().sort((a, b) => (stateRiskOrder[a.risk] ?? 1) - (stateRiskOrder[b.risk] ?? 1));
+            const readabilitySuggestions = data.readabilitySuggestions ?? [];
+            return (
+            <div className="divide-y divide-gray-100">
+              {/* Executive summary */}
+              <div className="px-6 py-5">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-gray-400">Summary</p>
+                <div className={`rounded-lg border-l-4 bg-gray-50 px-4 py-3 ${data.overallRiskLevel === "high" ? "border-red-400" : data.overallRiskLevel === "medium" ? "border-amber-400" : "border-green-400"}`}>
+                  <SummaryBody text={data.executiveSummary ?? ""} />
+                </div>
+              </div>
+
+              {/* 1. Clause Analysis */}
+              <ReviewAccordion title="Clause Analysis" count={clauseSummaries.length}>
+                <div className="space-y-3">
+                  {clauseSummaries.length === 0 && <p className="text-sm text-gray-400">No clauses identified.</p>}
+                  {clauseSummaries.map((c, i) => (
+                    <ClauseCard key={i} clause={c} />
+                  ))}
+                </div>
+              </ReviewAccordion>
+
+              {/* 2. Missing Sections */}
+              <ReviewAccordion title="Missing Sections" count={missingConcepts.length}>
+                <div className="space-y-2">
+                  {missingConcepts.length === 0 && <p className="text-sm text-gray-400">No missing sections detected.</p>}
+                  {missingConcepts.map((m, i) => (
+                    <div key={i} className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="text-sm font-semibold text-gray-900">{m.concept}</p>
+                        <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${IMPORTANCE_COLORS[m.importance] ?? "bg-slate-100 text-slate-700"}`}>{m.importance}</span>
+                      </div>
+                      <p className="mt-1 text-sm text-gray-600">{m.description}</p>
+                    </div>
+                  ))}
+                </div>
+              </ReviewAccordion>
+
+              {/* 3. Inconsistencies */}
+              <ReviewAccordion title="Inconsistencies" count={inconsistencies.length}>
+                <div className="space-y-2">
+                  {inconsistencies.length === 0 && <p className="text-sm text-gray-400">No inconsistencies detected.</p>}
+                  {inconsistencies.map((inc, i) => (
+                    <div key={i} className="flex items-start gap-3 rounded-lg border border-gray-100 bg-gray-50 p-3">
+                      <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${RISK_COLORS[inc.severity] ?? "bg-gray-100 text-gray-700"}`}>{inc.severity}</span>
+                      <p className="text-sm text-gray-700">{inc.description}</p>
+                    </div>
+                  ))}
+                </div>
+              </ReviewAccordion>
+
+              {/* 4. State Law Notes */}
+              <ReviewAccordion title="State Law Notes" count={stateLawNotes.length}>
+                <div className="space-y-2">
+                  {stateLawNotes.length === 0 && <p className="text-sm text-gray-400">No state law notes.</p>}
+                  {stateLawNotes.map((n, i) => (
+                    <div key={i} className={`rounded-lg border p-3 ${STATE_LAW_COLORS[n.risk] ?? "bg-gray-50 border-gray-200 text-gray-800"}`}>
+                      <p className="text-xs font-semibold uppercase tracking-wide opacity-70">{n.area}</p>
+                      <p className="mt-1 text-sm">{n.note}</p>
+                    </div>
+                  ))}
+                </div>
+              </ReviewAccordion>
+
+              {/* 5. Readability */}
+              <ReviewAccordion title="Readability Suggestions" count={readabilitySuggestions.length}>
+                <div className="space-y-3">
+                  {readabilitySuggestions.length === 0 && <p className="text-sm text-gray-400">No readability suggestions.</p>}
+                  {readabilitySuggestions.map((r, i) => (
+                    <div key={i} className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+                      <p className="text-xs font-semibold uppercase tracking-wide text-gray-400">{r.section}</p>
+                      <p className="mt-1 text-sm font-medium text-gray-800">{r.issue}</p>
+                      <p className="mt-1 text-sm text-gray-600">{r.suggestion}</p>
+                    </div>
+                  ))}
+                </div>
+              </ReviewAccordion>
+
+              {/* Bottom disclaimer (visible in print) */}
+              <div className="px-6 py-5 text-xs text-gray-400">
+                AI-generated suggestions are informational only and are not legal advice. Please consult a qualified attorney for legal review.
+              </div>
+            </div>
+            );
+          })()}
+        </div>
+
+        {/* Confirm / Discard footer — only shown for pending (not-yet-saved) uploads */}
+        {isPending && !loading && (
+          <div className="shrink-0 border-t border-gray-200 bg-white px-5 py-4 print:hidden">
+            <p className="mb-3 text-sm text-gray-600">
+              Review the findings above. Click <strong>Confirm Upload</strong> to save this template, or <strong>Discard</strong> to cancel.
+            </p>
+            <div className="flex items-center gap-3">
+              <button
+                type="button"
+                onClick={onConfirm}
+                disabled={confirming}
+                className="inline-flex h-9 items-center gap-1.5 rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white transition-colors hover:bg-emerald-700 disabled:opacity-60"
+              >
+                {confirming ? "Saving…" : "Confirm Upload"}
+              </button>
+              <button
+                type="button"
+                onClick={onDiscard}
+                disabled={confirming}
+                className="inline-flex h-9 items-center rounded-lg border border-gray-200 px-4 text-sm font-semibold text-gray-600 transition-colors hover:bg-gray-50 disabled:opacity-60"
+              >
+                Discard
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+function ClauseCard({ clause }: { clause: LeaseReview["clauseSummaries"][number] }) {
+  const [expanded, setExpanded] = useState(false);
+  return (
+    <div className="rounded-lg border border-gray-100 bg-gray-50 p-3">
+      <div className="flex items-start justify-between gap-2">
+        <p className="text-sm font-semibold text-gray-900">{clause.title}</p>
+        <span className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold ${RISK_COLORS[clause.riskLevel]}`}>{clause.riskLevel}</span>
+      </div>
+      <p className="mt-1 text-sm text-gray-600">{clause.summary}</p>
+      {clause.explanation && (
+        <>
+          <button type="button" onClick={() => setExpanded((v) => !v)} className="mt-1.5 text-xs text-emerald-700 hover:underline">
+            {expanded ? "Show less" : "Why this risk level?"}
+          </button>
+          {expanded && <p className="mt-1.5 text-xs text-gray-500">{clause.explanation}</p>}
+        </>
+      )}
+    </div>
+  );
+}
 
 // ─── Unit Card Menu ───────────────────────────────────────────────────────────
 
@@ -256,6 +1081,8 @@ function UnitCard({
   onActivate,
   onDeactivate,
   onOnboardRenter,
+  onSyncSignature,
+  syncingLeaseId,
   savingStatus,
   canManageUnits,
   canInviteRenters,
@@ -266,6 +1093,8 @@ function UnitCard({
   onActivate: (unit: UnitDetails) => void;
   onDeactivate: (unit: UnitDetails) => void;
   onOnboardRenter: (unit: UnitDetails) => void;
+  onSyncSignature: (leaseId: string) => void;
+  syncingLeaseId: string | null;
   savingStatus: boolean;
   canManageUnits: boolean;
   canInviteRenters: boolean;
@@ -387,6 +1216,33 @@ function UnitCard({
         )}
       </div>
 
+      {unit.pendingSignatureLeaseId && (
+        <div className="border-t border-amber-100 bg-amber-50 px-5 py-3" onClick={(e) => e.stopPropagation()}>
+          <div className="flex items-center justify-between gap-3">
+            <div className="flex items-center gap-1.5 text-xs text-amber-700">
+              <svg className="h-3.5 w-3.5 shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <path d="M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z" />
+                <path d="M12 6v6l4 2" />
+              </svg>
+              <span className="font-medium">Awaiting e-signatures</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => onSyncSignature(unit.pendingSignatureLeaseId!)}
+              disabled={syncingLeaseId === unit.pendingSignatureLeaseId}
+              className="inline-flex items-center gap-1 rounded-lg border border-amber-300 bg-white px-2.5 py-1 text-xs font-medium text-amber-700 transition hover:bg-amber-100 disabled:opacity-60"
+            >
+              {syncingLeaseId === unit.pendingSignatureLeaseId ? (
+                <svg className="h-3 w-3 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" aria-hidden><path d="M21 12a9 9 0 1 1-6.219-8.56" /></svg>
+              ) : (
+                <svg className="h-3 w-3" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M21 12a9 9 0 0 1-9 9m9-9a9 9 0 0 0-9-9m9 9H3m9 9a9 9 0 0 1-9-9m9 9c1.657 0 3-4.03 3-9s-1.343-9-3-9m0 18c-1.657 0-3-4.03-3-9s1.343-9 3-9" /></svg>
+              )}
+              Sync
+            </button>
+          </div>
+        </div>
+      )}
+
       {savingStatus && (
         <div className="border-t border-gray-100 px-5 py-2 text-center text-xs text-gray-400">
           Updating...
@@ -400,21 +1256,50 @@ function UnitCard({
 
 export function PropertyDetailsClient({
   initialProperty,
+  canManageProperties = false,
   canManageUnits = false,
   canInviteRenters = false,
 }: {
   initialProperty: PropertyDetails;
+  canManageProperties?: boolean;
   canManageUnits?: boolean;
   canInviteRenters?: boolean;
 }) {
   const router = useRouter();
   const toast = useToast();
   const [property, setProperty] = useState(initialProperty);
+  const [editingProperty, setEditingProperty] = useState(false);
+  const [propertyForm, setPropertyForm] = useState<PropertyFormState>({
+    name: initialProperty.name,
+    type: initialProperty.type,
+    address: initialProperty.address,
+    city: initialProperty.city,
+    state: initialProperty.state,
+    zip: initialProperty.zip,
+    description: initialProperty.description,
+  });
+  const [savingProperty, setSavingProperty] = useState(false);
+  const [propertyError, setPropertyError] = useState<string | null>(null);
+  const [leaseTemplates, setLeaseTemplates] = useState<LeaseTemplate[]>([]);
+  const [templatesLoading, setTemplatesLoading] = useState(false);
+  const [templatesError, setTemplatesError] = useState<string | null>(null);
+  const [uploadingTemplate, setUploadingTemplate] = useState(false);
+  const templateFileRef = useRef<HTMLInputElement>(null);
+  const templateFileDirectRef = useRef<HTMLInputElement>(null);
+
+  const [reviewPanelOpen, setReviewPanelOpen] = useState(false);
+  const [reviewData, setReviewData] = useState<LeaseReview | null>(null);
+  const [reviewLoading, setReviewLoading] = useState(false);
+  const [reviewError, setReviewError] = useState<string | null>(null);
+  const [reviewingTemplateId, setReviewingTemplateId] = useState<string | null>(null);
+  const [pendingUpload, setPendingUpload] = useState<{ blobUrl: string; contentType: string; fileName: string; name: string; review: LeaseReview } | null>(null);
+  const [confirmingUpload, setConfirmingUpload] = useState(false);
 
   // Unit state
   const [unitSearch, setUnitSearch] = useState("");
   const [unitStatusFilter, setUnitStatusFilter] = useState("all");
   const [savingUnitStatusId, setSavingUnitStatusId] = useState<string | null>(null);
+  const [syncingLeaseId, setSyncingLeaseId] = useState<string | null>(null);
 
   // Edit unit modal
   const [editingUnit, setEditingUnit] = useState<UnitDetails | null>(null);
@@ -458,6 +1343,11 @@ export function PropertyDetailsClient({
 
   const addWithAiHref = `/ai-import?propertyId=${property.id}&name=${encodeURIComponent(property.name)}&type=${encodeURIComponent(property.type)}&address=${encodeURIComponent(property.address)}&city=${encodeURIComponent(property.city)}&state=${encodeURIComponent(property.state)}&zip=${encodeURIComponent(property.zip)}`;
 
+  useEffect(() => {
+    if (canManageProperties) void loadLeaseTemplates();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [property.id]);
+
   // ── Handlers ───────────────────────────────────────────────────────────────
 
   function notify(msg: string) {
@@ -476,6 +1366,243 @@ export function PropertyDetailsClient({
     if (form.squareFeet.trim() === "" || Number(form.squareFeet) <= 0) errors.squareFeet = "Sq ft is required.";
     if (form.rentAmount.trim() === "" || Number(form.rentAmount) <= 0) errors.rentAmount = "Monthly rent is required.";
     return errors;
+  }
+
+  function openPropertyEdit() {
+    setPropertyForm({
+      name: property.name,
+      type: property.type,
+      address: property.address,
+      city: property.city,
+      state: property.state,
+      zip: property.zip,
+      description: property.description,
+    });
+    setPropertyError(null);
+    setEditingProperty(true);
+  }
+
+  function setPropertyField(field: keyof PropertyFormState, value: string) {
+    setPropertyForm((form) => ({ ...form, [field]: field === "state" ? value.toUpperCase() : value }));
+  }
+
+  async function loadLeaseTemplates() {
+    setTemplatesLoading(true);
+    setTemplatesError(null);
+    try {
+      const res = await fetch(`/api/properties/${property.id}/lease-templates`);
+      const data = (await res.json()) as { error?: string; templates?: LeaseTemplate[] };
+      if (!res.ok) throw new Error(data.error ?? "Could not load lease templates.");
+      setLeaseTemplates(data.templates ?? []);
+    } catch (err) {
+      setTemplatesError(err instanceof Error ? err.message : "Could not load lease templates.");
+    } finally {
+      setTemplatesLoading(false);
+    }
+  }
+
+  async function preReviewTemplate(file: File) {
+    setUploadingTemplate(true);
+    setTemplatesError(null);
+    setReviewError(null);
+    setReviewData(null);
+    setPendingUpload(null);
+    setReviewLoading(true);
+    setReviewPanelOpen(true);
+    setReviewingTemplateId(null);
+    try {
+      const body = new FormData();
+      body.append("file", file);
+      body.append("name", file.name.replace(/\.[^.]+$/, "") || "Lease template");
+      const res = await fetch(`/api/properties/${property.id}/lease-templates/pre-review`, {
+        method: "POST",
+        body,
+      });
+      const text = await res.text();
+      if (!text) throw new Error("Server returned an empty response. Please try again.");
+      let data: { error?: string; review?: LeaseReview; blobUrl?: string; contentType?: string; fileName?: string; name?: string };
+      try {
+        data = JSON.parse(text) as typeof data;
+      } catch {
+        throw new Error("Unexpected server response. Please try again.");
+      }
+      if (!res.ok) throw new Error(data.error ?? "Could not analyze lease.");
+      setReviewData(data.review as LeaseReview);
+      setPendingUpload({
+        blobUrl: data.blobUrl!,
+        contentType: data.contentType!,
+        fileName: data.fileName!,
+        name: data.name!,
+        review: data.review as LeaseReview,
+      });
+    } catch (err) {
+      setReviewError(err instanceof Error ? err.message : "Could not analyze lease.");
+    } finally {
+      setUploadingTemplate(false);
+      setReviewLoading(false);
+    }
+  }
+
+  async function confirmUpload() {
+    if (!pendingUpload) return;
+    setConfirmingUpload(true);
+    try {
+      const res = await fetch(`/api/properties/${property.id}/lease-templates/confirm`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          blobUrl: pendingUpload.blobUrl,
+          contentType: pendingUpload.contentType,
+          fileName: pendingUpload.fileName,
+          name: pendingUpload.name,
+          reviewData: pendingUpload.review,
+        }),
+      });
+      const data = (await res.json()) as { error?: string; template?: LeaseTemplate };
+      if (!res.ok || !data.template) throw new Error(data.error ?? "Could not save template.");
+      setLeaseTemplates((templates) => [data.template!, ...templates.map((t) => ({ ...t, isActive: false }))]);
+      setReviewingTemplateId(data.template!.id);
+      setPendingUpload(null);
+      setReviewPanelOpen(false);
+      setReviewData(null);
+      notify("Lease template uploaded.");
+    } catch (err) {
+      setTemplatesError(err instanceof Error ? err.message : "Could not save template.");
+    } finally {
+      setConfirmingUpload(false);
+    }
+  }
+
+  function discardUpload() {
+    setPendingUpload(null);
+    setReviewPanelOpen(false);
+    setReviewData(null);
+    setReviewError(null);
+  }
+
+  async function setActiveLeaseTemplate(templateId: string) {
+    setTemplatesError(null);
+    try {
+      const res = await fetch(`/api/properties/${property.id}/lease-templates/${templateId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isActive: true }),
+      });
+      const data = (await res.json()) as { error?: string; template?: LeaseTemplate };
+      if (!res.ok || !data.template) throw new Error(data.error ?? "Could not update template.");
+      setLeaseTemplates((templates) => templates.map((t) => ({ ...t, isActive: t.id === templateId })));
+      notify("Active lease template updated.");
+    } catch (err) {
+      setTemplatesError(err instanceof Error ? err.message : "Could not update template.");
+    }
+  }
+
+  async function deleteLeaseTemplate(templateId: string) {
+    setTemplatesError(null);
+    try {
+      const res = await fetch(`/api/properties/${property.id}/lease-templates/${templateId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({})) as { error?: string };
+        throw new Error(data.error ?? "Could not delete template.");
+      }
+      setLeaseTemplates((templates) => templates.filter((t) => t.id !== templateId));
+      notify("Lease template removed.");
+    } catch (err) {
+      setTemplatesError(err instanceof Error ? err.message : "Could not delete template.");
+    }
+  }
+
+  async function uploadLeaseTemplateDirect(file: File) {
+    setUploadingTemplate(true);
+    setTemplatesError(null);
+    try {
+      const body = new FormData();
+      body.append("file", file);
+      body.append("name", file.name.replace(/\.[^.]+$/, "") || "Lease template");
+      const res = await fetch(`/api/properties/${property.id}/lease-templates`, {
+        method: "POST",
+        body,
+      });
+      const data = (await res.json()) as { error?: string; template?: LeaseTemplate };
+      if (!res.ok || !data.template) throw new Error(data.error ?? "Could not upload template.");
+      setLeaseTemplates((templates) => [data.template!, ...templates.map((t) => ({ ...t, isActive: false }))]);
+      notify("Lease template uploaded.");
+    } catch (err) {
+      setTemplatesError(err instanceof Error ? err.message : "Could not upload template.");
+    } finally {
+      setUploadingTemplate(false);
+    }
+  }
+
+  async function runLeaseReview(templateId: string) {
+    setReviewingTemplateId(templateId);
+    setReviewLoading(true);
+    setReviewError(null);
+    setReviewData(null);
+    setReviewPanelOpen(true);
+    try {
+      const res = await fetch(`/api/properties/${property.id}/lease-templates/${templateId}/review`, { method: "POST" });
+      const text = await res.text();
+      if (!text) throw new Error("Server returned an empty response. Please try again.");
+      let data: { error?: string } & Partial<LeaseReview>;
+      try {
+        data = JSON.parse(text) as typeof data;
+      } catch {
+        throw new Error("Unexpected server response. Please try again.");
+      }
+      if (!res.ok) throw new Error(data.error ?? "Could not analyze lease.");
+      setReviewData(data as LeaseReview);
+    } catch (err) {
+      setReviewError(err instanceof Error ? err.message : "Could not analyze lease.");
+    } finally {
+      setReviewLoading(false);
+    }
+  }
+
+  async function saveProperty(e: React.FormEvent) {
+    e.preventDefault();
+    setPropertyError(null);
+    setSavingProperty(true);
+    try {
+      const res = await fetch(`/api/properties/${property.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(propertyForm),
+      });
+      const data = await res.json() as {
+        error?: string;
+        property?: {
+          id: string;
+          name: string;
+          type: string;
+          address: string;
+          city: string;
+          state: string;
+          zip: string;
+          description: string | null;
+        };
+      };
+      if (!res.ok || !data.property) throw new Error(data.error ?? "Could not update property.");
+      setProperty((current) => ({
+        ...current,
+        name: data.property!.name,
+        type: data.property!.type,
+        address: data.property!.address,
+        city: data.property!.city,
+        state: data.property!.state,
+        zip: data.property!.zip,
+        description: data.property!.description ?? "",
+      }));
+      setEditingProperty(false);
+      notify("Property updated.");
+      router.refresh();
+    } catch (err) {
+      setPropertyError(err instanceof Error ? err.message : "Could not update property.");
+    } finally {
+      setSavingProperty(false);
+    }
   }
 
   function focusFirstUnitError(errors: UnitFieldErrors) {
@@ -543,6 +1670,7 @@ export function PropertyDetailsClient({
         rentAmount: data.unit.rent_amount === null ? null : Number(data.unit.rent_amount),
         status: data.unit.status,
         hasActiveLease: false,
+        pendingSignatureLeaseId: null,
         futurePaymentCount: 0,
         tenant: null,
       };
@@ -599,6 +1727,7 @@ export function PropertyDetailsClient({
         rentAmount: data.unit.rent_amount === null ? null : Number(data.unit.rent_amount),
         status: data.unit.status,
         hasActiveLease: editingUnit.hasActiveLease,
+        pendingSignatureLeaseId: editingUnit.pendingSignatureLeaseId,
         futurePaymentCount: editingUnit.futurePaymentCount,
         tenant: editingUnit?.tenant ?? null,
       };
@@ -619,14 +1748,35 @@ export function PropertyDetailsClient({
     }
   }
 
-  function handleOnboardSuccess(unitId: string) {
+  function handleOnboardSuccess(unitId: string, options?: { pendingSignature?: boolean }) {
     setOnboardedUnitIds((prev) => new Set(prev).add(unitId));
-    setProperty((p) => ({
-      ...p,
-      units: p.units.map((u) => u.id === unitId ? { ...u, status: "occupied" } : u),
-    }));
-    notify("Tenant onboarded successfully.");
+    if (!options?.pendingSignature) {
+      setProperty((p) => ({
+        ...p,
+        units: p.units.map((u) => u.id === unitId ? { ...u, status: "occupied" } : u),
+      }));
+    }
+    notify(options?.pendingSignature ? "Lease sent for e-signature." : "Tenant onboarded successfully.");
     router.refresh();
+  }
+
+  async function syncSignature(leaseId: string) {
+    setSyncingLeaseId(leaseId);
+    try {
+      const res = await fetch(`/api/leases/${leaseId}/signature/sync`, { method: "POST" });
+      const data = await res.json() as { synced?: boolean; status?: string; error?: string };
+      if (!res.ok) throw new Error(data.error ?? "Could not sync signature status.");
+      if (data.status === "completed") {
+        notify("All signatures complete — lease is now active.");
+        router.refresh();
+      } else {
+        notify(`Signature status: ${data.status ?? "pending"}. Not all parties have signed yet.`);
+      }
+    } catch (err) {
+      notify(err instanceof Error ? err.message : "Sync failed.");
+    } finally {
+      setSyncingLeaseId(null);
+    }
   }
 
   async function confirmDeactivateUnit() {
@@ -726,6 +1876,30 @@ export function PropertyDetailsClient({
                   <span>{getPropertyTypeLabel(property.type)}</span>
                 </div>
               </div>
+              {canManageProperties && (
+                <div className="flex items-center gap-2">
+                  <LeaseTemplateButton
+                    propertyId={property.id}
+                    templates={leaseTemplates}
+                    uploading={uploadingTemplate}
+                    onUpload={() => templateFileRef.current?.click()}
+                    onUploadDirect={() => templateFileDirectRef.current?.click()}
+                    onDelete={(id) => void deleteLeaseTemplate(id)}
+                    onReview={() => {
+                      const active = leaseTemplates.find((t) => t.isActive) ?? leaseTemplates[0] ?? null;
+                      if (active) void runLeaseReview(active.id);
+                    }}
+                  />
+                  <button
+                    type="button"
+                    onClick={openPropertyEdit}
+                    className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50"
+                  >
+                    <EditIcon className="h-4 w-4" />
+                    Edit property
+                  </button>
+                </div>
+              )}
             </div>
 
             {/* Stats */}
@@ -752,6 +1926,33 @@ export function PropertyDetailsClient({
           </div>
         </div>
       </div>
+
+      {canManageProperties && (
+        <>
+          <input
+            ref={templateFileRef}
+            type="file"
+            accept=".pdf,.docx,.rtf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/rtf,text/rtf"
+            className="sr-only"
+            onChange={(e) => {
+              const picked = e.target.files?.[0];
+              if (picked) void preReviewTemplate(picked);
+              e.target.value = "";
+            }}
+          />
+          <input
+            ref={templateFileDirectRef}
+            type="file"
+            accept=".pdf,.docx,.rtf,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/rtf,text/rtf"
+            className="sr-only"
+            onChange={(e) => {
+              const picked = e.target.files?.[0];
+              if (picked) void uploadLeaseTemplateDirect(picked);
+              e.target.value = "";
+            }}
+          />
+        </>
+      )}
 
       {/* Apartments section */}
       <div className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm">
@@ -823,6 +2024,8 @@ export function PropertyDetailsClient({
                   onActivate={activateUnit}
                   onDeactivate={(u) => setDeactivatingUnit(u)}
                   onOnboardRenter={(u) => setOnboardingUnitId(u.id)}
+                  onSyncSignature={syncSignature}
+                  syncingLeaseId={syncingLeaseId}
                   savingStatus={savingUnitStatusId === unit.id}
                   canManageUnits={canManageUnits}
                   canInviteRenters={canInviteRenters}
@@ -835,6 +2038,59 @@ export function PropertyDetailsClient({
       </div>
 
       {/* ── Modals ── */}
+
+      {canManageProperties && editingProperty && (
+        <Modal title="Edit property" onClose={() => setEditingProperty(false)} maxWidthClassName="max-w-2xl">
+          <form onSubmit={saveProperty} noValidate className="space-y-5">
+            <section className="space-y-3">
+              <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">Property details</p>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <label className="block space-y-1 text-xs font-medium text-slate-700 sm:col-span-2">
+                  Property name
+                  <input className={modalInputClass} value={propertyForm.name} onChange={(e) => setPropertyField("name", e.target.value)} />
+                </label>
+                <label className="block space-y-1 text-xs font-medium text-slate-700">
+                  Type
+                  <select className={modalInputClass} value={propertyForm.type} onChange={(e) => setPropertyField("type", e.target.value)}>
+                    {PROPERTY_TYPE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </label>
+                <label className="block space-y-1 text-xs font-medium text-slate-700 sm:col-span-2">
+                  Street address
+                  <input className={modalInputClass} value={propertyForm.address} onChange={(e) => setPropertyField("address", e.target.value)} />
+                </label>
+                <label className="block space-y-1 text-xs font-medium text-slate-700">
+                  City
+                  <input className={modalInputClass} value={propertyForm.city} onChange={(e) => setPropertyField("city", e.target.value)} />
+                </label>
+                <div className="grid grid-cols-2 gap-3">
+                  <label className="block space-y-1 text-xs font-medium text-slate-700">
+                    State
+                    <input className={modalInputClass} maxLength={2} value={propertyForm.state} onChange={(e) => setPropertyField("state", e.target.value)} />
+                  </label>
+                  <label className="block space-y-1 text-xs font-medium text-slate-700">
+                    Zip
+                    <input className={modalInputClass} value={propertyForm.zip} onChange={(e) => setPropertyField("zip", e.target.value)} />
+                  </label>
+                </div>
+                <label className="block space-y-1 text-xs font-medium text-slate-700 sm:col-span-2">
+                  Description
+                  <textarea className={`${modalInputClass} resize-none`} rows={3} value={propertyForm.description} onChange={(e) => setPropertyField("description", e.target.value)} />
+                </label>
+              </div>
+            </section>
+
+            {propertyError && <p className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">{propertyError}</p>}
+            <ModalActions
+              onCancel={() => setEditingProperty(false)}
+              submitLabel={savingProperty ? "Saving..." : "Save property"}
+              disabled={savingProperty}
+            />
+          </form>
+        </Modal>
+      )}
 
       {/* Add unit */}
       {canManageUnits && addingUnit && (
@@ -932,11 +2188,31 @@ export function PropertyDetailsClient({
             }))}
           initialUnitId={onboardingUnitId}
           onClose={() => setOnboardingUnitId(null)}
-          onSuccess={(unitId) => {
-            handleOnboardSuccess(unitId);
+          onSuccess={(unitId, options) => {
+            handleOnboardSuccess(unitId, options);
           }}
         />
       )}
+
+      {/* AI Lease Review slide-over */}
+      <LeaseReviewPanel
+        open={reviewPanelOpen}
+        loading={reviewLoading}
+        error={reviewError}
+        data={reviewData}
+        templateName={
+          pendingUpload?.name ??
+          leaseTemplates.find((t) => t.id === reviewingTemplateId)?.name ??
+          leaseTemplates.find((t) => t.isActive)?.name ??
+          "Lease template"
+        }
+        isPending={!!pendingUpload}
+        confirming={confirmingUpload}
+        onClose={() => { if (!pendingUpload) setReviewPanelOpen(false); else discardUpload(); }}
+        onRetry={() => { if (reviewingTemplateId) void runLeaseReview(reviewingTemplateId); }}
+        onConfirm={confirmUpload}
+        onDiscard={discardUpload}
+      />
     </div>
   );
 }
@@ -947,15 +2223,17 @@ function Modal({
   title,
   onClose,
   children,
+  maxWidthClassName = "max-w-lg",
 }: {
   title: string;
   onClose: () => void;
   children: React.ReactNode;
+  maxWidthClassName?: string;
 }) {
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
       <div className="absolute inset-0 bg-black/40" onClick={onClose} />
-      <div className="relative w-full max-w-lg rounded-xl border border-gray-200 bg-white p-6 shadow-2xl">
+      <div className={`relative max-h-[calc(100dvh-2rem)] w-full overflow-y-auto rounded-xl border border-gray-200 bg-white p-6 shadow-2xl ${maxWidthClassName}`}>
         <h3 className="mb-4 text-lg font-semibold text-gray-900">{title}</h3>
         {children}
       </div>
