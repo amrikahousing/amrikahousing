@@ -19,6 +19,7 @@ import { prisma } from "@/lib/db";
 import {
   getOrganizationRentCollectionAccount,
   isEligibleRentCollectionAccount,
+  syncOrganizationStripeConnectedAccountStatus,
 } from "@/lib/organization-payment-destinations";
 import { getOrgPermissionContext } from "@/lib/org-authorization";
 
@@ -179,7 +180,11 @@ function Icon({ name, className = "" }: { name: string; className?: string }) {
 export default async function AccountsPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ year?: string | string[]; range?: string | string[] }>;
+  searchParams?: Promise<{
+    year?: string | string[];
+    range?: string | string[];
+    stripe_onboarding?: string | string[];
+  }>;
 }) {
   const { userId, orgId } = await auth();
   if (!userId) redirect("/login");
@@ -227,7 +232,7 @@ export default async function AccountsPage({
     return date;
   });
 
-  const orgRecord = orgId
+  let orgRecord = orgId
     ? await prisma.organizations.findUnique({
         where: { clerk_org_id: orgId },
         select: {
@@ -238,6 +243,24 @@ export default async function AccountsPage({
         },
       })
     : null;
+
+  if (
+    orgRecord?.stripe_account_id &&
+    resolvedSearchParams.stripe_onboarding === "complete"
+  ) {
+    const organizationId = orgRecord.id;
+    const stripeAccountId = orgRecord.stripe_account_id;
+    try {
+      orgRecord = await syncOrganizationStripeConnectedAccountStatus(organizationId);
+    } catch (error) {
+      console.error("[stripe-onboarding-sync]", {
+        organizationId,
+        stripeAccountId,
+        error,
+      });
+    }
+  }
+
   const stripeNeedsOnboarding = Boolean(
     orgRecord?.stripe_account_id &&
       (!orgRecord.stripe_charges_enabled || !orgRecord.stripe_payouts_enabled),

@@ -379,6 +379,35 @@ export async function createStripeOnboardingLink(
   return { url: accountLink.url };
 }
 
+export async function syncOrganizationStripeConnectedAccountStatus(organizationId: string) {
+  const organization = await prisma.organizations.findUnique({
+    where: { id: organizationId },
+    select: { stripe_account_id: true },
+  });
+
+  if (!organization?.stripe_account_id) {
+    return null;
+  }
+
+  const stripe = getStripeServer();
+  const account = await stripe.accounts.retrieve(organization.stripe_account_id);
+
+  return prisma.organizations.update({
+    where: { id: organizationId },
+    data: {
+      stripe_charges_enabled: account.charges_enabled ?? false,
+      stripe_payouts_enabled: account.payouts_enabled ?? false,
+      updated_at: new Date(),
+    },
+    select: {
+      id: true,
+      stripe_account_id: true,
+      stripe_charges_enabled: true,
+      stripe_payouts_enabled: true,
+    },
+  });
+}
+
 export async function clearOrganizationRentCollectionAccount(organizationId: string) {
   await prisma.organization_payment_destinations.deleteMany({
     where: { organization_id: organizationId },
