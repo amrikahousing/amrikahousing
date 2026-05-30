@@ -7,6 +7,9 @@ const isPublicRoute = createRouteMatcher([
   "/signup(.*)",
   "/onboard(.*)",
   "/api/webhooks(.*)",
+  // Inngest authenticates its own requests via signing keys, not Clerk. It must
+  // be reachable without a session so scheduled functions (e.g. auto-pay) run.
+  "/api/inngest(.*)",
 ]);
 
 // Routes that require an active org (not just authentication)

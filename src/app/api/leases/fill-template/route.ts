@@ -9,6 +9,7 @@ import {
   type ExtractedLeaseSchema,
 } from "@/lib/fill-lease";
 import { getOrgPermissionContext, requirePropertyPermission } from "@/lib/org-authorization";
+import { sanitizeLeasePreviewHtml } from "@/lib/lease-preview-html";
 import { z } from "zod";
 
 const bodySchema = z.object({
@@ -133,7 +134,8 @@ export async function POST(request: NextRequest) {
     }, template.blob_url);
 
     const mammoth = await import("mammoth");
-    const { value: previewHtml } = await mammoth.convertToHtml({ buffer: docxBuffer });
+    const { value: rawPreviewHtml } = await mammoth.convertToHtml({ buffer: docxBuffer });
+    const previewHtml = sanitizeLeasePreviewHtml(rawPreviewHtml);
 
     return Response.json({
       fileBase64: docxBuffer.toString("base64"),

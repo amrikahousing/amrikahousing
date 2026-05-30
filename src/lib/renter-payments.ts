@@ -725,6 +725,275 @@ export async function createPaymentAttempt(
   };
 }
 
+export type AutopayChargeCandidate = {
+  tenantId: string;
+  organizationId: string;
+  sharedUserId: string | null;
+  paymentId: string;
+  paymentMethodId: string;
+  amount: string;
+};
+
+export type AutopayChargeResult = {
+  paymentId: string;
+  outcome: "charged" | "processing" | "failed" | "skipped";
+  paymentIntentId?: string;
+  stripeStatus?: string;
+  failureCode?: string;
+  failureMessage?: string;
+};
+
+function endOfDay(date: Date) {
+  const cutoff = new Date(date);
+  cutoff.setHours(23, 59, 59, 999);
+  return cutoff;
+}
+
+function outcomeFromStripeStatus(status: string): AutopayChargeResult["outcome"] {
+  if (status === "succeeded") return "charged";
+  if (status === "processing") return "processing";
+  return "failed";
+}
+
+/**
+ * Finds rent charges that should be auto-charged: tenants with auto-pay enabled
+ * and a usable default Stripe method, who have pending payments due on or before
+ * `now`. Returns one candidate per (payment, method) so each can be charged and
+ * retried independently.
+ */
+export async function getAutopayChargesDue(now: Date = new Date()): Promise<AutopayChargeCandidate[]> {
+  const dueCutoff = endOfDay(now);
+  const settings = await prisma.renter_payment_settings.findMany({
+    where: {
+      autopay_enabled: true,
+      default_payment_method_id: { not: null },
+    },
+    select: {
+      tenant_id: true,
+      organization_id: true,
+      user_id: true,
+      default_payment_method: {
+        select: {
+          id: true,
+          is_active: true,
+          deleted_at: true,
+          payment_provider: true,
+          stripe_customer_id: true,
+          stripe_payment_method_id: true,
+        },
+      },
+    },
+  });
+
+  const candidates: AutopayChargeCandidate[] = [];
+
+  for (const setting of settings) {
+    const method = setting.default_payment_method;
+    if (
+      !method ||
+      !method.is_active ||
+      method.deleted_at ||
+      method.payment_provider !== "stripe" ||
+      !method.stripe_customer_id ||
+      !method.stripe_payment_method_id
+    ) {
+      continue;
+    }
+
+    const duePayments = await prisma.payments.findMany({
+      where: {
+        tenant_id: setting.tenant_id,
+        status: "pending",
+        due_date: { lte: dueCutoff },
+      },
+      select: { id: true, amount: true },
+      orderBy: { due_date: "asc" },
+    });
+
+    for (const payment of duePayments) {
+      candidates.push({
+        tenantId: setting.tenant_id,
+        organizationId: setting.organization_id,
+        sharedUserId: setting.user_id,
+        paymentId: payment.id,
+        paymentMethodId: method.id,
+        amount: payment.amount.toFixed(2),
+      });
+    }
+  }
+
+  return candidates;
+}
+
+/**
+ * Charges a single due rent payment off-session against the tenant's saved
+ * default Stripe method. Never throws on an expected payment failure (declines,
+ * authentication_required) — it records the attempt and reports the outcome so
+ * one bad charge can't abort the batch. Idempotent per (payment, method).
+ */
+export async function chargeAutopayPayment(
+  candidate: AutopayChargeCandidate,
+): Promise<AutopayChargeResult> {
+  const payment = await prisma.payments.findFirst({
+    where: { id: candidate.paymentId, tenant_id: candidate.tenantId, status: "pending" },
+    select: { id: true, amount: true, currency: true, type: true },
+  });
+  if (!payment) {
+    return { paymentId: candidate.paymentId, outcome: "skipped" };
+  }
+
+  const method = await prisma.renter_payment_methods.findFirst({
+    where: {
+      id: candidate.paymentMethodId,
+      tenant_id: candidate.tenantId,
+      is_active: true,
+      deleted_at: null,
+    },
+    select: {
+      id: true,
+      payment_provider: true,
+      stripe_customer_id: true,
+      stripe_payment_method_id: true,
+      payment_type: true,
+    },
+  });
+  if (
+    !method ||
+    method.payment_provider !== "stripe" ||
+    !method.stripe_customer_id ||
+    !method.stripe_payment_method_id
+  ) {
+    return { paymentId: candidate.paymentId, outcome: "skipped" };
+  }
+
+  const stripe = getStripeServer();
+  const idempotencyKey = `${payment.id}:${method.id}:autopay`;
+
+  const existingAttempt = await prisma.payment_attempts.findUnique({
+    where: { idempotency_key: idempotencyKey },
+    select: { stripe_payment_intent_id: true },
+  });
+  if (existingAttempt?.stripe_payment_intent_id) {
+    const existingIntent = await stripe.paymentIntents.retrieve(existingAttempt.stripe_payment_intent_id);
+    return {
+      paymentId: candidate.paymentId,
+      outcome: outcomeFromStripeStatus(existingIntent.status),
+      paymentIntentId: existingIntent.id,
+      stripeStatus: existingIntent.status,
+    };
+  }
+
+  const processingFee = calculateProcessingFee(payment.amount, method.payment_type);
+  const chargeAmount = roundCurrency(Number(payment.amount.toFixed(2)) + processingFee);
+  const rentDestination = await requireOrganizationStripeRentDestination(candidate.organizationId);
+
+  const baseAttemptData = {
+    payment_id: payment.id,
+    tenant_id: candidate.tenantId,
+    user_id: candidate.sharedUserId,
+    organization_id: candidate.organizationId,
+    renter_payment_method_id: method.id,
+    payment_provider: "stripe",
+    idempotency_key: idempotencyKey,
+    amount: chargeAmount,
+    currency: payment.currency,
+  };
+
+  let paymentIntent: Stripe.PaymentIntent;
+  try {
+    paymentIntent = await stripe.paymentIntents.create(
+      {
+        amount: toStripeAmountInMinorUnits(chargeAmount),
+        currency: payment.currency.toLowerCase(),
+        customer: method.stripe_customer_id,
+        payment_method: method.stripe_payment_method_id,
+        payment_method_types: [method.payment_type === "us_bank_account" ? "us_bank_account" : "card"],
+        confirm: true,
+        off_session: true,
+        description: `${payment.type} payment (auto-pay)`,
+        transfer_data: {
+          destination: rentDestination.stripeAccountId,
+          amount: toStripeAmountInMinorUnits(payment.amount),
+        },
+        metadata: {
+          paymentId: payment.id,
+          tenantId: candidate.tenantId,
+          organizationId: candidate.organizationId,
+          renterPaymentMethodId: method.id,
+          stripeDestinationAccountId: rentDestination.stripeAccountId,
+          rentAmount: payment.amount.toFixed(2),
+          processingFee: processingFee.toFixed(2),
+          totalAmount: chargeAmount.toFixed(2),
+          autopay: "true",
+        },
+      },
+      { idempotencyKey },
+    );
+  } catch (error) {
+    // Off-session failures (card_declined, authentication_required, etc.) reject
+    // with a StripeError that still carries the created PaymentIntent. Record the
+    // failed attempt and report it — don't throw and abort the rest of the batch.
+    const stripeError = error as {
+      code?: string;
+      message?: string;
+      payment_intent?: Stripe.PaymentIntent;
+    };
+    const failedIntent = stripeError.payment_intent;
+    await prisma.payment_attempts.create({
+      data: {
+        ...baseAttemptData,
+        stripe_payment_intent_id: failedIntent?.id ?? null,
+        status: failedIntent?.status ?? "failed",
+        failure_code: stripeError.code ?? null,
+        failure_message: stripeError.message ?? null,
+      },
+    });
+    return {
+      paymentId: candidate.paymentId,
+      outcome: "failed",
+      paymentIntentId: failedIntent?.id,
+      stripeStatus: failedIntent?.status,
+      failureCode: stripeError.code,
+      failureMessage: stripeError.message,
+    };
+  }
+
+  await prisma.payment_attempts.create({
+    data: {
+      ...baseAttemptData,
+      stripe_payment_intent_id: paymentIntent.id,
+      status: paymentIntent.status,
+      failure_code: paymentIntent.last_payment_error?.code ?? null,
+      failure_message: paymentIntent.last_payment_error?.message ?? null,
+    },
+  });
+
+  if (paymentIntent.status === "succeeded") {
+    await markPaymentIntentSucceeded(paymentIntent);
+  }
+
+  return {
+    paymentId: candidate.paymentId,
+    outcome: outcomeFromStripeStatus(paymentIntent.status),
+    paymentIntentId: paymentIntent.id,
+    stripeStatus: paymentIntent.status,
+  };
+}
+
+/**
+ * Charges every currently-due auto-pay rent payment. Thin orchestration over
+ * {@link getAutopayChargesDue} + {@link chargeAutopayPayment}; the scheduled
+ * Inngest function calls these primitives directly for per-payment retries.
+ */
+export async function runDueAutopayCharges(now: Date = new Date()) {
+  const candidates = await getAutopayChargesDue(now);
+  const results: AutopayChargeResult[] = [];
+  for (const candidate of candidates) {
+    results.push(await chargeAutopayPayment(candidate));
+  }
+  return { processed: candidates.length, results };
+}
+
 export async function getVerifiedSetupIntent(
   setupIntentId: string,
   ctx?: Pick<TenantContext, "tenantId" | "organizationId">,
@@ -898,7 +1167,10 @@ async function markPaymentIntentSucceeded(paymentIntent: Stripe.PaymentIntent) {
     });
 
     if (paymentIntent.metadata.paymentId) {
-      await tx.payments.update({
+      // updateMany (not update) so an event for an unknown paymentId — e.g. a
+      // record that was never created or already removed — no-ops instead of
+      // throwing P2025 and bubbling a misleading failure up to the webhook.
+      const updated = await tx.payments.updateMany({
         where: { id: paymentIntent.metadata.paymentId },
         data: {
           status: "paid",
@@ -910,6 +1182,12 @@ async function markPaymentIntentSucceeded(paymentIntent: Stripe.PaymentIntent) {
           updated_at: paidAt,
         },
       });
+
+      if (updated.count === 0) {
+        console.warn(
+          `[stripe-webhook] payment_intent.succeeded ${paymentIntent.id} references unknown paymentId ${paymentIntent.metadata.paymentId}; no payments row updated`,
+        );
+      }
     }
   });
 }
