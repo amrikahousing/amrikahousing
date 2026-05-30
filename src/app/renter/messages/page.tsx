@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { getRenterSupportContact } from "@/lib/renter-portal";
 import { resolveSharedUserIdentity } from "@/lib/renter-auth";
+import { getActiveAutopayFailure } from "@/lib/renter-payments";
 import { MessagesClient } from "./MessagesClient";
 
 export default async function RenterMessagesPage() {
