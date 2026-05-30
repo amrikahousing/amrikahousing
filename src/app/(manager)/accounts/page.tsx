@@ -230,11 +230,17 @@ export default async function AccountsPage({
   const orgRecord = orgId
     ? await prisma.organizations.findUnique({
         where: { clerk_org_id: orgId },
-        select: { id: true, stripe_account_id: true, stripe_charges_enabled: true },
+        select: {
+          id: true,
+          stripe_account_id: true,
+          stripe_charges_enabled: true,
+          stripe_payouts_enabled: true,
+        },
       })
     : null;
   const stripeNeedsOnboarding = Boolean(
-    orgRecord?.stripe_account_id && !orgRecord.stripe_charges_enabled,
+    orgRecord?.stripe_account_id &&
+      (!orgRecord.stripe_charges_enabled || !orgRecord.stripe_payouts_enabled),
   );
   const [accountingData, rentCollectionAccount] =
     orgId && orgRecord

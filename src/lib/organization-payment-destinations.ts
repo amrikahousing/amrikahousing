@@ -1,9 +1,5 @@
 import { getAccountingData } from "@/lib/accounting";
 import { prisma } from "@/lib/db";
-import {
-  createPlaidStripeBankAccountToken,
-  decryptPlaidAccessToken,
-} from "@/lib/plaid";
 import { getStripeServer } from "@/lib/stripe";
 
 const STRIPE_CONNECT_NOT_ENABLED_MESSAGE =
@@ -174,7 +170,7 @@ export async function requireOrganizationStripeRentDestination(organizationId: s
     },
   });
 
-  if (!organization?.stripe_account_id || !destination.stripeExternalAccountId) {
+  if (!organization?.stripe_account_id) {
     throw new Error(
       "This organization has not finished connecting its rent receiving account for online payments.",
     );
@@ -219,7 +215,7 @@ async function ensureOrganizationStripeConnectedAccount(args: {
   const stripe = getStripeServer();
   const account = await stripe.accounts
     .create({
-      type: "custom",
+      type: "express",
       country: "US",
       email: args.email ?? undefined,
       business_profile: {
@@ -256,67 +252,6 @@ async function ensureOrganizationStripeConnectedAccount(args: {
     chargesEnabled: account.charges_enabled ?? false,
     payoutsEnabled: account.payouts_enabled ?? false,
   };
-}
-
-async function attachPlaidAccountToStripeConnectedAccount(args: {
-  stripeAccountId: string;
-  accessToken: string;
-  accountId: string;
-}) {
-  const stripe = getStripeServer();
-
-  // Plaid sandbox generates btok_ tokens on Plaid's own internal Stripe test
-  // account, which cannot be used with any other Stripe account. Use Stripe's
-  // test bank account data directly so the full rent-collection setup flow can
-  // be exercised in development without needing a real processor token.
-  if (process.env.PLAID_ENV === "sandbox") {
-    const externalAccount = await stripe.accounts
-      .createExternalAccount(args.stripeAccountId, {
-        external_account: {
-          object: "bank_account",
-          country: "US",
-          currency: "usd",
-          routing_number: "110000000",
-          account_number: "000123456789",
-          account_holder_name: "Sandbox Test Account",
-          account_holder_type: "individual",
-        } as Parameters<typeof stripe.accounts.createExternalAccount>[1]["external_account"],
-        default_for_currency: true,
-      })
-      .catch((error: unknown) => {
-        throw normalizeStripeRentCollectionError(
-          error,
-          "Stripe could not attach the sandbox test bank account. Check your Stripe Connect setup.",
-        );
-      });
-    return externalAccount.id;
-  }
-
-  const token = await createPlaidStripeBankAccountToken({
-    accessToken: args.accessToken,
-    accountId: args.accountId,
-  });
-
-  if ("error" in token) {
-    throw new Error(token.error);
-  }
-
-  const externalAccount = await stripe.accounts
-    .createExternalAccount(
-      args.stripeAccountId,
-      {
-        external_account: token.bankAccountToken,
-        default_for_currency: true,
-      },
-    )
-    .catch((error: unknown) => {
-      throw normalizeStripeRentCollectionError(
-        error,
-        "Stripe could not attach this bank account for rent collection. Reconnect the account or check your Stripe Connect setup.",
-      );
-    });
-
-  return externalAccount.id;
 }
 
 export async function setOrganizationRentCollectionAccount(args: {
@@ -374,28 +309,10 @@ export async function setOrganizationRentCollectionAccount(args: {
     name: organization.name,
     email: organization.email,
   });
-
-  let resolvedStripeExternalAccountId =
+  const resolvedStripeExternalAccountId =
     existingDestination?.selectedConnectedAccountId === connectedAccount.id
       ? existingDestination.stripeExternalAccountId
       : null;
-
-  if (!resolvedStripeExternalAccountId) {
-    const plaidItem = await prisma.plaid_items.findUnique({
-      where: { id: connectedAccount.plaidItemId },
-      select: { access_token: true },
-    });
-
-    if (!plaidItem?.access_token || !connectedAccount.plaidAccountId) {
-      throw new Error("Reconnect this bank account before using it for online rent payouts.");
-    }
-
-    resolvedStripeExternalAccountId = await attachPlaidAccountToStripeConnectedAccount({
-      stripeAccountId: connectedStripeAccount.stripeAccountId,
-      accessToken: decryptPlaidAccessToken(plaidItem.access_token),
-      accountId: connectedAccount.plaidAccountId,
-    });
-  }
 
   const destination = await prisma.organization_payment_destinations.upsert({
     where: { organization_id: args.organizationId },
@@ -431,7 +348,8 @@ export async function setOrganizationRentCollectionAccount(args: {
     },
   });
 
-  const needsOnboarding = !connectedStripeAccount.chargesEnabled;
+  const needsOnboarding =
+    !connectedStripeAccount.chargesEnabled || !connectedStripeAccount.payoutsEnabled;
 
   return { ...formatDestination(destination), needsOnboarding };
 }

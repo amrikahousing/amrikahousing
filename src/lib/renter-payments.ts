@@ -682,7 +682,6 @@ export async function createPaymentAttempt(
         organizationId: ctx.organizationId,
         renterPaymentMethodId: method.id,
         stripeDestinationAccountId: rentDestination.stripeAccountId,
-        stripeExternalAccountId: rentDestination.stripeExternalAccountId,
         rentAmount: payment.amount.toFixed(2),
         processingFee: processingFee.toFixed(2),
         totalAmount: chargeAmount.toFixed(2),
