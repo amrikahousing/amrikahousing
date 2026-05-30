@@ -30,9 +30,9 @@ function extractStatus(payload: unknown): string | null {
 }
 
 export async function POST(request: Request) {
-  const configuredSecret = process.env.DOCUSEAL_WEBHOOK_SECRET;
+  const configuredSecret = process.env.DOCUSEAL_WEBHOOK_SECRET?.trim();
   const providedSecret = request.headers.get("x-docuseal-webhook-secret");
-  if (configuredSecret && providedSecret !== configuredSecret) {
+  if (!configuredSecret || providedSecret !== configuredSecret) {
     return Response.json({ error: "Invalid webhook secret." }, { status: 401 });
   }
 

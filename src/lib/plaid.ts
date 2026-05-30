@@ -54,6 +54,16 @@ type PlaidStripeBankAccountTokenCreateResponse = {
   request_id: string;
 };
 
+type PlaidWebhookVerificationKeyGetResponse = {
+  key: crypto.JsonWebKey & {
+    alg?: string;
+    created_at?: number;
+    expired_at?: number | null;
+    kid?: string;
+  };
+  request_id: string;
+};
+
 const PLAID_STRIPE_INTEGRATION_NOT_ENABLED_MESSAGE =
   "Plaid's Stripe integration is not enabled for this Plaid app yet. Enable Stripe in the Plaid Dashboard integrations, then reconnect the bank account and try again.";
 
@@ -142,6 +152,88 @@ async function plaidPost<TResponse extends object>(
   }
 
   return { data: body };
+}
+
+const plaidWebhookKeyCache = new Map<string, PlaidWebhookVerificationKeyGetResponse["key"]>();
+
+function base64UrlToBuffer(value: string) {
+  return Buffer.from(value.replaceAll("-", "+").replaceAll("_", "/"), "base64");
+}
+
+function decodeJwtPart(value: string) {
+  return JSON.parse(base64UrlToBuffer(value).toString("utf8")) as Record<string, unknown>;
+}
+
+function timingSafeEqualString(left: string, right: string) {
+  const leftBuffer = Buffer.from(left);
+  const rightBuffer = Buffer.from(right);
+  return leftBuffer.length === rightBuffer.length && crypto.timingSafeEqual(leftBuffer, rightBuffer);
+}
+
+async function getPlaidWebhookVerificationKey(
+  keyId: string,
+): Promise<
+  | { key: PlaidWebhookVerificationKeyGetResponse["key"] }
+  | { error: string; status: number }
+> {
+  const cachedKey = plaidWebhookKeyCache.get(keyId);
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  if (cachedKey && (!cachedKey.expired_at || cachedKey.expired_at > nowSeconds)) {
+    return { key: cachedKey };
+  }
+
+  const result = await plaidPost<PlaidWebhookVerificationKeyGetResponse>(
+    "/webhook_verification_key/get",
+    { key_id: keyId },
+    "Could not fetch Plaid webhook verification key.",
+  );
+  if ("error" in result) {
+    return {
+      error: result.error ?? "Could not fetch Plaid webhook verification key.",
+      status: result.status ?? 500,
+    };
+  }
+
+  plaidWebhookKeyCache.set(keyId, result.data.key);
+  return { key: result.data.key };
+}
+
+export async function verifyPlaidWebhookRequest(rawBody: string, verificationJwt: string | null) {
+  if (!verificationJwt) return false;
+
+  const jwtParts = verificationJwt.split(".");
+  if (jwtParts.length !== 3) return false;
+
+  let header: Record<string, unknown>;
+  let payload: Record<string, unknown>;
+  try {
+    header = decodeJwtPart(jwtParts[0]);
+    payload = decodeJwtPart(jwtParts[1]);
+  } catch {
+    return false;
+  }
+
+  if (header.alg !== "ES256" || typeof header.kid !== "string") return false;
+
+  const keyResult = await getPlaidWebhookVerificationKey(header.kid);
+  if ("error" in keyResult) return false;
+
+  const publicKey = crypto.createPublicKey({ key: keyResult.key, format: "jwk" });
+  const signatureIsValid = crypto.verify(
+    "sha256",
+    Buffer.from(`${jwtParts[0]}.${jwtParts[1]}`),
+    { key: publicKey, dsaEncoding: "ieee-p1363" },
+    base64UrlToBuffer(jwtParts[2]),
+  );
+  if (!signatureIsValid) return false;
+
+  const issuedAt = typeof payload.iat === "number" ? payload.iat : null;
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  if (!issuedAt || nowSeconds - issuedAt > 5 * 60 || issuedAt - nowSeconds > 60) return false;
+
+  if (typeof payload.request_body_sha256 !== "string") return false;
+  const bodyHash = crypto.createHash("sha256").update(rawBody, "utf8").digest("hex");
+  return timingSafeEqualString(bodyHash, payload.request_body_sha256);
 }
 
 export async function createPlaidLinkToken({

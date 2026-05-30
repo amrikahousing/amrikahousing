@@ -12,6 +12,7 @@ import {
   getOrgPermissionContext,
   requirePropertyPermission,
 } from "@/lib/org-authorization";
+import { escapeHtmlText, sanitizeLeasePreviewHtml } from "@/lib/lease-preview-html";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -80,8 +81,9 @@ export async function POST(request: NextRequest, context: RouteContext) {
       ["{{property_manager_email}}", body.propertyManagerEmail ?? ""],
     ];
     for (const [token, value] of substitutions) {
-      if (value) previewHtml = previewHtml.split(token).join(value);
+      if (value) previewHtml = previewHtml.split(token).join(escapeHtmlText(value));
     }
+    previewHtml = sanitizeLeasePreviewHtml(previewHtml);
 
     return Response.json({
       previewHtml,

@@ -6,7 +6,7 @@ export async function requireInternalAdmin() {
   const { userId, redirectToSignIn } = await auth();
 
   if (!userId) {
-    redirectToSignIn({ returnBackUrl: "/internal/provision" });
+    return redirectToSignIn({ returnBackUrl: "/internal/provision" });
   }
 
   const user = await currentUser();
