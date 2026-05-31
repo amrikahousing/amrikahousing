@@ -4,6 +4,8 @@ import { loadStripe, type Stripe } from "@stripe/stripe-js";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { MonthlyRentBreakdown } from "@/components/MonthlyRentBreakdown";
+import type { MonthlyBreakdownRow } from "@/lib/rent-credit";
 
 type PaymentRow = {
   id: string;
@@ -38,6 +40,7 @@ type SavedPaymentMethod = {
 type Props = {
   autopayEnabled: boolean;
   currentBalance: number;
+  monthlyBreakdown: MonthlyBreakdownRow[];
   defaultPaymentMethodId: string | null;
   nextDueDate: string | null;
   paymentMethod: string | null;
@@ -214,6 +217,7 @@ function FeedbackMessage({
 export function PaymentsClient({
   autopayEnabled: initialAutopayEnabled,
   currentBalance,
+  monthlyBreakdown,
   defaultPaymentMethodId,
   nextDueDate,
   paymentMethod,
@@ -680,6 +684,20 @@ export function PaymentsClient({
             </article>
           )}
       </section>
+
+      {monthlyBreakdown.length > 0 && (
+        <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="border-b border-slate-100 p-5">
+            <h2 className="font-semibold text-slate-900">Monthly Breakdown</h2>
+            <p className="mt-1 text-sm text-slate-500">
+              A rent credit is applied to your lease. Here is what you pay each month.
+            </p>
+          </div>
+          <div className="p-5">
+            <MonthlyRentBreakdown rows={monthlyBreakdown} />
+          </div>
+        </section>
+      )}
 
       <section className="rounded-xl border border-slate-200 bg-white shadow-sm">
         <div className="border-b border-slate-100 p-5">

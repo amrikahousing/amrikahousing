@@ -38,6 +38,8 @@ type UnitDetails = {
   rentAmount: number | null;
   status: string;
   hasActiveLease: boolean;
+  activeLeaseId: string | null;
+  hasLeaseDocument: boolean;
   pendingSignatureLeaseId: string | null;
   futurePaymentCount: number;
   tenant: UnitTenant | null;
@@ -142,6 +144,22 @@ function EditIcon({ className = "" }: { className?: string }) {
   return (
     <svg aria-hidden="true" className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
       <path d="m14.5 5.5 4 4" /><path d="M4 20h4l10.5-10.5a2.8 2.8 0 0 0-4-4L4 16v4Z" />
+    </svg>
+  );
+}
+
+function LeaseDocumentIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg aria-hidden="true" className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" /><path d="M14 2v6h6" /><path d="M8 13h8M8 17h8" />
+    </svg>
+  );
+}
+
+function RentCreditIcon({ className = "" }: { className?: string }) {
+  return (
+    <svg aria-hidden="true" className={className} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+      <circle cx="12" cy="12" r="9" /><path d="M14.5 9.5a2.5 2.5 0 0 0-2.5-1.5c-1.4 0-2.5.9-2.5 2s1.1 1.6 2.5 2 2.5.9 2.5 2-1.1 2-2.5 2a2.5 2.5 0 0 1-2.5-1.5M12 6.5v1.5M12 16v1.5" />
     </svg>
   );
 }
@@ -1006,13 +1024,17 @@ function UnitCardMenu({
   onEdit,
   onActivate,
   onDeactivate,
+  onRentCredit,
   canManageUnits,
+  canInviteRenters,
 }: {
   unit: UnitDetails;
   onEdit: (unit: UnitDetails) => void;
   onActivate: (unit: UnitDetails) => void;
   onDeactivate: (unit: UnitDetails) => void;
+  onRentCredit: (unit: UnitDetails) => void;
   canManageUnits: boolean;
+  canInviteRenters: boolean;
 }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -1050,6 +1072,27 @@ function UnitCardMenu({
             <EditIcon className="h-4 w-4" />
             Edit unit
           </button>
+          {unit.activeLeaseId && unit.hasLeaseDocument && (
+            <a
+              href={`/api/leases/${unit.activeLeaseId}/document`}
+              target="_blank"
+              rel="noopener noreferrer"
+              onClick={(e) => { e.stopPropagation(); setOpen(false); }}
+              className="flex w-full items-center gap-2 border-t border-gray-100 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50"
+            >
+              <LeaseDocumentIcon className="h-4 w-4" />
+              View latest lease
+            </a>
+          )}
+          {unit.activeLeaseId && canInviteRenters && (
+            <button
+              onClick={(e) => { e.stopPropagation(); setOpen(false); onRentCredit(unit); }}
+              className="flex w-full items-center gap-2 border-t border-gray-100 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50"
+            >
+              <RentCreditIcon className="h-4 w-4" />
+              Rent credit
+            </button>
+          )}
           {unit.status === "inactive" ? (
             <button
               onClick={(e) => { e.stopPropagation(); setOpen(false); onActivate(unit); }}
@@ -1080,6 +1123,7 @@ function UnitCard({
   onEdit,
   onActivate,
   onDeactivate,
+  onRentCredit,
   onOnboardRenter,
   onSyncSignature,
   syncingLeaseId,
@@ -1092,6 +1136,7 @@ function UnitCard({
   onEdit: (unit: UnitDetails) => void;
   onActivate: (unit: UnitDetails) => void;
   onDeactivate: (unit: UnitDetails) => void;
+  onRentCredit: (unit: UnitDetails) => void;
   onOnboardRenter: (unit: UnitDetails) => void;
   onSyncSignature: (leaseId: string) => void;
   syncingLeaseId: string | null;
@@ -1155,7 +1200,9 @@ function UnitCard({
             onEdit={onEdit}
             onActivate={onActivate}
             onDeactivate={onDeactivate}
+            onRentCredit={onRentCredit}
             canManageUnits={canManageUnits}
+            canInviteRenters={canInviteRenters}
           />
         </div>
       </div>
@@ -1316,6 +1363,9 @@ export function PropertyDetailsClient({
 
   // Deactivate unit confirmation
   const [deactivatingUnit, setDeactivatingUnit] = useState<UnitDetails | null>(null);
+
+  // Rent credit
+  const [rentCreditUnit, setRentCreditUnit] = useState<UnitDetails | null>(null);
 
   // Onboard tenant state
   const [onboardingUnitId, setOnboardingUnitId] = useState<string | null>(null);
@@ -1670,6 +1720,8 @@ export function PropertyDetailsClient({
         rentAmount: data.unit.rent_amount === null ? null : Number(data.unit.rent_amount),
         status: data.unit.status,
         hasActiveLease: false,
+        activeLeaseId: null,
+        hasLeaseDocument: false,
         pendingSignatureLeaseId: null,
         futurePaymentCount: 0,
         tenant: null,
@@ -1727,6 +1779,8 @@ export function PropertyDetailsClient({
         rentAmount: data.unit.rent_amount === null ? null : Number(data.unit.rent_amount),
         status: data.unit.status,
         hasActiveLease: editingUnit.hasActiveLease,
+        activeLeaseId: editingUnit.activeLeaseId,
+        hasLeaseDocument: editingUnit.hasLeaseDocument,
         pendingSignatureLeaseId: editingUnit.pendingSignatureLeaseId,
         futurePaymentCount: editingUnit.futurePaymentCount,
         tenant: editingUnit?.tenant ?? null,
@@ -2023,6 +2077,7 @@ export function PropertyDetailsClient({
                   onEdit={(u) => { setEditingUnit(u); setUnitForm(unitFormFromUnit(u)); setUnitFieldErrors({}); }}
                   onActivate={activateUnit}
                   onDeactivate={(u) => setDeactivatingUnit(u)}
+                  onRentCredit={(u) => setRentCreditUnit(u)}
                   onOnboardRenter={(u) => setOnboardingUnitId(u.id)}
                   onSyncSignature={syncSignature}
                   syncingLeaseId={syncingLeaseId}
@@ -2171,6 +2226,16 @@ export function PropertyDetailsClient({
         </Modal>
       )}
 
+      {/* Rent credit */}
+      {canInviteRenters && rentCreditUnit?.activeLeaseId && (
+        <RentCreditModal
+          leaseId={rentCreditUnit.activeLeaseId}
+          unitNumber={rentCreditUnit.unitNumber}
+          onClose={() => setRentCreditUnit(null)}
+          onApplied={() => router.refresh()}
+        />
+      )}
+
       {/* Onboard tenant wizard */}
       {onboardingUnitId !== null && (
         <OnboardRenterWizard
@@ -2218,6 +2283,258 @@ export function PropertyDetailsClient({
 }
 
 // ─── Shared sub-components ────────────────────────────────────────────────────
+
+// ─── Rent Credit Modal ──────────────────────────────────────────────────────
+
+type RentCreditMonth = {
+  paymentId: string;
+  month: number;
+  dueDate: string | null;
+  currentAmount: number;
+  status: string;
+};
+
+type RentCreditData = {
+  leaseId: string;
+  rentAmount: number;
+  monthlyRentCredit: number;
+  months: RentCreditMonth[];
+};
+
+function rentCreditCurrency(value: number) {
+  return new Intl.NumberFormat("en-US", { style: "currency", currency: "USD", maximumFractionDigits: 0 }).format(value);
+}
+
+function rentCreditMonthLabel(value: string | null) {
+  if (!value) return null;
+  return new Intl.DateTimeFormat("en-US", { month: "short", year: "numeric" }).format(new Date(value));
+}
+
+function RentCreditModal({
+  leaseId,
+  unitNumber,
+  onClose,
+  onApplied,
+}: {
+  leaseId: string;
+  unitNumber: string;
+  onClose: () => void;
+  onApplied: () => void;
+}) {
+  const toast = useToast();
+  const [data, setData] = useState<RentCreditData | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [creditInput, setCreditInput] = useState("");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [saving, setSaving] = useState(false);
+  const [formError, setFormError] = useState<string | null>(null);
+
+  function initSelection(body: RentCreditData) {
+    // Default: every month checked. When a credit is already applied to specific
+    // months, reflect that selection instead so re-editing is accurate.
+    const credited = body.months.filter((m) => m.currentAmount < body.rentAmount).map((m) => m.paymentId);
+    return new Set(credited.length > 0 ? credited : body.months.map((m) => m.paymentId));
+  }
+
+  useEffect(() => {
+    let cancelled = false;
+    setLoadError(null);
+    fetch(`/api/leases/${leaseId}/credit`)
+      .then(async (res) => {
+        const text = await res.text();
+        const body = text ? JSON.parse(text) : {};
+        if (!res.ok) throw new Error(body.error ?? "Could not load the rent schedule.");
+        return body as RentCreditData;
+      })
+      .then((body) => {
+        if (cancelled) return;
+        setData(body);
+        setCreditInput(body.monthlyRentCredit > 0 ? String(body.monthlyRentCredit) : "");
+        setSelectedIds(initSelection(body));
+      })
+      .catch((err) => {
+        if (!cancelled) setLoadError(err instanceof Error ? err.message : "Could not load the rent schedule.");
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [leaseId]);
+
+  const creditValue = creditInput.trim() === "" ? 0 : Number(creditInput);
+  const creditValid = Number.isFinite(creditValue) && creditValue >= 0;
+  const allSelected = !!data && data.months.length > 0 && data.months.every((m) => selectedIds.has(m.paymentId));
+
+  function toggleMonth(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleAll() {
+    if (!data) return;
+    setSelectedIds(allSelected ? new Set() : new Set(data.months.map((m) => m.paymentId)));
+  }
+
+  async function applyCredit(e: React.FormEvent) {
+    e.preventDefault();
+    if (!data) return;
+    if (!creditValid) {
+      setFormError("Enter a valid credit amount.");
+      return;
+    }
+    if (creditValue > data.rentAmount) {
+      setFormError(`Credit cannot exceed the monthly rent of $${data.rentAmount.toFixed(2)}.`);
+      return;
+    }
+    setFormError(null);
+    setSaving(true);
+    try {
+      const res = await fetch(`/api/leases/${leaseId}/credit`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ monthlyRentCredit: creditValue, appliedPaymentIds: [...selectedIds] }),
+      });
+      const text = await res.text();
+      const body = text ? JSON.parse(text) : {};
+      if (!res.ok) throw new Error(body.error ?? "Could not apply the credit.");
+      const next = body as RentCreditData;
+      const appliedCount = next.months.filter((m) => m.currentAmount < next.rentAmount).length;
+      toast.success(
+        appliedCount > 0
+          ? `Rent credit applied to ${appliedCount} month${appliedCount === 1 ? "" : "s"}.`
+          : "Rent credit removed.",
+        { title: "Rent credit" },
+      );
+      onApplied();
+      onClose();
+    } catch (err) {
+      setFormError(err instanceof Error ? err.message : "Could not apply the credit.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const effectiveCredit = creditValid ? creditValue : 0;
+  const totalCredit = data
+    ? data.months.reduce((sum, m) => sum + (selectedIds.has(m.paymentId) ? effectiveCredit : 0), 0)
+    : 0;
+  const totalPays = data
+    ? data.months.reduce((sum, m) => sum + Math.max(0, data.rentAmount - (selectedIds.has(m.paymentId) ? effectiveCredit : 0)), 0)
+    : 0;
+
+  return (
+    <Modal title={`Rent credit — Unit ${unitNumber}`} onClose={onClose} maxWidthClassName="max-w-2xl">
+      {loadError ? (
+        <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{loadError}</p>
+      ) : !data ? (
+        <p className="py-8 text-center text-sm text-slate-500">Loading rent schedule…</p>
+      ) : (
+        <form onSubmit={applyCredit} className="space-y-5">
+          <div className="space-y-3">
+            <label className="block space-y-1 text-xs font-medium text-slate-700">
+              Monthly rent credit
+              <div className="relative max-w-[200px]">
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm text-slate-400">$</span>
+                <input
+                  type="number"
+                  min="0"
+                  max={data.rentAmount}
+                  step="0.01"
+                  inputMode="decimal"
+                  value={creditInput}
+                  onChange={(e) => setCreditInput(e.target.value)}
+                  placeholder="0.00"
+                  className="w-full rounded-lg border border-slate-200 py-2 pl-7 pr-3 text-sm focus:border-emerald-400 focus:outline-none focus:ring-2 focus:ring-emerald-500/20"
+                />
+              </div>
+            </label>
+            <p className="text-xs text-slate-500">
+              Monthly rent is <span className="font-semibold text-slate-700">${data.rentAmount.toLocaleString()}</span>.
+              Check the months the credit should apply to — all months are selected by default. Enter $0 to remove the credit.
+            </p>
+            {formError && <p className="text-xs font-medium text-red-600">{formError}</p>}
+          </div>
+
+          <div className="overflow-hidden rounded-xl border border-slate-200">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+                  <th className="px-3 py-2.5">
+                    <input
+                      type="checkbox"
+                      checked={allSelected}
+                      onChange={toggleAll}
+                      className="h-4 w-4 cursor-pointer rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                      aria-label="Toggle all months"
+                    />
+                  </th>
+                  <th className="px-3 py-2.5">Month</th>
+                  <th className="px-3 py-2.5 text-right">Lease Rent</th>
+                  <th className="px-3 py-2.5 text-right">Credit Applied</th>
+                  <th className="px-3 py-2.5 text-right">Tenant Pays</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {data.months.map((m) => {
+                  const checked = selectedIds.has(m.paymentId);
+                  const credit = checked ? effectiveCredit : 0;
+                  const due = rentCreditMonthLabel(m.dueDate);
+                  return (
+                    <tr key={m.paymentId} className="text-slate-800">
+                      <td className="px-3 py-2.5">
+                        <input
+                          type="checkbox"
+                          checked={checked}
+                          onChange={() => toggleMonth(m.paymentId)}
+                          className="h-4 w-4 cursor-pointer rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                          aria-label={`Apply credit to month ${m.month}`}
+                        />
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <span className="font-medium">Month {m.month}</span>
+                        {due && <span className="ml-2 text-xs text-slate-400">{due}</span>}
+                        {m.status === "paid" && (
+                          <span className="ml-2 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-slate-500">Paid</span>
+                        )}
+                      </td>
+                      <td className="px-3 py-2.5 text-right tabular-nums">{rentCreditCurrency(data.rentAmount)}</td>
+                      <td className="px-3 py-2.5 text-right tabular-nums text-emerald-700">
+                        {credit > 0 ? `-${rentCreditCurrency(credit)}` : "-$0"}
+                      </td>
+                      <td className="px-3 py-2.5 text-right font-semibold tabular-nums">
+                        {rentCreditCurrency(Math.max(0, data.rentAmount - credit))}
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr className="border-t border-slate-200 bg-slate-50 text-slate-900">
+                  <td className="px-3 py-2.5" />
+                  <td className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-slate-500">Total</td>
+                  <td className="px-3 py-2.5" />
+                  <td className="px-3 py-2.5 text-right font-semibold tabular-nums text-emerald-700">
+                    {totalCredit > 0 ? `-${rentCreditCurrency(totalCredit)}` : "-$0"}
+                  </td>
+                  <td className="px-3 py-2.5 text-right font-semibold tabular-nums">{rentCreditCurrency(Math.max(0, totalPays))}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+
+          <ModalActions
+            onCancel={onClose}
+            submitLabel={saving ? "Saving…" : "Save credit"}
+            disabled={saving || !creditValid}
+          />
+        </form>
+      )}
+    </Modal>
+  );
+}
 
 function Modal({
   title,
