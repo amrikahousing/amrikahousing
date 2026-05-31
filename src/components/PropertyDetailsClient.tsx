@@ -1090,7 +1090,7 @@ function UnitCardMenu({
               className="flex w-full items-center gap-2 border-t border-gray-100 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50"
             >
               <RentCreditIcon className="h-4 w-4" />
-              Rent credit
+              Payment plan
             </button>
           )}
           {unit.status === "inactive" ? (
@@ -2226,9 +2226,9 @@ export function PropertyDetailsClient({
         </Modal>
       )}
 
-      {/* Rent credit */}
+      {/* Payment plan */}
       {canInviteRenters && rentCreditUnit?.activeLeaseId && (
-        <RentCreditModal
+        <PaymentPlanModal
           leaseId={rentCreditUnit.activeLeaseId}
           unitNumber={rentCreditUnit.unitNumber}
           onClose={() => setRentCreditUnit(null)}
@@ -2284,7 +2284,7 @@ export function PropertyDetailsClient({
 
 // ─── Shared sub-components ────────────────────────────────────────────────────
 
-// ─── Rent Credit Modal ──────────────────────────────────────────────────────
+// ─── Payment Plan Modal ─────────────────────────────────────────────────────
 
 type RentCreditMonth = {
   paymentId: string;
@@ -2310,7 +2310,18 @@ function rentCreditMonthLabel(value: string | null) {
   return new Intl.DateTimeFormat("en-US", { month: "short", year: "numeric" }).format(new Date(value));
 }
 
-function RentCreditModal({
+function paymentStatusBadge(status: string) {
+  const normalized = status.toLowerCase();
+  if (normalized === "paid" || normalized === "completed") {
+    return { label: "Paid", className: "bg-emerald-100 text-emerald-700" };
+  }
+  if (normalized === "overdue" || normalized === "failed") {
+    return { label: normalized === "failed" ? "Failed" : "Overdue", className: "bg-red-100 text-red-700" };
+  }
+  return { label: "Pending", className: "bg-amber-100 text-amber-700" };
+}
+
+function PaymentPlanModal({
   leaseId,
   unitNumber,
   onClose,
@@ -2426,11 +2437,11 @@ function RentCreditModal({
     : 0;
 
   return (
-    <Modal title={`Rent credit — Unit ${unitNumber}`} onClose={onClose} maxWidthClassName="max-w-2xl">
+    <Modal title={`Payment plan — Unit ${unitNumber}`} onClose={onClose} maxWidthClassName="max-w-2xl">
       {loadError ? (
         <p className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">{loadError}</p>
       ) : !data ? (
-        <p className="py-8 text-center text-sm text-slate-500">Loading rent schedule…</p>
+        <p className="py-8 text-center text-sm text-slate-500">Loading payment plan…</p>
       ) : (
         <form onSubmit={applyCredit} className="space-y-5">
           <div className="space-y-3">
@@ -2472,6 +2483,7 @@ function RentCreditModal({
                     />
                   </th>
                   <th className="px-3 py-2.5">Month</th>
+                  <th className="px-3 py-2.5">Status</th>
                   <th className="px-3 py-2.5 text-right">Lease Rent</th>
                   <th className="px-3 py-2.5 text-right">Credit Applied</th>
                   <th className="px-3 py-2.5 text-right">Tenant Pays</th>
@@ -2482,6 +2494,7 @@ function RentCreditModal({
                   const checked = selectedIds.has(m.paymentId);
                   const credit = checked ? effectiveCredit : 0;
                   const due = rentCreditMonthLabel(m.dueDate);
+                  const badge = paymentStatusBadge(m.status);
                   return (
                     <tr key={m.paymentId} className="text-slate-800">
                       <td className="px-3 py-2.5">
@@ -2496,9 +2509,11 @@ function RentCreditModal({
                       <td className="px-3 py-2.5">
                         <span className="font-medium">Month {m.month}</span>
                         {due && <span className="ml-2 text-xs text-slate-400">{due}</span>}
-                        {m.status === "paid" && (
-                          <span className="ml-2 rounded-full bg-slate-100 px-1.5 py-0.5 text-[10px] font-semibold uppercase text-slate-500">Paid</span>
-                        )}
+                      </td>
+                      <td className="px-3 py-2.5">
+                        <span className={`rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase ${badge.className}`}>
+                          {badge.label}
+                        </span>
                       </td>
                       <td className="px-3 py-2.5 text-right tabular-nums">{rentCreditCurrency(data.rentAmount)}</td>
                       <td className="px-3 py-2.5 text-right tabular-nums text-emerald-700">
@@ -2516,6 +2531,7 @@ function RentCreditModal({
                   <td className="px-3 py-2.5" />
                   <td className="px-3 py-2.5 text-xs font-semibold uppercase tracking-wide text-slate-500">Total</td>
                   <td className="px-3 py-2.5" />
+                  <td className="px-3 py-2.5" />
                   <td className="px-3 py-2.5 text-right font-semibold tabular-nums text-emerald-700">
                     {totalCredit > 0 ? `-${rentCreditCurrency(totalCredit)}` : "-$0"}
                   </td>
@@ -2527,7 +2543,7 @@ function RentCreditModal({
 
           <ModalActions
             onCancel={onClose}
-            submitLabel={saving ? "Saving…" : "Save credit"}
+            submitLabel={saving ? "Saving…" : "Save payment plan"}
             disabled={saving || !creditValid}
           />
         </form>
