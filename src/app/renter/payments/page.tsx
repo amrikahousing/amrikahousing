@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { prisma } from "@/lib/db";
 import { resolveSharedUserIdentity } from "@/lib/renter-auth";
 import { getTenantPaymentProfile } from "@/lib/renter-payments";
+import { buildMonthlyBreakdown } from "@/lib/rent-credit";
 import { PaymentsClient } from "./PaymentsClient";
 
 type SavedPaymentMethodView = {
@@ -193,11 +194,26 @@ export default async function RenterPaymentsPage() {
     ? formatSavedMethodLabel(defaultMethod)
     : allPayments.find((payment) => payment.payment_method)?.payment_method ?? null;
   const nextPending = pendingPayments.find((payment) => payment.due_date) ?? pendingPayments[0] ?? null;
+
+  // Monthly rent breakdown — surfaced only when a credit is in effect on the lease.
+  const leases = tenant?.lease_tenants.map((lt) => lt.leases) ?? [];
+  const breakdownLease =
+    leases.find((lease) => lease.payments.some((p) => p.type === "rent")) ?? leases[0] ?? null;
+  const monthlyBreakdown = breakdownLease
+    ? buildMonthlyBreakdown(
+        Number(breakdownLease.rent_amount),
+        breakdownLease.payments
+          .filter((p) => p.type === "rent")
+          .map((p) => ({ amount: Number(p.amount), dueDate: p.due_date?.toISOString() ?? null })),
+      )
+    : [];
+  const hasRentCredit = monthlyBreakdown.some((row) => row.creditApplied > 0);
   return (
     <PaymentsClient
         currentBalance={totalPending}
         totalPaid={totalPaid}
         autopayEnabled={paymentProfile?.renter_payment_settings?.autopay_enabled ?? false}
+        monthlyBreakdown={hasRentCredit ? monthlyBreakdown : []}
         defaultPaymentMethodId={defaultMethod?.id ?? null}
         paymentMethod={latestMethod}
         nextDueDate={nextPending?.due_date?.toISOString() ?? null}

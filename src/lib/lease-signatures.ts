@@ -2,6 +2,7 @@ import { get, put } from "@vercel/blob";
 import { prisma } from "./db";
 import { getBlobToken } from "./blob-token";
 import { buildRentPaymentDueDates } from "./lease-payments";
+import { computeNetRent } from "./rent-credit";
 import {
   createDocuSealSubmission,
   downloadDocuSealDocument,
@@ -108,6 +109,7 @@ export async function activateLeaseAfterSignature(leaseId: string) {
         start_date: true,
         end_date: true,
         rent_amount: true,
+        monthly_rent_credit: true,
         status: true,
         lease_tenants: {
           select: { tenant_id: true, is_primary: true },
@@ -133,16 +135,23 @@ export async function activateLeaseAfterSignature(leaseId: string) {
     const existingPaymentCount = await tx.payments.count({ where: { lease_id: leaseId } });
     const dueDates = buildRentPaymentDueDates(lease.start_date, lease.end_date);
     if (existingPaymentCount === 0 && primaryTenantId && dueDates.length > 0) {
+      const rent = Number(lease.rent_amount);
+      const credit = Number(lease.monthly_rent_credit ?? 0);
       await tx.payments.createMany({
-        data: dueDates.map((dueDate) => ({
-          lease_id: leaseId,
-          tenant_id: primaryTenantId,
-          amount: lease.rent_amount,
-          type: "rent",
-          status: "pending",
-          due_date: dueDate,
-          notes: "Monthly rent",
-        })),
+        // Month 1 is billed at full rent; the credit applies from month 2 onward.
+        data: dueDates.map((dueDate, index) => {
+          const applyCredit = index > 0 && credit > 0;
+          const amount = applyCredit ? computeNetRent(rent, credit) : rent;
+          return {
+            lease_id: leaseId,
+            tenant_id: primaryTenantId,
+            amount,
+            type: "rent",
+            status: "pending",
+            due_date: dueDate,
+            notes: applyCredit ? `Monthly rent (credit $${credit.toFixed(2)} applied)` : "Monthly rent",
+          };
+        }),
       });
     }
 

@@ -749,10 +749,19 @@ function endOfDay(date: Date) {
   return cutoff;
 }
 
+// How many failed daily attempts before auto-pay gives up on a charge, so a dead
+// or repeatedly-declined card isn't hammered forever (the tenant is notified and
+// can pay manually / update their method).
+const AUTOPAY_MAX_ATTEMPTS = 4;
+
 function outcomeFromStripeStatus(status: string): AutopayChargeResult["outcome"] {
   if (status === "succeeded") return "charged";
   if (status === "processing") return "processing";
   return "failed";
+}
+
+function isFailedAttemptStatus(status: string) {
+  return !["succeeded", "processing"].includes(status);
 }
 
 /**
@@ -867,19 +876,64 @@ export async function chargeAutopayPayment(
   }
 
   const stripe = getStripeServer();
-  const idempotencyKey = `${payment.id}:${method.id}:autopay`;
 
-  const existingAttempt = await prisma.payment_attempts.findUnique({
-    where: { idempotency_key: idempotencyKey },
-    select: { stripe_payment_intent_id: true },
+  // Retry across daily cron runs, but stay idempotent within a run: the key is
+  // scoped to the calendar day (UTC), so a prior day's failure gets a fresh
+  // attempt while a same-day rerun returns the existing attempt instead of
+  // double-charging.
+  const dateKey = new Date().toISOString().slice(0, 10);
+  const idempotencyKey = `${payment.id}:${method.id}:autopay:${dateKey}`;
+  const autopayKeyPrefix = `${payment.id}:${method.id}:autopay`;
+
+  const priorAttempts = await prisma.payment_attempts.findMany({
+    where: {
+      payment_id: payment.id,
+      renter_payment_method_id: method.id,
+      idempotency_key: { startsWith: autopayKeyPrefix },
+    },
+    select: { status: true, idempotency_key: true, stripe_payment_intent_id: true },
   });
-  if (existingAttempt?.stripe_payment_intent_id) {
-    const existingIntent = await stripe.paymentIntents.retrieve(existingAttempt.stripe_payment_intent_id);
+
+  // Already settled or in-flight (e.g. an ACH debit still processing) — never
+  // re-charge.
+  const inFlight = priorAttempts.find(
+    (attempt) => attempt.status === "succeeded" || attempt.status === "processing",
+  );
+  if (inFlight?.stripe_payment_intent_id) {
+    const intent = await stripe.paymentIntents.retrieve(inFlight.stripe_payment_intent_id);
     return {
       paymentId: candidate.paymentId,
-      outcome: outcomeFromStripeStatus(existingIntent.status),
-      paymentIntentId: existingIntent.id,
-      stripeStatus: existingIntent.status,
+      outcome: outcomeFromStripeStatus(intent.status),
+      paymentIntentId: intent.id,
+      stripeStatus: intent.status,
+    };
+  }
+
+  // Already attempted today (success, processing, or failure) — return it rather
+  // than charging twice in one day.
+  const todayAttempt = priorAttempts.find((attempt) => attempt.idempotency_key === idempotencyKey);
+  if (todayAttempt) {
+    const stripeStatus = todayAttempt.stripe_payment_intent_id
+      ? (await stripe.paymentIntents.retrieve(todayAttempt.stripe_payment_intent_id)).status
+      : todayAttempt.status;
+    return {
+      paymentId: candidate.paymentId,
+      outcome: outcomeFromStripeStatus(stripeStatus),
+      paymentIntentId: todayAttempt.stripe_payment_intent_id ?? undefined,
+      stripeStatus,
+    };
+  }
+
+  // Give up after too many failed days so a dead card isn't charged forever.
+  const failedAttempts = priorAttempts.filter((attempt) =>
+    isFailedAttemptStatus(attempt.status),
+  ).length;
+  if (failedAttempts >= AUTOPAY_MAX_ATTEMPTS) {
+    return {
+      paymentId: candidate.paymentId,
+      outcome: "skipped",
+      failureCode: "max_attempts_reached",
+      failureMessage: `Auto-pay stopped after ${AUTOPAY_MAX_ATTEMPTS} failed attempts.`,
     };
   }
 
@@ -992,6 +1046,28 @@ export async function runDueAutopayCharges(now: Date = new Date()) {
     results.push(await chargeAutopayPayment(candidate));
   }
   return { processed: candidates.length, results };
+}
+
+/**
+ * Returns the most recent failed auto-pay attempt for a tenant whose charge is
+ * still unpaid, or null. Used to notify the tenant in-app that auto-pay couldn't
+ * collect rent so they can update their method or pay manually.
+ */
+export async function getActiveAutopayFailure(tenantId: string) {
+  return prisma.payment_attempts.findFirst({
+    where: {
+      tenant_id: tenantId,
+      idempotency_key: { contains: ":autopay" },
+      status: { notIn: ["succeeded", "processing"] },
+      payments: { status: "pending" },
+    },
+    orderBy: { created_at: "desc" },
+    select: {
+      created_at: true,
+      failure_message: true,
+      payments: { select: { amount: true, due_date: true } },
+    },
+  });
 }
 
 export async function getVerifiedSetupIntent(

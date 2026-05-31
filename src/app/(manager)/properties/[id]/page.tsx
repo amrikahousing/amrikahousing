@@ -114,6 +114,8 @@ export default async function PropertyDetailsPage({
         rentAmount: unit.rent_amount === null ? null : Number(unit.rent_amount),
         status: unit.status,
         hasActiveLease: unit.leases?.status === "active",
+        activeLeaseId: unit.leases?.status === "active" ? unit.leases.id : null,
+        hasLeaseDocument: unit.leases?.status === "active" && Boolean(unit.leases.document_url),
         pendingSignatureLeaseId: unit.leases?.status === "pending_signature" ? unit.leases.id : null,
         futurePaymentCount: unit.leases?.payments.length ?? 0,
         tenant: primaryTenant

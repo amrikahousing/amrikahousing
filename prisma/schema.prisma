@@ -27,10 +27,11 @@ model leases {
   unit_id          String         @unique(map: "idx_leases_one_active_per_unit", where: raw("(status = 'active'::text)")) @db.Uuid
   start_date       DateTime       @db.Date
   end_date         DateTime?      @db.Date
-  rent_amount      Decimal        @db.Decimal(10, 2)
-  security_deposit Decimal?       @db.Decimal(10, 2)
-  status           String         @default("active")
-  document_url     String?
+  rent_amount         Decimal        @db.Decimal(10, 2)
+  security_deposit    Decimal?       @db.Decimal(10, 2)
+  monthly_rent_credit Decimal?       @db.Decimal(10, 2)
+  status              String         @default("active")
+  document_url        String?
   created_at       DateTime       @default(now()) @db.Timestamptz(6)
   updated_at       DateTime       @default(now()) @db.Timestamptz(6)
   deleted_at       DateTime?      @db.Timestamptz(6)

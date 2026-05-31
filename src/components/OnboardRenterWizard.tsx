@@ -861,6 +861,7 @@ export function OnboardRenterWizard({
         title: "Generate lease for e-sign",
         text: "Enter tenant details, choose a property template, and send the lease through DocuSeal.",
         icon: <SparklesIcon className="h-5 w-5" />,
+        disabled: true,
       },
     ];
 
@@ -884,11 +885,14 @@ export function OnboardRenterWizard({
         <div className="grid gap-3 md:grid-cols-2">
           {pathCards.map((card) => {
             const selected = leaseMode === card.id;
+            const disabled = Boolean(card.disabled);
             return (
               <button
                 key={card.id}
                 type="button"
+                disabled={disabled}
                 onClick={() => {
+                  if (disabled) return;
                   setLeaseMode(card.id);
                   if (card.id === "generate") {
                     setFile(null);
@@ -906,13 +910,23 @@ export function OnboardRenterWizard({
                 }}
                 className={[
                   "min-h-[148px] rounded-xl border-2 p-4 text-left transition",
+                  disabled ? "cursor-not-allowed opacity-60" : "",
                   selected
                     ? "border-emerald-500 bg-emerald-50 shadow-sm ring-2 ring-emerald-100"
-                    : "border-slate-200 bg-white hover:border-emerald-300",
+                    : disabled
+                      ? "border-slate-200 bg-slate-50"
+                      : "border-slate-200 bg-white hover:border-emerald-300",
                 ].join(" ")}
               >
-                <div className={["mb-3 flex h-10 w-10 items-center justify-center rounded-lg", selected ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-500"].join(" ")}>
-                  {card.icon}
+                <div className="mb-3 flex items-start justify-between gap-3">
+                  <div className={["flex h-10 w-10 items-center justify-center rounded-lg", selected ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-500"].join(" ")}>
+                    {card.icon}
+                  </div>
+                  {disabled && (
+                    <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-500">
+                      Coming soon
+                    </span>
+                  )}
                 </div>
                 <p className="font-semibold text-slate-900">{card.title}</p>
                 <p className="mt-1 text-sm leading-5 text-slate-500">{card.text}</p>
@@ -1105,46 +1119,50 @@ export function OnboardRenterWizard({
 
     return (
       <div className="space-y-4">
-        {/* Mismatch warning */}
-        {leaseValidationBlocked && (
-          <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2">
-            <div className="flex items-start gap-2.5">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 h-4 w-4 shrink-0 text-red-600" aria-hidden>
-                <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
-                <line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
-              </svg>
-              <div className="text-xs text-red-800">
-                <p className="font-semibold">Lease document can&apos;t be used for this unit</p>
-                {missingExtractedAddress && <p className="mt-1">The lease address could not be read. Upload a clearer document before continuing.</p>}
-                {addressMismatch && <p className="mt-1">Address on lease: <span className="font-medium">{extractedAddress}</span> · Expected: <span className="font-medium">{propertyAddress}</span></p>}
-                {missingExtractedUnit && <p className="mt-1">The lease unit number could not be read. Upload a clearer document before continuing.</p>}
-                {unitMismatch && <p className="mt-1">Unit on lease: <span className="font-medium">{extractedUnitNumber}</span> · Expected: <span className="font-medium">Unit {selectedUnit?.unitNumber}</span></p>}
-                <p className="mt-1 text-red-700">{canSkipLeaseValidation ? "Non-production override available below." : "Upload a matching lease to continue."}</p>
+        {(leaseValidationBlocked || canSkipLeaseValidation || (leaseMode === "generate" && (!templatesLoading && templates.length === 0 || templateError))) && (
+          <div className="sticky top-0 z-10 -mx-4 space-y-3 border-b border-slate-100 bg-white/95 px-4 pb-4 pt-0 backdrop-blur sm:-mx-6 sm:px-6">
+            {/* Mismatch warning */}
+            {leaseValidationBlocked && (
+              <div role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 shadow-sm">
+                <div className="flex items-start gap-2.5">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="mt-0.5 h-4 w-4 shrink-0 text-red-600" aria-hidden>
+                    <path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+                    <line x1="12" y1="9" x2="12" y2="13" /><line x1="12" y1="17" x2="12.01" y2="17" />
+                  </svg>
+                  <div className="text-xs text-red-800">
+                    <p className="font-semibold">Lease document can&apos;t be used for this unit</p>
+                    {missingExtractedAddress && <p className="mt-1">The lease address could not be read. Upload a clearer document before continuing.</p>}
+                    {addressMismatch && <p className="mt-1">Address on lease: <span className="font-medium">{extractedAddress}</span> · Expected: <span className="font-medium">{propertyAddress}</span></p>}
+                    {missingExtractedUnit && <p className="mt-1">The lease unit number could not be read. Upload a clearer document before continuing.</p>}
+                    {unitMismatch && <p className="mt-1">Unit on lease: <span className="font-medium">{extractedUnitNumber}</span> · Expected: <span className="font-medium">Unit {selectedUnit?.unitNumber}</span></p>}
+                    <p className="mt-1 text-red-700">{canSkipLeaseValidation ? "Non-production override available below." : "Upload a matching lease to continue."}</p>
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
-        )}
-        {canSkipLeaseValidation && (
-          <label className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
-            <input type="checkbox" checked={skipLeaseMismatchValidation} onChange={(e) => setLeaseMismatchOverride(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-amber-300 text-amber-600 focus:ring-amber-500" />
-            <span>
-              <span className="font-semibold">Skip lease mismatch validation</span>
-              <span className="block text-amber-700">
-                Non-production testing only. Checking this will replace the primary tenant fields with your signed-in account info. Uncheck to restore the extracted values.
-              </span>
-            </span>
-          </label>
-        )}
+            )}
+            {canSkipLeaseValidation && (
+              <label className="flex items-start gap-2.5 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 shadow-sm">
+                <input type="checkbox" checked={skipLeaseMismatchValidation} onChange={(e) => setLeaseMismatchOverride(e.target.checked)} className="mt-0.5 h-4 w-4 rounded border-amber-300 text-amber-600 focus:ring-amber-500" />
+                <span>
+                  <span className="font-semibold">Skip lease mismatch validation</span>
+                  <span className="block text-amber-700">
+                    Non-production testing only. Checking this will replace the primary tenant fields with your signed-in account info. Uncheck to restore the extracted values.
+                  </span>
+                </span>
+              </label>
+            )}
 
-        {leaseMode === "generate" && !templatesLoading && templates.length === 0 && (
-          <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
-            No lease template uploaded for this property yet. Add one from the property edit screen before sending an e-sign lease.
-          </p>
-        )}
-        {leaseMode === "generate" && templateError && (
-          <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
-            {templateError}
-          </p>
+            {leaseMode === "generate" && !templatesLoading && templates.length === 0 && (
+              <p className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800 shadow-sm">
+                No lease template uploaded for this property yet. Add one from the property edit screen before sending an e-sign lease.
+              </p>
+            )}
+            {leaseMode === "generate" && templateError && (
+              <p role="alert" className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700 shadow-sm">
+                {templateError}
+              </p>
+            )}
+          </div>
         )}
 
         {/* ── Side-by-side: Primary tenant | Co-tenants ── */}
