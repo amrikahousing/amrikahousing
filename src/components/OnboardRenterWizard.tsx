@@ -861,6 +861,7 @@ export function OnboardRenterWizard({
         title: "Generate lease for e-sign",
         text: "Enter tenant details, choose a property template, and send the lease through DocuSeal.",
         icon: <SparklesIcon className="h-5 w-5" />,
+        disabled: true,
       },
     ];
 
@@ -884,11 +885,14 @@ export function OnboardRenterWizard({
         <div className="grid gap-3 md:grid-cols-2">
           {pathCards.map((card) => {
             const selected = leaseMode === card.id;
+            const disabled = Boolean(card.disabled);
             return (
               <button
                 key={card.id}
                 type="button"
+                disabled={disabled}
                 onClick={() => {
+                  if (disabled) return;
                   setLeaseMode(card.id);
                   if (card.id === "generate") {
                     setFile(null);
@@ -906,13 +910,23 @@ export function OnboardRenterWizard({
                 }}
                 className={[
                   "min-h-[148px] rounded-xl border-2 p-4 text-left transition",
+                  disabled ? "cursor-not-allowed opacity-60" : "",
                   selected
                     ? "border-emerald-500 bg-emerald-50 shadow-sm ring-2 ring-emerald-100"
-                    : "border-slate-200 bg-white hover:border-emerald-300",
+                    : disabled
+                      ? "border-slate-200 bg-slate-50"
+                      : "border-slate-200 bg-white hover:border-emerald-300",
                 ].join(" ")}
               >
-                <div className={["mb-3 flex h-10 w-10 items-center justify-center rounded-lg", selected ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-500"].join(" ")}>
-                  {card.icon}
+                <div className="mb-3 flex items-start justify-between gap-3">
+                  <div className={["flex h-10 w-10 items-center justify-center rounded-lg", selected ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-500"].join(" ")}>
+                    {card.icon}
+                  </div>
+                  {disabled && (
+                    <span className="rounded-full border border-slate-200 bg-white px-2 py-0.5 text-xs font-semibold text-slate-500">
+                      Coming soon
+                    </span>
+                  )}
                 </div>
                 <p className="font-semibold text-slate-900">{card.title}</p>
                 <p className="mt-1 text-sm leading-5 text-slate-500">{card.text}</p>
