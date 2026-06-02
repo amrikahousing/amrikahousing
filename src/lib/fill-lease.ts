@@ -353,12 +353,29 @@ function buildReplacementMap(data: LeaseData): Record<string, string> {
 
 // ─── Extraction helpers ───────────────────────────────────────────────────────
 
+function sanitizeJsonControlChars(json: string): string {
+  // Replace literal control characters inside JSON string literals.
+  // The AI sometimes embeds raw tabs/newlines from the lease document directly in
+  // the "search" value (e.g. "(\t)(\t)"), which makes JSON.parse throw
+  // "Bad control character in string literal".
+  return json.replace(/"(?:[^"\\]|\\.)*"/g, (match) =>
+    match
+      .replace(/\t/g, "\\t")
+      .replace(/\r\n/g, "\\n")
+      .replace(/\r/g, "\\n")
+      .replace(/\n/g, "\\n")
+      .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, (c) =>
+        `\\u${c.charCodeAt(0).toString(16).padStart(4, "0")}`
+      )
+  );
+}
+
 function parseSubstitutionPairs(raw: string): Array<{ search: string; token: string }> {
   let parsed: unknown;
   try {
     const match = raw.match(/\[[\s\S]*\]/);
     if (!match) throw new Error("no JSON array found");
-    parsed = JSON.parse(match[0]);
+    parsed = JSON.parse(sanitizeJsonControlChars(match[0]));
   } catch (e) {
     console.error("[fill-lease] raw AI response:", raw.slice(0, 500));
     throw new Error(`Could not parse substitution pairs from AI response: ${e instanceof Error ? e.message : String(e)}`);
@@ -381,10 +398,80 @@ function parseSubstitutionPairs(raw: string): Array<{ search: string; token: str
         if (seenSearch.has(p.search)) return [];
         seenSearch.add(p.search);
       }
+      // Reject pairs where search contains XML characters (vision-text contamination)
+      if ((p.search as string).includes("<") || (p.search as string).includes(">")) return [];
       return [{ search: p.search, token: p.token }];
     }
     return [];
   });
+}
+
+/**
+ * Scans the mammoth-extracted text for standalone "INITIALS:" / "Initials:" lines
+ * and guarantees that Tenant 1 + Tenant 2 initial pairs exist for every slot.
+ *
+ * WHY THIS EXISTS:
+ * The AI sometimes outputs tab characters as spaces in its JSON, so search strings
+ * like "(  )" (space) miss the actual XML content "(	)" (tab).  This function
+ * reads the EXACT bytes from the mammoth text — preserving real tabs — and injects
+ * the correct pairs deterministically, regardless of what the AI produced.
+ *
+ * It strips any AI-generated T1/T2 initials pairs (which use generic blank searches
+ * that can fire on unrelated blanks) and replaces them with full-line specific pairs
+ * that only match INITIALS: lines.
+ */
+function ensureInitialsPairs(
+  text: string,
+  pairs: Array<{ search: string; token: string }>,
+): Array<{ search: string; token: string }> {
+  const T1 = "{{Initial;type=initials;role=Tenant 1}}";
+  const T2 = "{{Initial;type=initials;role=Tenant 2}}";
+
+  // Strip any AI-generated initials pairs — they use generic blank searches that may
+  // fire on unrelated blanks elsewhere in the doc. Replace with full-line specific pairs.
+  const result = pairs.filter((p) => p.token !== T1 && p.token !== T2);
+  const seenSearch = new Set(result.map((p) => p.search));
+
+  // Match every "INITIALS:" or "Initials:" line; use the FULL line as the search string
+  // so the replacement only lands on INITIALS: lines, never on generic blanks.
+  const lineRe = /^[ \t]*(?:INITIALS|Initials)\s*:[ \t]*(.+)$/gm;
+  let m: RegExpExecArray | null;
+  while ((m = lineRe.exec(text)) !== null) {
+    // trimStart: strip any leading indent chars that paragraph style may not include in runs
+    const fullLine = m[0].trimStart();
+    const after = m[1];
+
+    const slots: string[] = [];
+    const slotRe = /\([^)]*\)/g;
+    let sm: RegExpExecArray | null;
+    while ((sm = slotRe.exec(after)) !== null) {
+      slots.push(sm[0]);
+    }
+    if (slots.length === 0) continue;
+    // Skip lines contaminated with XML-like content (e.g. from vision model transcribing DOCX artifacts)
+    if (fullLine.includes("<") || fullLine.includes(">")) continue;
+    if (seenSearch.has(fullLine)) continue;
+
+    const slot1 = slots[0];
+    // Build the token value by surgically replacing slot1→T1 and slot2→T2 within fullLine
+    let tokenValue = fullLine;
+    const idx1 = tokenValue.indexOf(slot1);
+    if (idx1 !== -1) {
+      tokenValue = tokenValue.slice(0, idx1) + T1 + tokenValue.slice(idx1 + slot1.length);
+      if (slots.length >= 2) {
+        const slot2 = slots[1];
+        const idx2 = tokenValue.indexOf(slot2, idx1 + T1.length);
+        if (idx2 !== -1) {
+          tokenValue = tokenValue.slice(0, idx2) + T2 + tokenValue.slice(idx2 + slot2.length);
+        }
+      }
+    }
+
+    result.push({ search: fullLine, token: tokenValue });
+    seenSearch.add(fullLine);
+  }
+
+  return result;
 }
 
 const HEADING_RE = /^\s*(?:\d+[\.\)]\s+)?([A-Z][A-Z0-9 ,\/&'\-]{3,}[A-Z0-9])\s*\.?\s*$/;
@@ -439,8 +526,16 @@ function collectRuns(body: string): RunInfo[] {
   const pat = /<w:r\b[\s\S]*?<\/w:r>/g;
   let m: RegExpExecArray | null;
   while ((m = pat.exec(body)) !== null) {
-    const text = [...(m[0].matchAll(/<w:t[^>]*>([\s\S]*?)<\/w:t>/g))].map((t) => t[1]).join("");
-    runs.push({ fullMatch: m[0], text, start: m.index });
+    const runXml = m[0];
+    // Mirror mammoth: <w:t> contributes its text, <w:tab/> contributes "\t".
+    // This ensures AI search strings (derived from mammoth output) match here.
+    let text = "";
+    const innerPat = /<w:t[^>]*>([\s\S]*?)<\/w:t>|<w:tab\s*\/>/g;
+    let inner: RegExpExecArray | null;
+    while ((inner = innerPat.exec(runXml)) !== null) {
+      text += inner[0].startsWith("<w:tab") ? "\t" : (inner[1] ?? "");
+    }
+    runs.push({ fullMatch: runXml, text, start: m.index });
   }
   return runs;
 }
@@ -455,10 +550,9 @@ function extractRpr(runXml: string): string {
 }
 
 function withNewText(runXml: string, newText: string): string {
-  return runXml.replace(
-    /<w:t[^>]*>[\s\S]*?<\/w:t>/,
-    `<w:t xml:space="preserve">${xmlEscape(newText)}</w:t>`,
-  );
+  // Rebuild as a single clean text node, stripping any <w:tab/> and extra <w:t> elements.
+  const rPr = extractRpr(runXml);
+  return `<w:r>${rPr}<w:t xml:space="preserve">${xmlEscape(newText)}</w:t></w:r>`;
 }
 
 function replaceParagraphBody(body: string, search: string, value: string): string {
@@ -500,13 +594,44 @@ function replaceParagraphBody(body: string, search: string, value: string): stri
 }
 
 function applyReplacementsToXml(xml: string, replacements: Array<{ search: string; value: string }>): string {
+  // Group by search string (preserve insertion order).
+  // • Single-entry searches → replace every occurrence (correct for repeated data values).
+  // • Multi-entry searches (e.g. same blank "____" mapped to Tenant 1 / Tenant 2 / Manager
+  //   signature or initials anchors) → assign each entry to the NEXT occurrence in document
+  //   order, one per occurrence, so anchors land in the correct slots.
+  const groups = new Map<string, string[]>();
+  for (const { search, value } of replacements) {
+    if (!search) continue;
+    const g = groups.get(search);
+    if (g) g.push(value);
+    else groups.set(search, [value]);
+  }
+
+  const consumed = new Map<string, number>();
+  const xmlEscapeSearch = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+
   return xml.replace(/(<w:p\b(?:[^>]*)>)([\s\S]*?)(<\/w:p>)/g, (_, open, body: string, close) => {
     let newBody = body;
-    for (const { search, value } of replacements) {
-      if (!search) continue;
-      newBody = replaceParagraphBody(newBody, search, value);
-      const xmlSearch = search.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-      if (xmlSearch !== search) newBody = replaceParagraphBody(newBody, xmlSearch, value);
+    for (const [search, values] of groups) {
+      const xmlSearch = xmlEscapeSearch(search);
+      if (values.length === 1) {
+        newBody = replaceParagraphBody(newBody, search, values[0]);
+        if (xmlSearch !== search) newBody = replaceParagraphBody(newBody, xmlSearch, values[0]);
+        continue;
+      }
+      // Multi-entry: consume successive occurrences in this paragraph, advancing the cursor.
+      let idx = consumed.get(search) ?? 0;
+      while (idx < values.length) {
+        const before = newBody;
+        newBody = replaceParagraphBody(newBody, search, values[idx]);
+        if (newBody === before && xmlSearch !== search) {
+          newBody = replaceParagraphBody(newBody, xmlSearch, values[idx]);
+        }
+        if (newBody === before) break; // no more occurrences in this paragraph
+        idx++;
+      }
+      consumed.set(search, idx);
     }
     return open + newBody + close;
   });
@@ -789,7 +914,10 @@ export async function extractLeaseSchema(blobUrl: string): Promise<ExtractedLeas
     messages: [{ role: "user", content: `Find all blanks and placeholders in this lease template:\n\n${fullText}` }],
   });
   console.log("[fill-lease] raw pairs response:", pairsRaw.slice(0, 300));
-  const pairs = parseSubstitutionPairs(pairsRaw);
+  // Parse AI output, then guarantee every INITIALS block has correct Tenant 1 + Tenant 2 pairs.
+  // The AI sometimes normalises tabs to spaces in its JSON, so we read exact bytes from fullText.
+  const pairs = ensureInitialsPairs(fullText, parseSubstitutionPairs(pairsRaw));
+  console.log("[fill-lease] pairs after ensureInitialsPairs:", pairs.filter(p => p.token.includes("Initial")).map(p => `${JSON.stringify(p.search)} → ${p.token}`));
 
   // Phase 3: apply pairs to full text, then split into clauses for the fallback generator
   let tokenizedText = fullText;

@@ -778,28 +778,28 @@ function DragDropTagPreview({ previewHtml, loading }: { previewHtml: string | nu
   const selected = placedTags.find((t) => t.placementId === selectedPlaced) ?? null;
 
   return (
-    <div className="flex overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm" style={{ height: 620 }}>
+    <div className="flex overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm" style={{ height: 700 }}>
 
       {/* ── Left sidebar ─────────────────────────────────────────── */}
-      <div className="flex w-48 flex-shrink-0 flex-col border-r border-slate-100 bg-white">
+      <div className="flex w-44 flex-shrink-0 flex-col border-r border-slate-100 bg-white">
         <div className="border-b border-slate-100 px-4 py-3">
-          <p className="text-sm font-semibold text-slate-900">Fields</p>
+          <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Fields</p>
         </div>
-        <div className="flex-1 overflow-y-auto py-3">
+        <div className="flex-1 overflow-y-auto py-2">
           {tagGroups.map((group) => (
-            <div key={group.label} className="mb-1">
-              <p className="px-4 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-widest text-slate-400">{group.label}</p>
+            <div key={group.label} className="mb-0.5">
+              <p className="px-4 pb-0.5 pt-2.5 text-[9px] font-semibold uppercase tracking-widest text-slate-400">{group.label}</p>
               {group.items.map((tag) => (
                 <div
                   key={tag.id}
                   draggable
                   onDragStart={(e) => e.dataTransfer.setData("application/x-lease-tag", tag.id)}
-                  className="flex cursor-grab items-center gap-3 px-3 py-2 transition-colors hover:bg-slate-50 active:cursor-grabbing"
+                  className="flex cursor-grab items-center gap-2.5 px-3 py-1.5 transition-colors hover:bg-slate-50 active:cursor-grabbing"
                 >
-                  <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-sky-100 text-sky-600">
+                  <span className="flex h-7 w-7 flex-shrink-0 items-center justify-center rounded-md bg-sky-50 text-sky-600">
                     {tagIcon(tag)}
                   </span>
-                  <span className="text-sm font-medium text-slate-700">{tag.label}</span>
+                  <span className="text-xs font-medium leading-tight text-slate-700">{tag.label}</span>
                 </div>
               ))}
             </div>
@@ -808,23 +808,24 @@ function DragDropTagPreview({ previewHtml, loading }: { previewHtml: string | nu
       </div>
 
       {/* ── Document canvas ──────────────────────────────────────── */}
-      <div className="relative flex flex-1 flex-col overflow-hidden bg-[#f3f4f6]">
+      <div className="relative flex flex-1 flex-col overflow-hidden bg-slate-100">
         {/* toolbar strip */}
         <div className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-2">
           <span className="text-xs text-slate-500">Drag a field onto the page · click a placed field to select</span>
           <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">{placedTags.length} field{placedTags.length !== 1 ? "s" : ""} placed</span>
         </div>
 
-        <div className="flex-1 overflow-auto px-8 py-6">
-          {/* Paper page */}
+        <div className="flex-1 overflow-auto px-10 py-6">
+          {/* Paper — US Letter proportions, letter-quality margins */}
           <div
             onDragOver={(e) => e.preventDefault()}
             onDrop={handleDrop}
             onClick={() => setSelectedPlaced(null)}
-            className="relative mx-auto min-h-[500px] w-full max-w-[580px] rounded-sm bg-white shadow-[0_2px_16px_rgba(0,0,0,0.12)]"
+            className="relative mx-auto w-full bg-white shadow-[0_2px_20px_rgba(0,0,0,0.13)]"
+            style={{ maxWidth: 816, minHeight: 600 }}
           >
             {loading ? (
-              <div className="flex min-h-[500px] flex-col items-center justify-center gap-3 text-slate-400">
+              <div className="flex min-h-[600px] flex-col items-center justify-center gap-3 text-slate-400">
                 <svg className="h-6 w-6 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
                 </svg>
@@ -832,11 +833,11 @@ function DragDropTagPreview({ previewHtml, loading }: { previewHtml: string | nu
               </div>
             ) : previewHtml ? (
               <div
-                className="lease-preview pointer-events-none select-none overflow-hidden px-10 py-8 text-sm leading-relaxed text-slate-800"
+                className="lease-preview pointer-events-none select-none px-24 py-14 text-[13px] leading-[1.7] text-slate-800"
                 dangerouslySetInnerHTML={{ __html: previewHtml }}
               />
             ) : (
-              <div className="flex min-h-[500px] flex-col items-center justify-center gap-2 px-10 text-center text-slate-400">
+              <div className="flex min-h-[600px] flex-col items-center justify-center gap-2 px-16 text-center text-slate-400">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-8 w-8 text-slate-300">
                   <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z" /><path d="M14 3v5h5" /><path d="M8 13h8M8 17h5" />
                 </svg>
@@ -875,12 +876,12 @@ function DragDropTagPreview({ previewHtml, loading }: { previewHtml: string | nu
         </div>
       </div>
 
-      {/* ── Right detail panel ───────────────────────────────────── */}
-      <div className="flex w-44 flex-shrink-0 flex-col border-l border-slate-100 bg-white">
-        <div className="border-b border-slate-100 px-4 py-3">
-          <p className="text-sm font-semibold text-slate-900">Details</p>
-        </div>
-        {selected ? (
+      {/* ── Right detail panel — only shown when a tag is selected ── */}
+      {selected && (
+        <div className="flex w-48 flex-shrink-0 flex-col border-l border-slate-100 bg-white">
+          <div className="border-b border-slate-100 px-4 py-3">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Field details</p>
+          </div>
           <div className="p-4 space-y-4">
             <div className="flex items-center gap-2">
               <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-sky-100 text-sky-600">
@@ -906,16 +907,8 @@ function DragDropTagPreview({ previewHtml, loading }: { previewHtml: string | nu
               Remove field
             </button>
           </div>
-        ) : (
-          <div className="flex flex-1 flex-col items-center justify-center gap-2 p-4 text-center">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" className="h-8 w-8 text-slate-300">
-              <path d="m14.5 5.5 4 4" /><path d="M4 20h4l10.5-10.5a2.8 2.8 0 0 0-4-4L4 16v4Z" />
-            </svg>
-            <p className="text-xs font-semibold text-slate-500">Nothing selected</p>
-            <p className="text-[11px] leading-4 text-slate-400">Select a field to make changes</p>
-          </div>
-        )}
-      </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1946,21 +1939,10 @@ function LeaseCreationWorkflow({
           ) : pendingUpload?.previewError ? (
             <div className="bg-red-50 px-4 py-5 text-sm text-red-700">{pendingUpload.previewError}</div>
           ) : pendingUpload?.previewHtml ? (
-            <>
-              <div
-                className="lease-preview h-[520px] overflow-y-auto bg-white px-10 py-8 text-sm leading-relaxed text-slate-800"
-                dangerouslySetInnerHTML={{ __html: pendingUpload.previewHtml }}
-              />
-              <style>{`
-                .lease-preview h1, .lease-preview h2 { font-weight: 700; margin: 1em 0 0.4em; }
-                .lease-preview h1 { font-size: 1.15em; text-align: center; }
-                .lease-preview h2 { font-size: 1em; }
-                .lease-preview p { margin: 0.5em 0; }
-                .lease-preview table { width: 100%; border-collapse: collapse; margin: 0.75em 0; }
-                .lease-preview td, .lease-preview th { border: 1px solid #e2e8f0; padding: 6px 10px; vertical-align: top; }
-                .lease-preview strong, .lease-preview b { font-weight: 600; }
-              `}</style>
-            </>
+            <div
+              className="lease-preview h-[520px] overflow-y-auto bg-white px-10 py-8 text-sm"
+              dangerouslySetInnerHTML={{ __html: pendingUpload.previewHtml }}
+            />
           ) : (
             <div className="bg-white px-4 py-8 text-center text-sm text-slate-500">
               Generate a preview to inspect the tokenized lease template with extracted clauses.
