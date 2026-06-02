@@ -115,6 +115,7 @@ async function handlePost(request: NextRequest, context: RouteContext) {
     propertyManagerName?: string;
     propertyManagerEmail?: string;
     propertyManagerPhone?: string;
+    manualPairs?: Array<{ search: string; token: string }>;
   };
   try {
     body = (await request.json()) as typeof body;
@@ -168,6 +169,17 @@ async function handlePost(request: NextRequest, context: RouteContext) {
     schema.propertyCity = property.city;
     schema.propertyState = property.state;
     schema.propertyZip = property.zip;
+
+    // Merge manually placed tag pairs from the Tags step UI into the AI-extracted pairs.
+    // Manual pairs take precedence — if a manager assigned a blank that AI also mapped,
+    // the manager's assignment replaces the AI one.
+    if (body.manualPairs && body.manualPairs.length > 0) {
+      const manualSearchSet = new Set(body.manualPairs.map((p) => p.search));
+      // Remove any AI pairs whose search string was re-assigned manually
+      schema.pairs = schema.pairs.filter((p) => !manualSearchSet.has(p.search));
+      // Append the manual pairs
+      schema.pairs = [...schema.pairs, ...body.manualPairs.filter((p) => p.search && p.token)];
+    }
 
     // Merge form-entered party values (overrides AI extraction)
     if (body.organizationName) schema.landlordName = body.organizationName;

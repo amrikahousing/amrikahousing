@@ -67,6 +67,10 @@ export interface ExtractedLeaseSchema {
   pairs: Array<{ search: string; token: string }>;
   // Clause list — used for PDF fallback generation and future UI editing
   clauses: ExtractedLeaseClause[];
+  // Raw tokenized text — original full document text with pairs applied as
+  // {{token}} placeholders. Used to render PDF previews directly when clause
+  // heading detection produces too few clauses to be useful.
+  tokenizedText?: string;
 }
 
 // ─── Token definitions ────────────────────────────────────────────────────────
@@ -296,8 +300,10 @@ function buildReplacementMap(data: LeaseData): Record<string, string> {
       month: "long", day: "numeric", year: "numeric",
     });
   };
-  const fmt$ = (n: string) => `$${Number(n).toLocaleString()}`;
-  const fmtWords = (n: string) => Number.isFinite(Number(n)) ? intToWords(Math.round(Number(n))) : "—";
+  // Strip any leading $ or commas before parsing so "$1,700" and "1700" both work
+  const parseAmt = (n: string) => Number(n.replace(/[$,]/g, ""));
+  const fmt$ = (n: string) => { const v = parseAmt(n); return Number.isFinite(v) ? `$${v.toLocaleString()}` : "—"; };
+  const fmtWords = (n: string) => { const v = parseAmt(n); return Number.isFinite(v) ? intToWords(Math.round(v)) : "—"; };
   const primaryName = `${data.primaryTenant.firstName} ${data.primaryTenant.lastName}`.trim();
   const coNames = data.additionalTenants.map((t) => `${t.firstName} ${t.lastName}`.trim()).join(", ");
   const allNames = [primaryName, ...data.additionalTenants.map((t) => `${t.firstName} ${t.lastName}`.trim())].join(", ");
@@ -353,12 +359,47 @@ function buildReplacementMap(data: LeaseData): Record<string, string> {
 
 // ─── Extraction helpers ───────────────────────────────────────────────────────
 
+function recoverPartialJsonArray(raw: string): unknown[] {
+  // When Claude hits max_tokens the JSON array is truncated mid-way.
+  // Scan backwards from the truncation point to find the last complete object
+  // boundary (closing "}") and close the array there so we can parse what we have.
+  const start = raw.indexOf("[");
+  if (start === -1) return [];
+  // Walk backwards from the end to find the last "}"
+  let end = raw.lastIndexOf("}");
+  if (end === -1) return [];
+  const candidate = raw.slice(start, end + 1) + "]";
+  try {
+    const result = JSON.parse(candidate);
+    return Array.isArray(result) ? result : [];
+  } catch {
+    return [];
+  }
+}
+
 function parseSubstitutionPairs(raw: string): Array<{ search: string; token: string }> {
   let parsed: unknown;
   try {
     const match = raw.match(/\[[\s\S]*\]/);
-    if (!match) throw new Error("no JSON array found");
-    parsed = JSON.parse(match[0]);
+    if (match) {
+      try {
+        parsed = JSON.parse(match[0]);
+      } catch {
+        // Full parse failed — try partial recovery
+        parsed = recoverPartialJsonArray(raw);
+        if ((parsed as unknown[]).length > 0) {
+          console.warn("[fill-lease] Recovered partial JSON —", (parsed as unknown[]).length, "pairs from truncated response");
+        }
+      }
+    } else {
+      // No closing bracket — response was cut off entirely, attempt recovery
+      parsed = recoverPartialJsonArray(raw);
+      if ((parsed as unknown[]).length === 0) {
+        console.error("[fill-lease] raw AI response:", raw.slice(0, 500));
+        throw new Error("no JSON array found and partial recovery returned nothing");
+      }
+      console.warn("[fill-lease] Recovered partial JSON (no closing bracket) —", (parsed as unknown[]).length, "pairs");
+    }
   } catch (e) {
     console.error("[fill-lease] raw AI response:", raw.slice(0, 500));
     throw new Error(`Could not parse substitution pairs from AI response: ${e instanceof Error ? e.message : String(e)}`);
@@ -461,7 +502,7 @@ function withNewText(runXml: string, newText: string): string {
   );
 }
 
-function replaceParagraphBody(body: string, search: string, value: string): string {
+function replaceParagraphBodyOnce(body: string, search: string, value: string): string {
   const runs = collectRuns(body);
   const combined = runs.map((r) => r.text).join("");
   const pos = combined.indexOf(search);
@@ -499,6 +540,18 @@ function replaceParagraphBody(body: string, search: string, value: string): stri
   return body.slice(0, firstStart) + parts.join("") + body.slice(lastEnd);
 }
 
+// Replace ALL occurrences of search within a paragraph body, not just the first.
+// This handles cases like INITIALS: ( )( ) where the same blank appears twice in one <w:p>.
+function replaceParagraphBody(body: string, search: string, value: string): string {
+  let current = body;
+  let prev = "";
+  while (current !== prev) {
+    prev = current;
+    current = replaceParagraphBodyOnce(current, search, value);
+  }
+  return current;
+}
+
 function applyReplacementsToXml(xml: string, replacements: Array<{ search: string; value: string }>): string {
   return xml.replace(/(<w:p\b(?:[^>]*)>)([\s\S]*?)(<\/w:p>)/g, (_, open, body: string, close) => {
     let newBody = body;
@@ -519,15 +572,14 @@ async function fillDocxDirect(
   const PizZip = (await import("pizzip")).default;
   const zip = new PizZip(originalBuffer);
 
-  const files = [
-    "word/document.xml",
-    "word/header1.xml",
-    "word/header2.xml",
-    "word/footer1.xml",
-    "word/footer2.xml",
-  ];
+  // Process every XML part that can contain text runs — document body, all
+  // headers/footers (including first-page header3/footer3), footnotes, and
+  // endnotes. Scanning the zip dynamically means we never miss a part that
+  // the old hardcoded list didn't include.
+  const PROCESSABLE = /^word\/(document|header\d+|footer\d+|footnotes|endnotes|comments)\.xml$/;
 
-  for (const filePath of files) {
+  for (const filePath of Object.keys(zip.files)) {
+    if (!PROCESSABLE.test(filePath)) continue;
     const file = zip.file(filePath);
     if (!file) continue;
     const xml = applyReplacementsToXml(file.asText(), replacements);
@@ -689,10 +741,216 @@ export function extractErrorMessage(err: unknown): string {
   return String(err);
 }
 
+// ─── Tokenized text → HTML (used for PDF previews) ───────────────────────────
+
+/**
+ * Convert tokenized plain text into HTML paragraphs. Used when the original
+ * template was a PDF — pdfjs gives us plain text but no formatting structure,
+ * so we can't go through DOCX/mammoth. We render the text as a flat sequence
+ * of <p> tags, splitting on blank lines. Tokens like {{tenant_name}} are
+ * preserved verbatim — generateTaggableHtml() picks them up downstream.
+ */
+export function tokenizedTextToHtml(text: string): string {
+  if (!text) return "";
+  const esc = (s: string) =>
+    s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+  // Split on blank lines into paragraphs, then within each paragraph keep
+  // single newlines as <br/> so the layout roughly matches the source.
+  return text
+    .split(/\n{2,}/)
+    .map((para) => para.trim())
+    .filter((para) => para.length > 0)
+    .map((para) => {
+      const lines = para.split("\n").map(esc).join("<br/>");
+      // Heuristic: ALL-CAPS short lines render as headings — preserves
+      // section structure that pdfjs flattened but is still visible in text.
+      if (/^[A-Z0-9 ,'\-&/.]{4,80}$/.test(para) && para === para.toUpperCase()) {
+        return `<h2>${lines}</h2>`;
+      }
+      return `<p>${lines}</p>`;
+    })
+    .join("\n");
+}
+
+// ─── Taggable HTML (Tags step preview) ───────────────────────────────────────
+
+const TOKEN_LABELS: Record<string, string> = {
+  tenant_name: "Tenant name",
+  tenant_email: "Tenant email",
+  all_tenant_names: "All tenants",
+  co_tenant_names: "Co-tenant names",
+  property_name: "Property name",
+  property_address: "Property address",
+  property_address_with_unit: "Property + unit",
+  property_street: "Street address",
+  unit_number: "Unit number",
+  lease_start: "Lease start",
+  lease_end: "Lease end",
+  rent_amount: "Monthly rent",
+  rent_amount_words: "Rent (words)",
+  security_deposit: "Security deposit",
+  total_rent: "Total rent",
+  organization_name: "Landlord / org",
+  landlord_signatory: "Landlord signatory",
+  property_manager_name: "Manager name",
+  property_manager_email: "Manager email",
+  property_manager_phone: "Manager phone",
+  lease_term: "Lease term",
+  late_fee_amount: "Late fee",
+  late_fee_grace_days: "Grace days",
+  late_fee_pct: "Late fee %",
+  pet_fee_amount: "Pet fee",
+  tenant_paid_utilities: "Tenant utilities",
+  early_termination_fee: "Early term. fee",
+  early_termination_months: "Early term. months",
+  guest_stay_limit: "Guest stay limit",
+  condemnation_notice_days: "Condemnation days",
+  included_appliances: "Appliances",
+};
+
+function docuSealTokenLabel(inner: string): string {
+  const typeMatch = inner.match(/type=([^;}\s]+)/);
+  const roleMatch = inner.match(/role=([^;}]+)/);
+  const type = typeMatch?.[1] ?? "";
+  const role = roleMatch?.[1]?.trim() ?? "";
+  const typeLabel =
+    type === "signature" ? "Signature" :
+    type === "initials" ? "Initials" :
+    (type === "date" || type === "date_signed") ? "Date" : type;
+  return role ? `${typeLabel} · ${role}` : typeLabel;
+}
+
+export function tokenToHumanLabel(token: string): string {
+  const inner = token.replace(/^\{\{|\}\}$/g, "");
+  if (inner.includes(";type=")) return docuSealTokenLabel(inner);
+  return TOKEN_LABELS[inner] ?? inner;
+}
+
+// Process only text nodes in an HTML string (skip content inside < ... >).
+function processHtmlTextNodes(html: string, fn: (text: string) => string): string {
+  const parts = html.split(/(<[^>]+>)/);
+  for (let i = 0; i < parts.length; i += 2) parts[i] = fn(parts[i]);
+  return parts.join("");
+}
+
+// Blank patterns that represent unfilled slots in a lease template.
+const BLANK_RE = /_{3,}|\( \)/g;
+
+/**
+ * Converts a tokenized HTML string (from mammoth) into an interactive taggable
+ * HTML string for the Tags step:
+ *  - AI-assigned tokens → colored chip spans  (green = autofill, blue = signature)
+ *  - Remaining unmatched blanks              → yellow droppable target spans
+ */
+export function generateTaggableHtml(tokenizedHtml: string): string {
+  // Pass 1 — wrap known tokens as chip spans
+  let html = processHtmlTextNodes(tokenizedHtml, (text) =>
+    text.replace(/\{\{[^}]+\}\}/g, (token) => {
+      const inner = token.replace(/^\{\{|\}\}$/g, "");
+      const isDocuSeal = inner.includes(";type=");
+      const label = isDocuSeal ? docuSealTokenLabel(inner) : (TOKEN_LABELS[inner] ?? inner);
+      const kind = isDocuSeal ? "signature" : "autofill";
+      const tokenEsc = token.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+      return `<span class="lt-chip lt-chip-${kind}" data-token="${tokenEsc}">${label}</span>`;
+    })
+  );
+  // Pass 2 — wrap remaining blanks as droppable targets
+  html = processHtmlTextNodes(html, (text) =>
+    text.replace(BLANK_RE, (match) => {
+      const esc = match.replace(/"/g, "&quot;");
+      return `<span class="lt-blank" data-blank-search="${esc}">⬚ drop tag</span>`;
+    })
+  );
+  return html;
+}
+
 // ─── Public: extract schema on upload ────────────────────────────────────────
 
-export async function extractLeaseSchema(blobUrl: string): Promise<ExtractedLeaseSchema> {
-  const buffer = await fetchBuffer(blobUrl);
+/**
+ * Phase 2 only: given already-extracted plain text, ask Claude to find every
+ * substitution pair. Skips the expensive Phase 1 PDF/DOCX-to-text Claude call.
+ * Used when the client has already extracted the text in the browser via
+ * pdfjs/mammoth — eliminates 30-50s from the upload flow.
+ */
+export async function extractLeaseSchemaFromText(
+  text: string,
+  originalFormat: "pdf" | "docx",
+): Promise<ExtractedLeaseSchema> {
+  if (!text || text.trim().length < 100) {
+    throw new Error("Provided text is too short to extract a lease schema from.");
+  }
+
+  const anthropicFetch = async (body: object): Promise<string> => {
+    const res = await fetch("https://api.anthropic.com/v1/messages", {
+      method: "POST",
+      headers: {
+        "x-api-key": process.env.ANTHROPIC_API_KEY!,
+        "anthropic-version": "2023-06-01",
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(body),
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      throw new Error(`Anthropic API error ${res.status}: ${err}`);
+    }
+    const json = await res.json() as { content: Array<{ type: string; text: string }>; stop_reason: string };
+    if (json.stop_reason === "max_tokens") {
+      console.warn("[fill-lease] Claude hit max_tokens limit — output may be truncated");
+    }
+    return json.content.find((b) => b.type === "text")?.text ?? "";
+  };
+
+  const pairsRaw = await anthropicFetch({
+    model: "claude-sonnet-4-6",
+    max_tokens: 16000,
+    system: SUBSTITUTION_SYSTEM,
+    messages: [{ role: "user", content: `Find all blanks and placeholders in this lease template:\n\n${text}` }],
+  });
+  console.log("[fill-lease] raw pairs response (from-text):", pairsRaw.slice(0, 300));
+  const pairs = parseSubstitutionPairs(pairsRaw);
+
+  let tokenizedText = text;
+  for (const { search, token } of pairs) {
+    if (search) tokenizedText = tokenizedText.replaceAll(search, token);
+  }
+  const clauses = splitTextIntoClauses(tokenizedText);
+  const pairValue = (token: string) => pairs.find((p) => p.token === `{{${token}}}`)?.search;
+
+  return {
+    schemaVersion: 1,
+    originalFormat,
+    jurisdiction: detectJurisdiction(text),
+    landlordName: detectLandlordName(text),
+    landlordSignatory: pairValue("landlord_signatory"),
+    earlyTerminationFee: pairValue("early_termination_fee"),
+    earlyTerminationMonths: pairValue("early_termination_months"),
+    guestStayLimit: pairValue("guest_stay_limit"),
+    condemnationNoticeDays: pairValue("condemnation_notice_days"),
+    includedAppliances: pairValue("included_appliances"),
+    lateFeeAmount: pairValue("late_fee_amount"),
+    lateFeeGraceDays: pairValue("late_fee_grace_days"),
+    lateFeePct: pairValue("late_fee_pct"),
+    petFeeAmount: pairValue("pet_fee_amount"),
+    tenantPaidUtilities: pairValue("tenant_paid_utilities"),
+    pairs,
+    clauses,
+    tokenizedText,
+  };
+}
+
+/**
+ * Extract a lease schema from either a Blob URL or a buffer.
+ * Passing a buffer is preferred when the caller already has the bytes
+ * (e.g. inside the upload handler) — avoids an extra network round-trip
+ * and a potential race condition with newly-uploaded blobs.
+ */
+export async function extractLeaseSchema(
+  source: string | { buffer: Buffer },
+): Promise<ExtractedLeaseSchema> {
+  const buffer = typeof source === "string"
+    ? await fetchBuffer(source)
+    : source.buffer;
   const format = detectFormat(buffer);
 
   if (format === "ole-doc") {
@@ -768,7 +1026,7 @@ export async function extractLeaseSchema(blobUrl: string): Promise<ExtractedLeas
   } else {
     fullText = await anthropicFetch({
       model: "claude-sonnet-4-6",
-      max_tokens: 8000,
+      max_tokens: 16000,
       messages: [
         {
           role: "user",
@@ -784,7 +1042,7 @@ export async function extractLeaseSchema(blobUrl: string): Promise<ExtractedLeas
   // Phase 2: Claude finds substitution pairs only (compact output, no verbatim reproduction)
   const pairsRaw = await anthropicFetch({
     model: "claude-sonnet-4-6",
-    max_tokens: 4000,
+    max_tokens: 16000,
     system: SUBSTITUTION_SYSTEM,
     messages: [{ role: "user", content: `Find all blanks and placeholders in this lease template:\n\n${fullText}` }],
   });
@@ -819,6 +1077,7 @@ export async function extractLeaseSchema(blobUrl: string): Promise<ExtractedLeas
     tenantPaidUtilities: pairValue("tenant_paid_utilities"),
     pairs,
     clauses,
+    tokenizedText,
   };
 }
 

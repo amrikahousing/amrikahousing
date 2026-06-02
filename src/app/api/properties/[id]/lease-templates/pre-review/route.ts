@@ -1,4 +1,4 @@
-export const maxDuration = 120;
+export const maxDuration = 180;
 
 import mammoth from "mammoth";
 import { put } from "@vercel/blob";
@@ -9,6 +9,8 @@ import {
   buildLeaseTemplateReviewUserPrompt,
   leaseTemplateReviewTool,
 } from "@/lib/lease-extract-prompt";
+import { extractLeaseSchema, extractLeaseSchemaFromText } from "@/lib/fill-lease";
+import { registerSchemaExtraction } from "@/lib/lease-schema-cache";
 import {
   getOrgPermissionContext,
   requirePropertyPermission,
@@ -65,6 +67,12 @@ async function handlePost(request: NextRequest, context: RouteContext) {
 
   const file = form.get("file");
   const nameRaw = form.get("name");
+  // Optional: text already extracted in the browser via pdfjs/mammoth.
+  // When present, we skip Phase 1 (Claude PDF-to-text) and only run Phase 2 (pairs).
+  const clientExtractedTextRaw = form.get("clientExtractedText");
+  const clientExtractedText = typeof clientExtractedTextRaw === "string" && clientExtractedTextRaw.trim().length > 100
+    ? clientExtractedTextRaw
+    : null;
   if (!(file instanceof File) || file.size <= 0) {
     return Response.json({ error: "Lease template file is required." }, { status: 422 });
   }
@@ -89,10 +97,33 @@ async function handlePost(request: NextRequest, context: RouteContext) {
   // Upload to blob so it's ready to persist if user confirms
   const blob = await put(path, Buffer.from(buffer), { access: "private", token: getBlobToken() });
 
+  // Kick off schema extraction in the BACKGROUND. Two paths:
+  //   1. FAST: client extracted the text already → only run Phase 2 (pairs)  → ~15-30s
+  //   2. SLOW: no client text → full server pipeline with Claude Phase 1+2   → ~45-80s
+  const isDocxFile = file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+  const schemaPromise = (clientExtractedText
+    ? extractLeaseSchemaFromText(clientExtractedText, isDocxFile ? "docx" : "pdf")
+    : extractLeaseSchema({ buffer })
+  ).catch((err) => {
+    console.error("[lease-pre-review] schema extraction failed:", err);
+    return null;
+  });
+  registerSchemaExtraction(blob.url, schemaPromise);
+
   const isDocx = file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
   let userContent: unknown[];
 
-  if (isDocx) {
+  // Prefer client-extracted text when available — even for PDFs. This is a huge
+  // speedup: Claude reviews plain text in ~5-8s instead of re-parsing a 20-page
+  // PDF (which can take 30s+ via the document API).
+  if (clientExtractedText) {
+    userContent = [
+      {
+        type: "text",
+        text: buildLeaseTemplateReviewUserPrompt({ hasDocxText: true, text: clientExtractedText.slice(0, 16_000) }),
+      },
+    ];
+  } else if (isDocx) {
     let extractedText: string;
     try {
       const result = await mammoth.extractRawText({ buffer });
@@ -150,7 +181,10 @@ async function handlePost(request: NextRequest, context: RouteContext) {
     return Response.json({ error: "Could not analyze this lease template." }, { status: 502 });
   }
 
+  // Only wait for the AI clause review here. Schema extraction continues in the
+  // background; clients pick it up via the preview route which awaits the cached promise.
   const message = (await response.json()) as AnthropicMessageResponse;
+
   if (message.stop_reason === "max_tokens") {
     console.error("[lease-pre-review] Response truncated — increase max_tokens or reduce input");
     return Response.json({ error: "The lease document is too large to review in one pass. Try uploading a shorter document." }, { status: 422 });
@@ -167,5 +201,8 @@ async function handlePost(request: NextRequest, context: RouteContext) {
     contentType: file.type,
     fileName: file.name,
     name,
+    // Schema is being extracted in background — client should call preview later;
+    // preview route will await the cached extraction promise.
+    schemaPending: true,
   });
 }

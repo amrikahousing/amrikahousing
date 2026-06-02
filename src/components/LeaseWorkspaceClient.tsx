@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useToast } from "./ToastProvider";
 
@@ -191,9 +191,12 @@ type PendingWorkflowUpload = {
   fileName: string;
   name: string;
   review: LeaseReview;
+  schema?: object | null;
   previewHtml?: string | null;
+  taggableHtml?: string | null;
   previewFileBase64?: string | null;
   previewError?: string | null;
+  schemaNotReady?: boolean;
 };
 
 type CreationSection = {
@@ -231,11 +234,6 @@ type TagPaletteItem = {
   role?: string;
 };
 
-type PlacedTag = TagPaletteItem & {
-  placementId: string;
-  x: number;
-  y: number;
-};
 
 const emptyClause: ClauseForm = {
   id: null,
@@ -709,214 +707,228 @@ function UnitStatusTable({ units }: { units: LeaseUnit[] }) {
 
 
 const tagPalette: TagPaletteItem[] = [
-  { id: "tenant-signature", label: "Tenant signature", token: "{{Sign;type=signature;role=Tenant 1}}", kind: "signature", role: "Tenant 1" },
-  { id: "tenant-initials", label: "Tenant initials", token: "{{Sign;type=initials;role=Tenant 1}}", kind: "signature", role: "Tenant 1" },
-  { id: "tenant-date", label: "Tenant date", token: "{{Sign;type=date_signed;role=Tenant 1}}", kind: "signature", role: "Tenant 1" },
-  { id: "manager-signature", label: "Manager signature", token: "{{Sign;type=signature;role=Manager}}", kind: "signature", role: "Manager" },
-  { id: "manager-date", label: "Manager date", token: "{{Sign;type=date_signed;role=Manager}}", kind: "signature", role: "Manager" },
-  { id: "property-name", label: "Property name", token: "{{property_name}}", kind: "autofill" },
-  { id: "property-address", label: "Property address", token: "{{property_address}}", kind: "autofill" },
-  { id: "landlord", label: "Landlord / org", token: "{{organization_name}}", kind: "autofill" },
-  { id: "manager-name", label: "Manager name", token: "{{property_manager_name}}", kind: "autofill" },
-  { id: "tenant-name", label: "Tenant name", token: "{{tenant_name}}", kind: "autofill" },
-  { id: "unit-number", label: "Unit number", token: "{{unit_number}}", kind: "autofill" },
+  { id: "tenant-signature",  label: "Tenant signature",  token: "{{Sign;type=signature;role=Tenant 1}}",  kind: "signature", role: "Tenant 1" },
+  { id: "tenant-initials",   label: "Tenant initials",   token: "{{Initial;type=initials;role=Tenant 1}}", kind: "signature", role: "Tenant 1" },
+  { id: "tenant-date",       label: "Tenant date",       token: "{{Date;type=date;role=Tenant 1}}",        kind: "signature", role: "Tenant 1" },
+  { id: "tenant2-signature", label: "Co-tenant signature", token: "{{Sign;type=signature;role=Tenant 2}}", kind: "signature", role: "Tenant 2" },
+  { id: "tenant2-initials",  label: "Co-tenant initials",  token: "{{Initial;type=initials;role=Tenant 2}}", kind: "signature", role: "Tenant 2" },
+  { id: "tenant2-date",      label: "Co-tenant date",      token: "{{Date;type=date;role=Tenant 2}}",      kind: "signature", role: "Tenant 2" },
+  { id: "manager-signature", label: "Manager signature", token: "{{Sign;type=signature;role=Manager}}",   kind: "signature", role: "Manager" },
+  { id: "manager-initials",  label: "Manager initials",  token: "{{Initial;type=initials;role=Manager}}", kind: "signature", role: "Manager" },
+  { id: "manager-date",      label: "Manager date",      token: "{{Date;type=date;role=Manager}}",        kind: "signature", role: "Manager" },
+  { id: "tenant-name",           label: "Tenant name",        token: "{{tenant_name}}",                kind: "autofill" },
+  { id: "all-tenant-names",      label: "All tenants",        token: "{{all_tenant_names}}",           kind: "autofill" },
+  { id: "unit-number",           label: "Unit number",        token: "{{unit_number}}",                kind: "autofill" },
+  { id: "property-name",         label: "Property name",      token: "{{property_name}}",              kind: "autofill" },
+  { id: "property-address",      label: "Property address",   token: "{{property_address}}",           kind: "autofill" },
+  { id: "property-address-unit", label: "Address + unit",     token: "{{property_address_with_unit}}", kind: "autofill" },
+  { id: "lease-start",           label: "Lease start",        token: "{{lease_start}}",                kind: "autofill" },
+  { id: "lease-end",             label: "Lease end",          token: "{{lease_end}}",                  kind: "autofill" },
+  { id: "rent-amount",           label: "Monthly rent",       token: "{{rent_amount}}",                kind: "autofill" },
+  { id: "security-deposit",      label: "Security deposit",   token: "{{security_deposit}}",           kind: "autofill" },
+  { id: "landlord",              label: "Landlord / org",     token: "{{organization_name}}",          kind: "autofill" },
+  { id: "manager-name",          label: "Manager name",       token: "{{property_manager_name}}",      kind: "autofill" },
 ];
-
-// ── Tag field icons ──────────────────────────────────────────────────────────
-const TAG_ICONS: Record<string, React.ReactNode> = {
-  signature: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d="m14.5 5.5 4 4" /><path d="M4 20h4l10.5-10.5a2.8 2.8 0 0 0-4-4L4 16v4Z" /></svg>,
-  initials: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><rect x="3" y="3" width="18" height="18" rx="2" /><path d="M8 12h8M12 8v8" /></svg>,
-  date: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><rect x="3" y="4" width="18" height="18" rx="2" /><path d="M16 2v4M8 2v4M3 10h18" /></svg>,
-  autofill: <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><circle cx="12" cy="12" r="3" /><path d="M12 2v3M12 19v3M4.22 4.22l2.12 2.12M17.66 17.66l2.12 2.12M2 12h3M19 12h3M4.22 19.78l2.12-2.12M17.66 6.34l2.12-2.12" /></svg>,
-};
-
-function tagIcon(tag: TagPaletteItem) {
-  if (tag.token.includes("initials")) return TAG_ICONS.initials;
-  if (tag.token.includes("date_signed")) return TAG_ICONS.date;
-  if (tag.kind === "signature") return TAG_ICONS.signature;
-  return TAG_ICONS.autofill;
-}
 
 const tagGroups = [
   { label: "Signature fields", items: tagPalette.filter((t) => t.kind === "signature") },
   { label: "Auto-fill fields", items: tagPalette.filter((t) => t.kind === "autofill") },
 ];
 
-function placedTagStyle(kind: TagPaletteItem["kind"]) {
-  return kind === "signature"
-    ? "border-blue-300 bg-blue-50/90 text-blue-700 shadow-blue-100"
-    : "border-emerald-300 bg-emerald-50/90 text-emerald-700 shadow-emerald-100";
-}
+type ManualPair = { search: string; token: string; label: string; kind: "signature" | "autofill" };
 
-function DragDropTagPreview({ previewHtml, loading }: { previewHtml: string | null; loading?: boolean }) {
-  const [placedTags, setPlacedTags] = useState<PlacedTag[]>([
-    { ...tagPalette[1], placementId: "seed-tenant-initials", x: 63, y: 28 },
-    { ...tagPalette[3], placementId: "seed-manager-signature", x: 56, y: 78 },
-  ]);
-  const [draggedTagId, setDraggedTagId] = useState<string | null>(null);
-  const [selectedPlaced, setSelectedPlaced] = useState<string | null>(null);
-
-  function handleDrop(event: React.DragEvent<HTMLDivElement>) {
-    event.preventDefault();
-    const paletteId = event.dataTransfer.getData("application/x-lease-tag");
-    const movingId = event.dataTransfer.getData("application/x-placed-tag");
-    const rect = event.currentTarget.getBoundingClientRect();
-    const x = Math.max(2, Math.min(85, ((event.clientX - rect.left) / rect.width) * 100));
-    const y = Math.max(1, Math.min(95, ((event.clientY - rect.top) / rect.height) * 100));
-    if (movingId) {
-      setPlacedTags((tags) => tags.map((t) => t.placementId === movingId ? { ...t, x, y } : t));
-      setDraggedTagId(null);
-      return;
+/**
+ * TaggableDocumentPreview — the real Tags step component.
+ *
+ * Shows the lease HTML with:
+ *  - Green chips  (lt-chip-autofill)   for AI-assigned auto-fill tokens
+ *  - Blue chips   (lt-chip-signature)  for AI-assigned DocuSeal anchor tokens
+ *  - Yellow spans (lt-blank)           for blanks the AI missed → droppable targets
+ *
+ * When a manager drops a palette tag onto a yellow blank the blank turns into a
+ * chip and the assignment is recorded in manualPairs (lifted to parent state).
+ */
+function TaggableDocumentPreview({
+  taggableHtml,
+  previewHtmlFallback,
+  manualPairs,
+  onTagPlaced,
+  onTagRemoved,
+  loading,
+}: {
+  taggableHtml: string | null;
+  previewHtmlFallback: string | null;
+  manualPairs: ManualPair[];
+  onTagPlaced: (pair: ManualPair) => void;
+  onTagRemoved: (search: string) => void;
+  loading?: boolean;
+}) {
+  // Compute the rendered HTML: replace assigned blanks with chip spans
+  const renderedHtml = useMemo(() => {
+    // Fall back to plain previewHtml when taggable version isn't available yet
+    if (!taggableHtml) return null;
+    let html = taggableHtml;
+    for (const pair of manualPairs) {
+      const kindClass = pair.kind === "signature" ? "lt-chip-signature" : "lt-chip-autofill";
+      const escapedSearch = pair.search.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+      // Replace all lt-blank spans with this search value with a chip span
+      const blankPattern = new RegExp(
+        `<span class="lt-blank" data-blank-search="${escapedSearch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}">⬚ drop tag<\/span>`,
+        "g",
+      );
+      const chipHtml = `<span class="lt-chip ${kindClass}" data-token="${escapedSearch}" data-manual-search="${escapedSearch}">${pair.label} ✕</span>`;
+      html = html.replace(blankPattern, chipHtml);
     }
-    const tag = tagPalette.find((t) => t.id === paletteId);
+    return html;
+  }, [taggableHtml, manualPairs]);
+
+  function handleDrop(e: React.DragEvent<HTMLDivElement>) {
+    e.preventDefault();
+    const tagId = e.dataTransfer.getData("application/x-lease-tag");
+    if (!tagId) return;
+    const tag = tagPalette.find((t) => t.id === tagId);
     if (!tag) return;
-    const newId = `${tag.id}-${Date.now()}`;
-    setPlacedTags((tags) => [...tags, { ...tag, placementId: newId, x, y }]);
-    setSelectedPlaced(newId);
+    // Find what was dropped onto
+    const target = (e.target as HTMLElement).closest<HTMLElement>("[data-blank-search]");
+    if (!target || !target.classList.contains("lt-blank")) return;
+    const search = target.getAttribute("data-blank-search") ?? "";
+    if (!search) return;
+    onTagPlaced({ search, token: tag.token, label: tag.label, kind: tag.kind });
   }
 
-  const selected = placedTags.find((t) => t.placementId === selectedPlaced) ?? null;
+  function handleClick(e: React.MouseEvent<HTMLDivElement>) {
+    // Click on a manually placed chip (has data-manual-search) → remove it
+    const target = (e.target as HTMLElement).closest<HTMLElement>("[data-manual-search]");
+    if (!target) return;
+    const search = target.getAttribute("data-manual-search") ?? "";
+    if (search) onTagRemoved(search);
+  }
+
+  const assignedCount = manualPairs.length;
 
   return (
-    <div className="flex overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm" style={{ height: 620 }}>
+    <>
+      {/* Inline styles for chip and blank rendering */}
+      <style>{`
+        .lt-chip { display:inline-flex; align-items:center; gap:3px; border-radius:4px; padding:1px 6px; font-size:11px; font-weight:600; line-height:1.6; border:1px solid; }
+        .lt-chip-autofill  { background:#ecfdf5; border-color:#6ee7b7; color:#065f46; }
+        .lt-chip-signature { background:#eff6ff; border-color:#93c5fd; color:#1d4ed8; }
+        .lt-blank { display:inline-flex; align-items:center; gap:3px; border-radius:4px; padding:1px 7px; font-size:11px; font-weight:500; background:#fefce8; border:1.5px dashed #fbbf24; color:#92400e; cursor:copy; transition:background .15s; }
+        .lt-blank:hover { background:#fef9c3; }
+        [data-manual-search] { cursor:pointer; }
+        [data-manual-search]:hover { opacity:.8; }
+      `}</style>
 
-      {/* ── Left sidebar ─────────────────────────────────────────── */}
-      <div className="flex w-48 flex-shrink-0 flex-col border-r border-slate-100 bg-white">
-        <div className="border-b border-slate-100 px-4 py-3">
-          <p className="text-sm font-semibold text-slate-900">Fields</p>
+      <div className="flex overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm" style={{ height: 640 }}>
+
+        {/* ── Left sidebar ────────────────────────────────────────── */}
+        <div className="flex w-48 flex-shrink-0 flex-col border-r border-slate-100 bg-white">
+          <div className="border-b border-slate-100 px-4 py-3">
+            <p className="text-sm font-semibold text-slate-900">Fields</p>
+            <p className="mt-0.5 text-[10px] text-slate-400">Drag onto a yellow blank</p>
+          </div>
+          <div className="flex-1 overflow-y-auto py-2">
+            {tagGroups.map((group) => (
+              <div key={group.label} className="mb-1">
+                <p className="px-4 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-widest text-slate-400">{group.label}</p>
+                {group.items.map((tag) => (
+                  <div
+                    key={tag.id}
+                    draggable
+                    onDragStart={(e) => e.dataTransfer.setData("application/x-lease-tag", tag.id)}
+                    className="flex cursor-grab items-center gap-2 px-3 py-1.5 transition-colors hover:bg-slate-50 active:cursor-grabbing"
+                  >
+                    <span className={[
+                      "inline-flex shrink-0 items-center rounded px-1.5 py-0.5 text-[10px] font-semibold border",
+                      tag.kind === "signature" ? "bg-blue-50 border-blue-200 text-blue-700" : "bg-emerald-50 border-emerald-200 text-emerald-700",
+                    ].join(" ")}>
+                      {tag.kind === "signature" ? "✍" : "⚡"}
+                    </span>
+                    <span className="text-xs font-medium text-slate-700 leading-tight">{tag.label}</span>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
         </div>
-        <div className="flex-1 overflow-y-auto py-3">
-          {tagGroups.map((group) => (
-            <div key={group.label} className="mb-1">
-              <p className="px-4 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-widest text-slate-400">{group.label}</p>
-              {group.items.map((tag) => (
+
+        {/* ── Document canvas ─────────────────────────────────────── */}
+        <div className="flex flex-1 flex-col overflow-hidden bg-slate-50">
+          <div className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-2">
+            <div className="flex items-center gap-3 text-xs text-slate-500">
+              <span className="inline-flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm bg-blue-200 border border-blue-400"></span> AI-detected signature</span>
+              <span className="inline-flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm bg-emerald-200 border border-emerald-400"></span> AI-detected field</span>
+              <span className="inline-flex items-center gap-1"><span className="inline-block h-2.5 w-2.5 rounded-sm bg-yellow-100 border border-yellow-400 border-dashed"></span> Unassigned blank</span>
+            </div>
+            {assignedCount > 0 && (
+              <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">
+                {assignedCount} added manually
+              </span>
+            )}
+          </div>
+
+          <div
+            className="flex-1 overflow-auto px-8 py-6"
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={handleDrop}
+            onClick={handleClick}
+          >
+            <div className="mx-auto w-full max-w-[600px] rounded-sm bg-white shadow-[0_2px_16px_rgba(0,0,0,0.1)]">
+              {loading ? (
+                <div className="flex min-h-[500px] flex-col items-center justify-center gap-3 text-slate-400">
+                  <svg className="h-6 w-6 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
+                  </svg>
+                  <span className="text-sm">Generating document preview…</span>
+                </div>
+              ) : (renderedHtml ?? previewHtmlFallback) ? (
                 <div
-                  key={tag.id}
-                  draggable
-                  onDragStart={(e) => e.dataTransfer.setData("application/x-lease-tag", tag.id)}
-                  className="flex cursor-grab items-center gap-3 px-3 py-2 transition-colors hover:bg-slate-50 active:cursor-grabbing"
-                >
-                  <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-sky-100 text-sky-600">
-                    {tagIcon(tag)}
-                  </span>
-                  <span className="text-sm font-medium text-slate-700">{tag.label}</span>
+                  className="lease-preview px-10 py-8 text-sm leading-relaxed text-slate-800"
+                  dangerouslySetInnerHTML={{ __html: (renderedHtml ?? previewHtmlFallback)! }}
+                />
+              ) : (
+                <div className="flex min-h-[500px] flex-col items-center justify-center gap-2 px-10 text-center text-slate-400">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-8 w-8 text-slate-300">
+                    <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z" /><path d="M14 3v5h5" /><path d="M8 13h8M8 17h5" />
+                  </svg>
+                  <p className="text-sm">Document preview not available</p>
+                  <p className="text-xs text-slate-300">Upload a lease in the Start step to see the full document</p>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+
+        {/* ── Right legend / summary ──────────────────────────────── */}
+        <div className="flex w-44 flex-shrink-0 flex-col border-l border-slate-100 bg-white">
+          <div className="border-b border-slate-100 px-4 py-3">
+            <p className="text-sm font-semibold text-slate-900">Manual tags</p>
+          </div>
+          {manualPairs.length === 0 ? (
+            <div className="flex flex-1 flex-col items-center justify-center gap-2 p-4 text-center">
+              <p className="text-xs font-semibold text-slate-400">None added yet</p>
+              <p className="text-[11px] leading-4 text-slate-400">Drag a field from the left onto a yellow blank in the document</p>
+            </div>
+          ) : (
+            <div className="flex-1 overflow-y-auto p-3 space-y-2">
+              {manualPairs.map((p) => (
+                <div key={p.search} className="rounded-lg border border-slate-100 bg-slate-50 p-2">
+                  <p className="text-[11px] font-semibold text-slate-700">{p.label}</p>
+                  <p className="mt-0.5 text-[10px] text-slate-400 truncate" title={p.search}>blank: {p.search}</p>
+                  <button
+                    type="button"
+                    onClick={() => onTagRemoved(p.search)}
+                    className="mt-1.5 w-full rounded border border-red-200 bg-red-50 py-0.5 text-[10px] font-semibold text-red-500 hover:bg-red-100"
+                  >
+                    Remove
+                  </button>
                 </div>
               ))}
             </div>
-          ))}
+          )}
         </div>
       </div>
-
-      {/* ── Document canvas ──────────────────────────────────────── */}
-      <div className="relative flex flex-1 flex-col overflow-hidden bg-[#f3f4f6]">
-        {/* toolbar strip */}
-        <div className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-2">
-          <span className="text-xs text-slate-500">Drag a field onto the page · click a placed field to select</span>
-          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">{placedTags.length} field{placedTags.length !== 1 ? "s" : ""} placed</span>
-        </div>
-
-        <div className="flex-1 overflow-auto px-8 py-6">
-          {/* Paper page */}
-          <div
-            onDragOver={(e) => e.preventDefault()}
-            onDrop={handleDrop}
-            onClick={() => setSelectedPlaced(null)}
-            className="relative mx-auto min-h-[500px] w-full max-w-[580px] rounded-sm bg-white shadow-[0_2px_16px_rgba(0,0,0,0.12)]"
-          >
-            {loading ? (
-              <div className="flex min-h-[500px] flex-col items-center justify-center gap-3 text-slate-400">
-                <svg className="h-6 w-6 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
-                </svg>
-                <span className="text-sm">Generating document preview…</span>
-              </div>
-            ) : previewHtml ? (
-              <div
-                className="lease-preview pointer-events-none select-none overflow-hidden px-10 py-8 text-sm leading-relaxed text-slate-800"
-                dangerouslySetInnerHTML={{ __html: previewHtml }}
-              />
-            ) : (
-              <div className="flex min-h-[500px] flex-col items-center justify-center gap-2 px-10 text-center text-slate-400">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="h-8 w-8 text-slate-300">
-                  <path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8Z" /><path d="M14 3v5h5" /><path d="M8 13h8M8 17h5" />
-                </svg>
-                <p className="text-sm">Document preview not available</p>
-                <p className="text-xs text-slate-300">Upload a lease in the Start step to see the full document</p>
-              </div>
-            )}
-
-            {/* Placed tags */}
-            {placedTags.map((tag) => {
-              const isSelected = tag.placementId === selectedPlaced;
-              return (
-                <button
-                  key={tag.placementId}
-                  type="button"
-                  draggable
-                  onDragStart={(e) => {
-                    e.stopPropagation();
-                    setDraggedTagId(tag.placementId);
-                    e.dataTransfer.setData("application/x-placed-tag", tag.placementId);
-                  }}
-                  onClick={(e) => { e.stopPropagation(); setSelectedPlaced(isSelected ? null : tag.placementId); }}
-                  className={[
-                    "absolute cursor-move rounded border px-2 py-0.5 text-[11px] font-semibold shadow-sm transition-all",
-                    placedTagStyle(tag.kind),
-                    isSelected ? "ring-2 ring-sky-400 ring-offset-1 scale-105" : "",
-                    draggedTagId === tag.placementId ? "opacity-30" : "",
-                  ].join(" ")}
-                  style={{ left: `${tag.x}%`, top: `${tag.y}%` }}
-                >
-                  {tag.label}
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      </div>
-
-      {/* ── Right detail panel ───────────────────────────────────── */}
-      <div className="flex w-44 flex-shrink-0 flex-col border-l border-slate-100 bg-white">
-        <div className="border-b border-slate-100 px-4 py-3">
-          <p className="text-sm font-semibold text-slate-900">Details</p>
-        </div>
-        {selected ? (
-          <div className="p-4 space-y-4">
-            <div className="flex items-center gap-2">
-              <span className="flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-lg bg-sky-100 text-sky-600">
-                {tagIcon(selected)}
-              </span>
-              <span className="text-sm font-semibold text-slate-800">{selected.label}</span>
-            </div>
-            {selected.role && (
-              <div>
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-1">Signer</p>
-                <p className="text-xs font-medium text-slate-700">{selected.role}</p>
-              </div>
-            )}
-            <div>
-              <p className="text-[10px] font-semibold uppercase tracking-wide text-slate-400 mb-1">Token</p>
-              <p className="break-all font-mono text-[10px] text-slate-400 leading-4">{selected.token}</p>
-            </div>
-            <button
-              type="button"
-              onClick={() => { setPlacedTags((ts) => ts.filter((t) => t.placementId !== selected.placementId)); setSelectedPlaced(null); }}
-              className="w-full rounded-lg border border-red-200 bg-red-50 px-3 py-1.5 text-xs font-semibold text-red-600 hover:bg-red-100 transition-colors"
-            >
-              Remove field
-            </button>
-          </div>
-        ) : (
-          <div className="flex flex-1 flex-col items-center justify-center gap-2 p-4 text-center">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" className="h-8 w-8 text-slate-300">
-              <path d="m14.5 5.5 4 4" /><path d="M4 20h4l10.5-10.5a2.8 2.8 0 0 0-4-4L4 16v4Z" />
-            </svg>
-            <p className="text-xs font-semibold text-slate-500">Nothing selected</p>
-            <p className="text-[11px] leading-4 text-slate-400">Select a field to make changes</p>
-          </div>
-        )}
-      </div>
-    </div>
+    </>
   );
 }
 
@@ -944,6 +956,11 @@ function LeaseCreationWorkflow({
   advanceToken,
   workflowStarted,
   onWorkflowStarted,
+  manualPairs,
+  onManualPairAdded,
+  onManualPairRemoved,
+  uploadProgress,
+  previewInFlight,
 }: {
   property: LeaseProperty;
   properties: LeaseProperty[];
@@ -968,6 +985,11 @@ function LeaseCreationWorkflow({
   advanceToken: number;
   workflowStarted: boolean;
   onWorkflowStarted: (started: boolean) => void;
+  manualPairs: ManualPair[];
+  onManualPairAdded: (pair: ManualPair) => void;
+  onManualPairRemoved: (search: string) => void;
+  uploadProgress: { label: string; percent: number } | null;
+  previewInFlight: boolean;
 }) {
   const review = pendingUpload?.review;
   const reviewClauses = Array.isArray(review?.clauseSummaries) ? review.clauseSummaries : [];
@@ -1279,14 +1301,29 @@ function LeaseCreationWorkflow({
           ) : null}
 
           {workflowUploading && (
-            <div className="flex items-center gap-4 rounded-xl border border-emerald-200 bg-emerald-50 p-4" aria-live="polite" aria-busy="true">
-              <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-white shadow-sm">
-                <span className="h-5 w-5 animate-spin rounded-full border-2 border-emerald-600 border-r-transparent" />
-              </span>
-              <div>
-                <p className="text-sm font-semibold text-slate-900">Scanning lease with AI</p>
-                <p className="text-xs text-slate-500">Extracting terms, clauses, and tags. Keep this page open.</p>
+            <div className="flex flex-col gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-4" aria-live="polite" aria-busy="true">
+              <div className="flex items-center gap-4">
+                <span className="flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-xl bg-white shadow-sm">
+                  <span className="h-5 w-5 animate-spin rounded-full border-2 border-emerald-600 border-r-transparent" />
+                </span>
+                <div className="flex-1">
+                  <p className="text-sm font-semibold text-slate-900">
+                    {uploadProgress?.label ?? "Scanning lease with AI"}
+                  </p>
+                  <p className="text-xs text-slate-500">Keep this page open while we process your document.</p>
+                </div>
+                {uploadProgress && (
+                  <span className="text-xs font-semibold text-emerald-700">{uploadProgress.percent}%</span>
+                )}
               </div>
+              {uploadProgress && (
+                <div className="h-1.5 w-full overflow-hidden rounded-full bg-emerald-100">
+                  <div
+                    className="h-full bg-emerald-500 transition-all duration-300"
+                    style={{ width: `${uploadProgress.percent}%` }}
+                  />
+                </div>
+              )}
             </div>
           )}
 	          {pendingUpload || selectedTemplateNeedsValidation ? (
@@ -1871,7 +1908,42 @@ function LeaseCreationWorkflow({
     if (activeSection === "tags") {
       return (
         <div className="space-y-4">
-          <DragDropTagPreview previewHtml={pendingUpload?.previewHtml ?? null} loading={busy === "workflow-preview"} />
+          {pendingUpload?.schemaNotReady && (
+            <div className="flex items-start gap-3 rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5 flex-shrink-0 mt-0.5">
+                <circle cx="12" cy="12" r="10" /><path d="M12 8v4M12 16h.01" />
+              </svg>
+              <div className="flex-1">
+                <p className="font-semibold">Tag detection is still processing</p>
+                <p className="mt-0.5 text-xs">The document is shown below. Field chips will appear once AI extraction completes. You can continue without them.</p>
+              </div>
+              <button
+                type="button"
+                onClick={onGeneratePreview}
+                disabled={busy === "workflow-preview"}
+                className="rounded-md border border-amber-300 bg-white px-3 py-1 text-xs font-semibold text-amber-800 hover:bg-amber-100 disabled:opacity-50"
+              >
+                {busy === "workflow-preview" ? "Retrying…" : "Retry"}
+              </button>
+            </div>
+          )}
+          <TaggableDocumentPreview
+            taggableHtml={pendingUpload?.taggableHtml ?? null}
+            previewHtmlFallback={pendingUpload?.previewHtml ?? null}
+            manualPairs={manualPairs}
+            onTagPlaced={onManualPairAdded}
+            onTagRemoved={onManualPairRemoved}
+            // Show the loader whenever:
+            //   - a preview request is in flight (silent OR manual)
+            //   - OR the schema isn't ready yet but the user has reached this step
+            //   - OR we have a pending upload but no preview HTML has been produced yet
+            loading={
+              busy === "workflow-preview" ||
+              previewInFlight ||
+              (!!pendingUpload?.schemaNotReady) ||
+              (!!pendingUpload && !pendingUpload.previewHtml)
+            }
+          />
           <div className="flex items-center gap-3">
             <BackButton />
             <button
@@ -2142,6 +2214,11 @@ export function LeaseWorkspaceClient({
   const router = useRouter();
   const toast = useToast();
   const fileRef = useRef<HTMLInputElement>(null);
+  // In-flight guard for silent previews — prevents duplicate API calls when the
+  // user clicks through multiple workflow steps in quick succession.
+  const silentPreviewInFlight = useRef(false);
+  // Tracks the input signature of the last preview so we don't re-fetch unchanged data
+  const lastSilentPreviewKey = useRef<string>("");
   const workflowFileRef = useRef<HTMLInputElement>(null);
   const [mode, setMode] = useState<WorkspaceMode>("create");
   const [selectedPropertyId, setSelectedPropertyId] = useState(properties[0]?.id ?? "");
@@ -2160,6 +2237,13 @@ export function LeaseWorkspaceClient({
   const [workflowTerms, setWorkflowTerms] = useState<WorkflowTerms>(defaultWorkflowTerms);
   const [pendingWorkflowUpload, setPendingWorkflowUpload] = useState<PendingWorkflowUpload | null>(null);
   const [acceptedSuggestions, setAcceptedSuggestions] = useState(false);
+  const [manualPairs, setManualPairs] = useState<Array<{ search: string; token: string; label: string; kind: "signature" | "autofill" }>>([]);
+  // Per-stage upload progress used while extracting text in the browser
+  // and waiting for the server-side AI review.
+  const [workflowUploadProgress, setWorkflowUploadProgress] = useState<{ label: string; percent: number } | null>(null);
+  // True whenever ANY preview request (silent or manual) is in flight.
+  // Used by the Tags step to show a loader instead of an empty canvas.
+  const [previewInFlight, setPreviewInFlight] = useState(false);
   const [workflowStarted, setWorkflowStarted] = useState(false);
   const [workflowAdvanceToken, setWorkflowAdvanceToken] = useState(0);
 
@@ -2314,10 +2398,40 @@ export function LeaseWorkspaceClient({
     setBusy("workflow-upload");
     setPendingWorkflowUpload(null);
     setAcceptedSuggestions(false);
+    setWorkflowUploadProgress(null);
     try {
+      // Step 1 — Extract text from the file ENTIRELY IN THE BROWSER (no server,
+      // no Claude). Eliminates the 30-50s Phase 1 wait for PDFs and gives the
+      // user instant per-page progress feedback.
+      let clientExtractedText = "";
+      try {
+        const { extractLeaseTextInBrowser } = await import("@/lib/client-extract-text");
+        const result = await extractLeaseTextInBrowser(file, (info) => {
+          if (info.stage === "reading-file") {
+            setWorkflowUploadProgress({ label: "Reading file…", percent: 5 });
+          } else if (info.stage === "parsing-pdf" && info.page && info.totalPages) {
+            const pct = Math.round((info.page / info.totalPages) * 60) + 10;
+            setWorkflowUploadProgress({ label: `Reading page ${info.page} of ${info.totalPages}…`, percent: pct });
+          } else if (info.stage === "parsing-docx") {
+            setWorkflowUploadProgress({ label: "Reading document text…", percent: 40 });
+          }
+        });
+        if (!result.needsServerExtraction) {
+          clientExtractedText = result.text;
+        }
+        // else: scanned PDF or unknown — leave clientExtractedText empty so the
+        // server falls back to its Claude vision pipeline.
+      } catch (extractErr) {
+        console.warn("[runWorkflowExtraction] browser text extraction failed, falling back to server:", extractErr);
+        // Non-fatal — server will do full extraction
+      }
+
+      setWorkflowUploadProgress({ label: "AI is reviewing the document…", percent: 75 });
+
       const body = new FormData();
       body.append("file", file);
       body.append("name", file.name.replace(/\.[^.]+$/, "") || "Lease template");
+      if (clientExtractedText) body.append("clientExtractedText", clientExtractedText);
       const res = await fetch(`/api/properties/${selectedProperty.id}/lease-templates/pre-review`, {
         method: "POST",
         body,
@@ -2329,16 +2443,23 @@ export function LeaseWorkspaceClient({
         contentType?: string;
         fileName?: string;
         name?: string;
+        schema?: object | null;
+        schemaPending?: boolean;
       };
       if (!res.ok || !data.review || !data.blobUrl || !data.contentType || !data.fileName || !data.name) {
         throw new Error(data.error ?? "Could not extract lease details.");
       }
+      // Reset the silent preview cache key — a new upload means new inputs
+      lastSilentPreviewKey.current = "";
       setPendingWorkflowUpload({
         blobUrl: data.blobUrl,
         contentType: data.contentType,
         fileName: data.fileName,
         name: data.name,
         review: data.review,
+        // Schema may be returned eagerly OR is being extracted in the background
+        // (in which case the preview route will await the cached promise).
+        schema: data.schema ?? null,
       });
       const extractedLandlord = data.review?.extractedTerms?.landlordName?.trim();
       const extractedSignatory = data.review?.extractedTerms?.landlordSignatory?.trim();
@@ -2414,6 +2535,7 @@ export function LeaseWorkspaceClient({
       toast.error(err instanceof Error ? err.message : "Could not extract lease.", { title: "Leases" });
     } finally {
       setBusy(null);
+      setWorkflowUploadProgress(null);
     }
   }
 
@@ -2446,12 +2568,32 @@ export function LeaseWorkspaceClient({
 
   async function generateWorkflowPreviewSilent() {
     if (!selectedProperty || !pendingWorkflowUpload || busy === "workflow-preview") return;
+    if (silentPreviewInFlight.current) return;   // skip — a silent preview is already running
+
+    // Build a signature from the inputs that affect the preview. If unchanged
+    // since the last successful call, skip — avoids redundant 8-13s requests on
+    // every step advance.
+    const key = JSON.stringify({
+      b: pendingWorkflowUpload.blobUrl,
+      s: pendingWorkflowUpload.schema ? "yes" : "no",
+      o: workflowProfile.landlordName ?? "",
+      l: workflowProfile.landlordSignatory ?? "",
+      m: workflowProfile.propertyManagerName ?? "",
+      e: workflowProfile.propertyManagerEmail ?? "",
+      p: workflowProfile.propertyManagerPhone ?? "",
+      u: computeTenantPaidUtilities() ?? "",
+    });
+    if (key === lastSilentPreviewKey.current && pendingWorkflowUpload.previewHtml) return;
+
+    silentPreviewInFlight.current = true;
+    setPreviewInFlight(true);
     try {
       const res = await fetch(`/api/properties/${selectedProperty.id}/lease-templates/preview`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           blobUrl: pendingWorkflowUpload.blobUrl,
+          schema: pendingWorkflowUpload.schema ?? undefined,
           organizationName: workflowProfile.landlordName || undefined,
           landlordSignatory: workflowProfile.landlordSignatory || undefined,
           propertyManagerName: workflowProfile.propertyManagerName || undefined,
@@ -2460,23 +2602,30 @@ export function LeaseWorkspaceClient({
           tenantPaidUtilities: computeTenantPaidUtilities() || undefined,
         }),
       });
-      const data = (await res.json().catch(() => ({}))) as { previewHtml?: string; fileBase64?: string };
+      const data = (await res.json().catch(() => ({}))) as { previewHtml?: string; taggableHtml?: string; fileBase64?: string; schemaNotReady?: boolean };
       if (res.ok && data.previewHtml) {
+        lastSilentPreviewKey.current = key;
         setPendingWorkflowUpload((upload) => upload ? {
           ...upload,
           previewHtml: data.previewHtml ?? null,
+          taggableHtml: data.taggableHtml ?? null,
           previewFileBase64: data.fileBase64 ?? null,
           previewError: null,
+          schemaNotReady: data.schemaNotReady ?? false,
         } : upload);
       }
     } catch {
       // silent — user can still manually generate in the review step
+    } finally {
+      silentPreviewInFlight.current = false;
+      setPreviewInFlight(false);
     }
   }
 
   async function generateWorkflowPreview() {
     if (!selectedProperty || !pendingWorkflowUpload) return;
     setBusy("workflow-preview");
+    setPreviewInFlight(true);
     setPendingWorkflowUpload((upload) => upload ? { ...upload, previewError: null } : upload);
     try {
       const res = await fetch(`/api/properties/${selectedProperty.id}/lease-templates/preview`, {
@@ -2484,6 +2633,7 @@ export function LeaseWorkspaceClient({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           blobUrl: pendingWorkflowUpload.blobUrl,
+          schema: pendingWorkflowUpload.schema ?? undefined,
           organizationName: workflowProfile.landlordName || undefined,
           landlordSignatory: workflowProfile.landlordSignatory || undefined,
           propertyManagerName: workflowProfile.propertyManagerName || undefined,
@@ -2495,14 +2645,18 @@ export function LeaseWorkspaceClient({
       const data = (await res.json().catch(() => ({}))) as {
         error?: string;
         previewHtml?: string;
+        taggableHtml?: string;
         fileBase64?: string;
+        schemaNotReady?: boolean;
       };
       if (!res.ok || !data.previewHtml) throw new Error(data.error ?? "Could not generate template preview.");
       setPendingWorkflowUpload((upload) => upload ? {
         ...upload,
         previewHtml: data.previewHtml ?? null,
+        taggableHtml: data.taggableHtml ?? null,
         previewFileBase64: data.fileBase64 ?? null,
         previewError: null,
+        schemaNotReady: data.schemaNotReady ?? false,
       } : upload);
     } catch (err) {
       const message = err instanceof Error ? err.message : "Could not generate template preview.";
@@ -2510,6 +2664,7 @@ export function LeaseWorkspaceClient({
       toast.error(message, { title: "Leases" });
     } finally {
       setBusy(null);
+      setPreviewInFlight(false);
     }
   }
 
@@ -2566,6 +2721,8 @@ export function LeaseWorkspaceClient({
               "{{pet_fee_amount}}",
             ],
           },
+          // Manually placed tag pairs from the Tags step — merged into schema.pairs on save
+          manualPairs: manualPairs.map(({ search, token }) => ({ search, token })),
         }),
       });
       const data = (await res.json()) as { error?: string; template?: { id: string } };
@@ -2573,6 +2730,7 @@ export function LeaseWorkspaceClient({
       setSelectedTemplateId(data.template.id);
       setPendingWorkflowUpload(null);
       setAcceptedSuggestions(false);
+      setManualPairs([]);
       setWorkflowStarted(false);
       setMode("create");
       toast.success("Tagged lease template saved.", { title: "Leases" });
@@ -2657,6 +2815,15 @@ export function LeaseWorkspaceClient({
               advanceToken={workflowAdvanceToken}
               workflowStarted={workflowStarted}
               onWorkflowStarted={setWorkflowStarted}
+              manualPairs={manualPairs}
+              onManualPairAdded={(pair) =>
+                setManualPairs((prev) => [...prev.filter((p) => p.search !== pair.search), pair])
+              }
+              onManualPairRemoved={(search) =>
+                setManualPairs((prev) => prev.filter((p) => p.search !== search))
+              }
+              uploadProgress={workflowUploadProgress}
+              previewInFlight={previewInFlight}
             />
           ) : null}
 

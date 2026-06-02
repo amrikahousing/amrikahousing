@@ -9,6 +9,26 @@ export function escapeHtmlText(value: string) {
     .replaceAll("'", "&#39;");
 }
 
+// Sanitizer for the interactive taggable preview in the Tags step.
+// Allows data-token and data-blank-search on <span> so the drag-drop engine works.
+export function sanitizeTaggableHtml(html: string) {
+  return sanitizeHtml(html, {
+    allowedTags: [
+      "a", "b", "br", "caption", "col", "colgroup", "div", "em",
+      "h1", "h2", "h3", "h4", "h5", "h6", "hr", "i", "li", "ol",
+      "p", "s", "span", "strong", "sub", "sup",
+      "table", "tbody", "td", "tfoot", "th", "thead", "tr", "u", "ul",
+    ],
+    allowedAttributes: {
+      a: ["href", "name", "target", "rel"],
+      td: ["colspan", "rowspan"],
+      th: ["colspan", "rowspan"],
+      span: ["class", "data-token", "data-blank-search"],
+    },
+    allowedSchemes: ["http", "https", "mailto", "tel"],
+  });
+}
+
 export function sanitizeLeasePreviewHtml(html: string) {
   return sanitizeHtml(html, {
     allowedTags: [

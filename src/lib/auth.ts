@@ -1,4 +1,5 @@
 import { auth, clerkClient, currentUser } from "@clerk/nextjs/server";
+import { cache } from "react";
 import { prisma } from "./db";
 import { syncClerkMembershipAccess } from "./permissions";
 
@@ -120,6 +121,18 @@ export async function syncLocalUser({
   if (!dbOrgId) return null;
 
   try {
+    // Fast path: user already exists — return their id without any writes.
+    const existing = await prisma.users.findUnique({
+      where: { clerk_user_id: userId },
+      select: { id: true },
+    });
+    if (existing) {
+      // Membership sync is only needed on first visit or role changes (handled by
+      // Clerk webhook). Skip it on every warm request to save a round-trip.
+      return existing.id;
+    }
+
+    // Slow path: first time this user hits the app — fetch full Clerk profile and create.
     const clerkUser = user ?? (await currentUser().catch(() => null));
     const record = await upsertUserRecord({
       userId,
@@ -144,10 +157,11 @@ export async function syncLocalUser({
 
 /**
  * Verifies the request has an authenticated user + active Clerk org.
- * Upserts the organization in DB using the real org name from Clerk.
- * Returns OrgContext on success, AccessError on failure.
+ * On first call per request: ensures the org and user exist in DB.
+ * Subsequent calls within the same request return the cached result instantly
+ * (React `cache()` deduplicates per server request lifecycle).
  */
-export async function requireOrgAccess(): Promise<OrgContext | AccessError> {
+export const requireOrgAccess = cache(async (): Promise<OrgContext | AccessError> => {
   const [{ userId, orgId, orgRole }, user] = await Promise.all([
     auth(),
     currentUser().catch(() => null),
@@ -156,22 +170,31 @@ export async function requireOrgAccess(): Promise<OrgContext | AccessError> {
   if (!userId) return { error: "Unauthorized", status: 401 };
   if (!orgId) return { error: "No active organization. Please join or create an organization.", status: 403 };
 
-  // Fetch real org name from Clerk
-  let orgName = orgId;
-  try {
-    const clerk = await clerkClient();
-    const clerkOrg = await clerk.organizations.getOrganization({ organizationId: orgId });
-    orgName = clerkOrg.name;
-  } catch {
-    // Non-fatal: fall back to orgId as name
-  }
-
-  const org = await prisma.organizations.upsert({
+  // Only look up the org in DB — skip the Clerk API call for the org name on every
+  // request. The name is synced once at org creation / via webhook, not on every hit.
+  let org = await prisma.organizations.findUnique({
     where: { clerk_org_id: orgId },
-    update: { name: orgName },
-    create: { clerk_org_id: orgId, name: orgName },
     select: { id: true },
   });
+
+  if (!org) {
+    // First time this org hits the app — fetch name from Clerk once and create the row.
+    let orgName = orgId;
+    try {
+      const clerk = await clerkClient();
+      const clerkOrg = await clerk.organizations.getOrganization({ organizationId: orgId });
+      orgName = clerkOrg.name;
+    } catch {
+      // Non-fatal: fall back to orgId as name
+    }
+    org = await prisma.organizations.upsert({
+      where: { clerk_org_id: orgId },
+      update: {},
+      create: { clerk_org_id: orgId, name: orgName },
+      select: { id: true },
+    });
+  }
+
   const userDbId = await syncLocalUser({
     userId,
     orgId,
@@ -188,7 +211,7 @@ export async function requireOrgAccess(): Promise<OrgContext | AccessError> {
     orgRole: orgRole ?? null,
     isOrgAdmin: orgRole === "org:admin",
   };
-}
+});
 
 export function isAccessError(v: OrgContext | AccessError): v is AccessError {
   return "error" in v;

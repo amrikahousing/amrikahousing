@@ -9,8 +9,8 @@ export type DocuSealRecipient = {
 };
 
 function apiKey() {
-  const key = process.env.DOCUSEAL_API_KEY;
-  if (!key) throw new Error("DOCUSEAL_API_KEY is not configured.");
+  const key = process.env.DOCUSEAL_API_KEY ?? process.env.DOCUSEAL_API_SECRET;
+  if (!key) throw new Error("DOCUSEAL_API_KEY (or DOCUSEAL_API_SECRET) is not configured.");
   return key;
 }
 
