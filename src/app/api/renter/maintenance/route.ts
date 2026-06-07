@@ -1,5 +1,6 @@
 import { requireTenantAccess, isTenantAccessError } from "@/lib/renter-auth";
 import { prisma } from "@/lib/db";
+import { logMaintenanceEvent } from "@/lib/maintenance-audit";
 
 export async function GET() {
   const ctx = await requireTenantAccess();
@@ -25,6 +26,19 @@ export async function GET() {
         select: {
           unit_number: true,
           properties: { select: { name: true, address: true } },
+        },
+      },
+      events: {
+        orderBy: { created_at: "asc" },
+        select: {
+          id: true,
+          action: true,
+          actor_type: true,
+          actor_name: true,
+          from_status: true,
+          to_status: true,
+          note: true,
+          created_at: true,
         },
       },
     },
@@ -91,6 +105,17 @@ export async function POST(request: Request) {
       status: "open",
     },
     select: { id: true, title: true, priority: true, status: true, created_at: true },
+  });
+
+  await logMaintenanceEvent({
+    organizationId: ctx.organizationId,
+    maintenanceRequestId: req.id,
+    action: "created",
+    actorType: "tenant",
+    actorId: ctx.tenantId,
+    toStatus: req.status,
+    note: "Request submitted by tenant",
+    metadata: { category: categoryLabel, priority: validPriority },
   });
 
   return Response.json({ request: req }, { status: 201 });

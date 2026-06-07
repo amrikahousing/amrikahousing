@@ -41,6 +41,19 @@ export default async function MaintenancePage() {
           name: true,
         },
       },
+      events: {
+        orderBy: { created_at: "asc" },
+        select: {
+          id: true,
+          action: true,
+          actor_type: true,
+          actor_name: true,
+          from_status: true,
+          to_status: true,
+          note: true,
+          created_at: true,
+        },
+      },
     },
     orderBy: [{ created_at: "desc" }],
   });
@@ -82,6 +95,8 @@ export default async function MaintenancePage() {
     return {
       id: request.id,
       propertyId: request.units.properties.id,
+      unitId: request.unit_id,
+      unitNumber: request.units.unit_number,
       tenantId: request.tenants?.clerk_user_id ?? userId,
       title: request.title,
       description: request.description ?? "No description provided.",
@@ -94,6 +109,16 @@ export default async function MaintenancePage() {
       assignmentNote: request.vendors?.name ? "Vendor assigned." : null,
       createdAt: request.created_at.toISOString(),
       statusChangeNote: request.status_change_note ?? null,
+      events: request.events.map((event) => ({
+        id: event.id,
+        action: event.action,
+        actorType: event.actor_type,
+        actorName: event.actor_name,
+        fromStatus: event.from_status,
+        toStatus: event.to_status,
+        note: event.note,
+        createdAt: event.created_at.toISOString(),
+      })),
     };
   });
 

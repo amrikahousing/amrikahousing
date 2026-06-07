@@ -849,7 +849,13 @@ export function OnboardRenterWizard({
 
   function renderChoosePath() {
     const unit = selectedUnit;
-    const pathCards = [
+    const pathCards: Array<{
+      id: LeaseMode;
+      title: string;
+      text: string;
+      icon: React.ReactNode;
+      disabled?: boolean;
+    }> = [
       {
         id: "uploaded" as LeaseMode,
         title: "Upload signed lease",
@@ -861,7 +867,6 @@ export function OnboardRenterWizard({
         title: "Generate lease for e-sign",
         text: "Enter tenant details, choose a property template, and send the lease through DocuSeal.",
         icon: <SparklesIcon className="h-5 w-5" />,
-        disabled: true,
       },
     ];
 
