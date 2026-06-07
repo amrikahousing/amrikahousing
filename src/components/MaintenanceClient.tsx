@@ -4,7 +4,13 @@ import { useMemo, useRef, useState } from "react";
 
 export type UserRole = "manager" | "tenant";
 export type RequestPriority = "low" | "medium" | "high" | "emergency";
-export type RequestStatus = "open" | "in_progress" | "completed" | "rejected" | "cancelled";
+export type RequestStatus =
+  | "open"
+  | "in_progress"
+  | "pending_acceptance"
+  | "completed"
+  | "rejected"
+  | "cancelled";
 export type RequestCategory =
   | "plumbing"
   | "electrical"
@@ -22,9 +28,22 @@ export type Property = {
   zipCode: string;
 };
 
+export type MaintenanceActivityEvent = {
+  id: string;
+  action: string;
+  actorType: string;
+  actorName: string | null;
+  fromStatus: string | null;
+  toStatus: string | null;
+  note: string | null;
+  createdAt: string;
+};
+
 export type MaintenanceRequest = {
   id: string;
   propertyId: string;
+  unitId: string;
+  unitNumber: string;
   tenantId: string;
   title: string;
   description: string;
@@ -37,6 +56,7 @@ export type MaintenanceRequest = {
   assignmentNote: string | null;
   createdAt: string;
   statusChangeNote: string | null;
+  events: MaintenanceActivityEvent[];
 };
 
 type MaintenanceClientProps = {
@@ -113,10 +133,44 @@ function statusClass(status: RequestStatus) {
       return "border-emerald-200 bg-emerald-50 text-emerald-700";
     case "in_progress":
       return "border-sky-200 bg-sky-50 text-sky-700";
+    case "pending_acceptance":
+      return "border-indigo-200 bg-indigo-50 text-indigo-700";
     case "rejected":
       return "border-rose-200 bg-rose-50 text-rose-700";
     default:
       return "border-amber-200 bg-amber-50 text-amber-700";
+  }
+}
+
+function statusText(status: string | null) {
+  if (!status) return "";
+  if (status === "pending_acceptance") return "Awaiting tenant";
+  return status.replaceAll("_", " ");
+}
+
+function activityActor(event: MaintenanceActivityEvent) {
+  if (event.actorType === "tenant") return "Tenant";
+  if (event.actorType === "manager") return event.actorName?.trim() || "Property team";
+  return event.actorName?.trim() || "System";
+}
+
+function activityLabel(event: MaintenanceActivityEvent) {
+  const who = activityActor(event);
+  switch (event.action) {
+    case "created":
+      return `${who} submitted this request`;
+    case "cancelled":
+      return `${who} cancelled this request`;
+    case "tenant_confirmed":
+      return `${who} confirmed the work was completed`;
+    case "tenant_disputed":
+      return `${who} reported the work is not done`;
+    case "status_changed":
+      return `${who} changed status to ${statusText(event.toStatus) || "updated"}`;
+    case "updated":
+      return `${who} updated this request`;
+    default:
+      return `${who} updated this request`;
   }
 }
 
@@ -253,8 +307,12 @@ export function MaintenanceClient({
     useState<MaintenanceRequest[]>(initialRequests);
   const [searchQuery, setSearchQuery] = useState("");
   const [selectedPropertyId, setSelectedPropertyId] = useState("all");
+  const [selectedUnitId, setSelectedUnitId] = useState("all");
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [selectedPriority, setSelectedPriority] = useState("all");
+  // Default hides closed requests (completed/cancelled/rejected) so the queue
+  // shows active work first.
+  const [selectedStatus, setSelectedStatus] = useState("active");
   const [filtersOpen, setFiltersOpen] = useState(false);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [autoTriageEnabled, setAutoTriageEnabled] = useState(true);
@@ -266,6 +324,7 @@ export function MaintenanceClient({
     status: RequestStatus;
   } | null>(null);
   const [resolutionNote, setResolutionNote] = useState("");
+  const [expandedActivityId, setExpandedActivityId] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [requestErrors, setRequestErrors] = useState({ title: "", description: "" });
@@ -285,6 +344,22 @@ export function MaintenanceClient({
       (a, b) => priorityRank(a) - priorityRank(b),
     );
   }, [requests]);
+
+  const unitOptions = useMemo(() => {
+    const byId = new Map<string, string>();
+    requests
+      .filter(
+        (request) =>
+          selectedPropertyId === "all" ||
+          request.propertyId === selectedPropertyId,
+      )
+      .forEach((request) => {
+        if (request.unitId) byId.set(request.unitId, request.unitNumber);
+      });
+    return Array.from(byId, ([id, number]) => ({ id, number })).sort((a, b) =>
+      a.number.localeCompare(b.number, undefined, { numeric: true }),
+    );
+  }, [requests, selectedPropertyId]);
 
   const visibleRequests = useMemo(() => {
     const scopedRequests =
@@ -306,6 +381,10 @@ export function MaintenanceClient({
           request.assignmentNote,
           request.category,
           request.priority,
+          request.status,
+          statusText(request.status),
+          request.unitNumber,
+          request.unitNumber ? `unit ${request.unitNumber}` : "",
           label,
         ]
           .filter(Boolean)
@@ -320,12 +399,26 @@ export function MaintenanceClient({
       )
       .filter(
         (request) =>
+          selectedUnitId === "all" || request.unitId === selectedUnitId,
+      )
+      .filter(
+        (request) =>
           selectedCategory === "all" || request.category === selectedCategory,
       )
       .filter(
         (request) =>
           selectedPriority === "all" || request.priority === selectedPriority,
       )
+      .filter((request) => {
+        if (selectedStatus === "all") return true;
+        if (selectedStatus === "active")
+          return (
+            request.status !== "completed" &&
+            request.status !== "cancelled" &&
+            request.status !== "rejected"
+          );
+        return request.status === selectedStatus;
+      })
       .sort((a, b) => {
         const rank = priorityRank(a.priority) - priorityRank(b.priority);
         if (rank !== 0) return rank;
@@ -340,14 +433,18 @@ export function MaintenanceClient({
     searchQuery,
     selectedCategory,
     selectedPriority,
+    selectedStatus,
     selectedPropertyId,
+    selectedUnitId,
     userId,
   ]);
 
   const dropdownFilterCount =
     (selectedPropertyId !== "all" ? 1 : 0) +
+    (selectedUnitId !== "all" ? 1 : 0) +
     (selectedCategory !== "all" ? 1 : 0) +
-    (selectedPriority !== "all" ? 1 : 0);
+    (selectedPriority !== "all" ? 1 : 0) +
+    (selectedStatus !== "active" ? 1 : 0);
 
   const activeFilterCount =
     (searchQuery.trim() ? 1 : 0) + dropdownFilterCount;
@@ -355,8 +452,10 @@ export function MaintenanceClient({
   function resetFilters() {
     setSearchQuery("");
     setSelectedPropertyId("all");
+    setSelectedUnitId("all");
     setSelectedCategory("all");
     setSelectedPriority("all");
+    setSelectedStatus("active");
   }
 
   function handleStatusChange(id: string, status: RequestStatus) {
@@ -369,9 +468,14 @@ export function MaintenanceClient({
   }
 
   function commitStatusChange(id: string, status: RequestStatus, note: string) {
+    const previousStatus = requests.find((request) => request.id === id)?.status ?? null;
+    // Completing a request with a tenant routes through tenant confirmation
+    // server-side, so reflect the awaiting state optimistically.
+    const optimisticStatus: RequestStatus =
+      status === "completed" ? "pending_acceptance" : status;
     setRequests((current) =>
       current.map((request) =>
-        request.id === id ? { ...request, status } : request,
+        request.id === id ? { ...request, status: optimisticStatus } : request,
       ),
     );
     setPendingStatusChange(null);
@@ -383,11 +487,29 @@ export function MaintenanceClient({
       body: JSON.stringify({ status, actorName: "Manager", resolutionNote: note }),
     }).then(async (res) => {
       if (res.ok) {
-        const data = (await res.json()) as { request: { status_change_note: string } };
+        const data = (await res.json()) as {
+          request: { status: RequestStatus; status_change_note: string };
+        };
+        const serverStatus = data.request.status;
+        const newEvent: MaintenanceActivityEvent = {
+          id: crypto.randomUUID(),
+          action: previousStatus === serverStatus ? "updated" : "status_changed",
+          actorType: "manager",
+          actorName: "Manager",
+          fromStatus: previousStatus,
+          toStatus: serverStatus,
+          note: data.request.status_change_note,
+          createdAt: new Date().toISOString(),
+        };
         setRequests((current) =>
           current.map((request) =>
             request.id === id
-              ? { ...request, statusChangeNote: data.request.status_change_note }
+              ? {
+                  ...request,
+                  status: serverStatus,
+                  statusChangeNote: data.request.status_change_note,
+                  events: [...request.events, newEvent],
+                }
               : request,
           ),
         );
@@ -411,6 +533,8 @@ export function MaintenanceClient({
     const nextRequest: MaintenanceRequest = {
       id: crypto.randomUUID(),
       propertyId: initialProperties[0]?.id ?? "",
+      unitId: "",
+      unitNumber: "",
       tenantId: userId,
       title: title.trim(),
       description: description.trim(),
@@ -423,6 +547,7 @@ export function MaintenanceClient({
       assignmentNote: "Your property team has been notified.",
       createdAt: new Date().toISOString(),
       statusChangeNote: null,
+      events: [],
     };
 
     if (!nextRequest.propertyId) return;
@@ -530,7 +655,8 @@ export function MaintenanceClient({
                   >
                     <p className="mb-3 text-xs font-medium uppercase tracking-[0.18em] text-slate-500">
                       {propertyLabel(propertyById.get(request.propertyId))}
-                    </p>
+                    {request.unitNumber ? ` · Unit ${request.unitNumber}` : ""}
+  </p>
                     <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                       <div>
                         <h3 className="font-medium text-slate-900">
@@ -542,7 +668,7 @@ export function MaintenanceClient({
                       </div>
                       <div className="flex flex-wrap gap-2">
                         <Badge className={statusClass(request.status)}>
-                          {request.status.replaceAll("_", " ")}
+                          {statusText(request.status)}
                         </Badge>
                         <Badge className={priorityClass(request.priority)}>
                           {request.priority}
@@ -629,7 +755,7 @@ export function MaintenanceClient({
             <input
               value={searchQuery}
               onChange={(event) => setSearchQuery(event.target.value)}
-              placeholder="Search maintenance by title, property, vendor, description..."
+              placeholder="Search by property, unit, type, priority, status, vendor, title..."
               className={`${inputClass} pl-10`}
             />
           </div>
@@ -653,16 +779,32 @@ export function MaintenanceClient({
         </div>
 
         {filtersOpen ? (
-          <div className="mt-3 grid gap-3 sm:grid-cols-3">
+          <div className="mt-3 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <select
               value={selectedPropertyId}
-              onChange={(event) => setSelectedPropertyId(event.target.value)}
+              onChange={(event) => {
+                setSelectedPropertyId(event.target.value);
+                setSelectedUnitId("all");
+              }}
               className={`${inputClass} bg-slate-50`}
             >
               <option value="all">All properties</option>
               {initialProperties.map((property) => (
                 <option key={property.id} value={property.id}>
                   {propertyLabel(property)}
+                </option>
+              ))}
+            </select>
+
+            <select
+              value={selectedUnitId}
+              onChange={(event) => setSelectedUnitId(event.target.value)}
+              className={`${inputClass} bg-slate-50`}
+            >
+              <option value="all">All units</option>
+              {unitOptions.map((unit) => (
+                <option key={unit.id} value={unit.id}>
+                  Unit {unit.number}
                 </option>
               ))}
             </select>
@@ -692,6 +834,21 @@ export function MaintenanceClient({
                 </option>
               ))}
             </select>
+
+            <select
+              value={selectedStatus}
+              onChange={(event) => setSelectedStatus(event.target.value)}
+              className={`${inputClass} bg-slate-50`}
+            >
+              <option value="active">Active (open requests)</option>
+              <option value="all">All statuses</option>
+              <option value="open">Open</option>
+              <option value="in_progress">In Progress</option>
+              <option value="pending_acceptance">Awaiting tenant</option>
+              <option value="completed">Completed</option>
+              <option value="rejected">Rejected</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
           </div>
         ) : null}
 
@@ -719,6 +876,16 @@ export function MaintenanceClient({
                   </button>
                 </Badge>
               ) : null}
+              {selectedUnitId !== "all" ? (
+                <Badge className="border-slate-200 bg-slate-100 text-slate-700">
+                  Unit:{" "}
+                  {unitOptions.find((unit) => unit.id === selectedUnitId)
+                    ?.number ?? selectedUnitId}
+                  <button type="button" onClick={() => setSelectedUnitId("all")}>
+                    x
+                  </button>
+                </Badge>
+              ) : null}
               {selectedCategory !== "all" ? (
                 <Badge className="border-slate-200 bg-slate-100 text-slate-700">
                   Category: {selectedCategory.replaceAll("_", " ")}
@@ -736,6 +903,20 @@ export function MaintenanceClient({
                   <button
                     type="button"
                     onClick={() => setSelectedPriority("all")}
+                  >
+                    x
+                  </button>
+                </Badge>
+              ) : null}
+              {selectedStatus !== "active" ? (
+                <Badge className="border-slate-200 bg-slate-100 text-slate-700">
+                  Status:{" "}
+                  {selectedStatus === "all"
+                    ? "All"
+                    : statusText(selectedStatus)}
+                  <button
+                    type="button"
+                    onClick={() => setSelectedStatus("active")}
                   >
                     x
                   </button>
@@ -830,13 +1011,18 @@ export function MaintenanceClient({
           visibleRequests.map((request) => (
             <article
               key={request.id}
-              className="rounded-lg border border-slate-200 bg-white p-6 shadow-sm transition-shadow hover:shadow-md"
+              className={`rounded-lg border p-6 shadow-sm transition-shadow ${
+                request.status === "completed" || request.status === "cancelled"
+                  ? "border-slate-200 bg-slate-50 opacity-60"
+                  : "border-slate-200 bg-white hover:shadow-md"
+              }`}
             >
               <div className="flex flex-col gap-6 md:flex-row">
                 <div className="min-w-0 flex-1">
                   <p className="mb-3 text-xs font-medium uppercase tracking-[0.18em] text-slate-500">
                     {propertyLabel(propertyById.get(request.propertyId))}
-                  </p>
+                    {request.unitNumber ? ` · Unit ${request.unitNumber}` : ""}
+</p>
                   <div className="mb-2 flex items-center gap-3">
                     <Badge className={priorityClass(request.priority)}>
                       {request.priority}
@@ -886,6 +1072,55 @@ export function MaintenanceClient({
                     </div>
                   ) : null}
 
+                  {request.events.length > 0 ? (
+                    <div className="mt-4 border-t border-slate-100 pt-3">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setExpandedActivityId((current) =>
+                            current === request.id ? null : request.id,
+                          )
+                        }
+                        aria-expanded={expandedActivityId === request.id}
+                        className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-400 transition-colors hover:text-slate-600"
+                      >
+                        <svg
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2.2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          aria-hidden
+                          className={`h-3 w-3 transition-transform ${expandedActivityId === request.id ? "rotate-90" : ""}`}
+                        >
+                          <path d="m9 18 6-6-6-6" />
+                        </svg>
+                        Activity history ({request.events.length})
+                      </button>
+                      {expandedActivityId === request.id ? (
+                        <ol className="mt-3 space-y-3">
+                          {request.events.map((event) => (
+                            <li key={event.id} className="relative pl-4">
+                              <span className="absolute left-0 top-1.5 h-1.5 w-1.5 rounded-full bg-slate-300" />
+                              <p className="text-xs font-medium text-slate-700">
+                                {activityLabel(event)}
+                              </p>
+                              {event.note ? (
+                                <p className="mt-0.5 text-xs italic text-slate-500">
+                                  {event.note}
+                                </p>
+                              ) : null}
+                              <p className="mt-0.5 text-[11px] text-slate-400">
+                                {formatDate(event.createdAt)}
+                              </p>
+                            </li>
+                          ))}
+                        </ol>
+                      ) : null}
+                    </div>
+                  ) : null}
+
                 </div>
 
                 <div className="flex flex-col gap-3 md:min-w-[200px]">
@@ -899,13 +1134,20 @@ export function MaintenanceClient({
                           event.target.value as RequestStatus,
                         )
                       }
-                      disabled={request.status === "cancelled"}
+                      disabled={request.status === "completed" || request.status === "cancelled"}
                       className="h-9 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/15 disabled:cursor-not-allowed disabled:opacity-60"
                     >
                       <option value="open">Open</option>
                       <option value="in_progress">In Progress</option>
-                      <option value="completed">Completed</option>
+                      <option value="completed">
+                        {request.status === "completed"
+                          ? "Completed"
+                          : "Mark done (tenant confirms)"}
+                      </option>
                       <option value="rejected">Rejected</option>
+                      {request.status === "pending_acceptance" ? (
+                        <option value="pending_acceptance">Awaiting tenant</option>
+                      ) : null}
                       {request.status === "cancelled" ? (
                         <option value="cancelled">Cancelled</option>
                       ) : null}

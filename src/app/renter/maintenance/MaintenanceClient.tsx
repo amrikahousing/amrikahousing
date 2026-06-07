@@ -4,6 +4,17 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useToast } from "@/components/ToastProvider";
 
+type MaintenanceEvent = {
+  id: string;
+  action: string;
+  actor_type: string;
+  actor_name: string | null;
+  from_status: string | null;
+  to_status: string | null;
+  note: string | null;
+  created_at: Date;
+};
+
 type MaintenanceRequest = {
   id: string;
   title: string;
@@ -19,6 +30,7 @@ type MaintenanceRequest = {
     unit_number: string;
     properties: { name: string; address: string };
   };
+  events: MaintenanceEvent[];
 };
 
 type Props = {
@@ -63,6 +75,7 @@ const priorityLabels: Record<string, string> = {
 const statusColors: Record<string, string> = {
   open: "bg-amber-50 text-amber-700",
   in_progress: "bg-sky-50 text-sky-700",
+  pending_acceptance: "bg-indigo-50 text-indigo-700",
   completed: "bg-emerald-50 text-emerald-700",
   rejected: "bg-slate-100 text-slate-500",
   cancelled: "bg-rose-50 text-rose-500",
@@ -71,10 +84,39 @@ const statusColors: Record<string, string> = {
 const statusLabels: Record<string, string> = {
   open: "Open",
   in_progress: "In Progress",
+  pending_acceptance: "Awaiting your confirmation",
   completed: "Completed",
   rejected: "Rejected",
   cancelled: "Cancelled",
 };
+
+function actorLabel(event: MaintenanceEvent) {
+  if (event.actor_type === "tenant") return "You";
+  if (event.actor_type === "manager") return event.actor_name?.trim() || "Property team";
+  return event.actor_name?.trim() || "System";
+}
+
+function eventLabel(event: MaintenanceEvent) {
+  const who = actorLabel(event);
+  switch (event.action) {
+    case "created":
+      return `${who} submitted this request`;
+    case "cancelled":
+      return `${who} cancelled this request`;
+    case "tenant_confirmed":
+      return `${who} confirmed the work was completed`;
+    case "tenant_disputed":
+      return `${who} reported the work is not done`;
+    case "status_changed": {
+      const to = statusLabels[event.to_status ?? ""] ?? event.to_status ?? "updated";
+      return `${who} changed status to ${to}`;
+    }
+    case "updated":
+      return `${who} updated this request`;
+    default:
+      return `${who} updated this request`;
+  }
+}
 
 function Icon({ name, className = "" }: { name: string; className?: string }) {
   const shared = {
@@ -118,17 +160,87 @@ export function MaintenanceClient({ requests, hasActiveLease, unitLabel }: Props
     "Other",
   ] as const;
 
+  const DISPUTE_REASONS = [
+    "Issue still present",
+    "Only partially fixed",
+    "New problem after the work",
+    "Other",
+  ] as const;
+
+  const [expandedHistoryId, setExpandedHistoryId] = useState<string | null>(null);
+
   const [pendingCancelId, setPendingCancelId] = useState<string | null>(null);
   const [cancelReason, setCancelReason] = useState<string | null>(null);
   const [cancelOther, setCancelOther] = useState("");
   const [cancelError, setCancelError] = useState<string | null>(null);
   const [isClosing, setIsClosing] = useState(false);
 
+  const [pendingDisputeId, setPendingDisputeId] = useState<string | null>(null);
+  const [disputeReason, setDisputeReason] = useState<string | null>(null);
+  const [disputeOther, setDisputeOther] = useState("");
+  const [disputeError, setDisputeError] = useState<string | null>(null);
+  const [confirmingId, setConfirmingId] = useState<string | null>(null);
+
   function openCancelPrompt(id: string) {
     setPendingCancelId(id);
     setCancelReason(null);
     setCancelOther("");
     setCancelError(null);
+  }
+
+  function openDisputePrompt(id: string) {
+    setPendingDisputeId(id);
+    setDisputeReason(null);
+    setDisputeOther("");
+    setDisputeError(null);
+  }
+
+  async function confirmCompletion(id: string) {
+    setConfirmingId(id);
+    try {
+      const res = await fetch(`/api/renter/maintenance/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "confirm" }),
+      });
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string };
+        toast.error(data.error ?? "Could not confirm completion.", { title: "Maintenance" });
+        return;
+      }
+      toast.success("Thanks for confirming — this request is now closed.", { title: "Maintenance" });
+      router.refresh();
+    } finally {
+      setConfirmingId(null);
+    }
+  }
+
+  async function confirmDispute() {
+    if (!pendingDisputeId || !disputeReason) return;
+    const note =
+      disputeReason === "Other"
+        ? disputeOther.trim() || "Other"
+        : disputeReason;
+    setIsClosing(true);
+    try {
+      const res = await fetch(`/api/renter/maintenance/${pendingDisputeId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "dispute", note }),
+      });
+      if (!res.ok) {
+        const data = (await res.json()) as { error?: string };
+        const message = data.error ?? "Could not report this request.";
+        setDisputeError(message);
+        toast.error(message, { title: "Maintenance" });
+        return;
+      }
+      setPendingDisputeId(null);
+      setDisputeError(null);
+      router.refresh();
+    } finally {
+      setIsClosing(false);
+    }
   }
 
   async function confirmCancel() {
@@ -301,6 +413,68 @@ export function MaintenanceClient({ requests, hasActiveLease, unitLabel }: Props
         </div>
       ) : null}
 
+      {pendingDisputeId ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="w-full max-w-sm rounded-xl border border-slate-200 bg-white p-6 shadow-2xl">
+            <h2 className="mb-1 text-lg font-semibold text-slate-900">What still needs fixing?</h2>
+            <p className="mb-4 text-sm text-slate-500">
+              We&apos;ll reopen this request and let your property team know.
+            </p>
+            <div className="flex flex-col gap-2">
+              {DISPUTE_REASONS.map((reason) => (
+                <button
+                  key={reason}
+                  type="button"
+                  disabled={isClosing}
+                  onClick={() => setDisputeReason(reason)}
+                  className={`rounded-lg border px-4 py-2.5 text-left text-sm font-medium transition-colors disabled:opacity-60 ${
+                    disputeReason === reason
+                      ? "border-rose-400 bg-rose-50 text-rose-700"
+                      : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                  }`}
+                >
+                  {reason}
+                </button>
+              ))}
+            </div>
+            {disputeReason === "Other" && (
+              <textarea
+                autoFocus
+                value={disputeOther}
+                onChange={(e) => setDisputeOther(e.target.value)}
+                placeholder="Briefly describe what's still wrong…"
+                rows={2}
+                disabled={isClosing}
+                className="mt-3 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-sky-500 focus:ring-2 focus:ring-sky-500/20 disabled:opacity-60"
+              />
+            )}
+            {disputeError ? (
+              <p className="mt-3 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+                {disputeError}
+              </p>
+            ) : null}
+            <div className="mt-5 flex justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setPendingDisputeId(null)}
+                disabled={isClosing}
+                className="rounded-lg border border-slate-300 px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50 disabled:opacity-60"
+              >
+                Back
+              </button>
+              <button
+                type="button"
+                onClick={() => void confirmDispute()}
+                disabled={!disputeReason || isClosing}
+                className="rounded-lg bg-rose-600 px-4 py-2 text-sm font-semibold text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                {isClosing ? "Reopening…" : "Reopen request"}
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       <header>
         <h1 className="text-3xl font-bold tracking-tight text-slate-900">Maintenance</h1>
         <p className="mt-1 text-slate-500">Submit a request and track updates from your property team.</p>
@@ -466,6 +640,7 @@ export function MaintenanceClient({ requests, hasActiveLease, unitLabel }: Props
                 <article key={req.id} className="px-6 py-5">
                   <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">
                     {req.units.properties.address}
+                    {req.units.unit_number ? ` · Unit ${req.units.unit_number}` : ""}
                   </p>
                   <div className="flex items-start justify-between gap-4">
                     <h3 className="font-semibold text-slate-900 leading-snug">{req.title}</h3>
@@ -506,6 +681,75 @@ export function MaintenanceClient({ requests, hasActiveLease, unitLabel }: Props
                       </div>
                     )}
                   </div>
+                  {req.events.length > 0 && (
+                    <div className="mt-3 border-t border-slate-100 pt-3">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setExpandedHistoryId((cur) => (cur === req.id ? null : req.id))
+                        }
+                        aria-expanded={expandedHistoryId === req.id}
+                        className="flex items-center gap-1.5 text-xs font-semibold uppercase tracking-wider text-slate-400 transition-colors hover:text-slate-600"
+                      >
+                        <svg
+                          viewBox="0 0 24 24"
+                          fill="none"
+                          stroke="currentColor"
+                          strokeWidth="2.2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          aria-hidden
+                          className={`h-3 w-3 transition-transform ${expandedHistoryId === req.id ? "rotate-90" : ""}`}
+                        >
+                          <path d="m9 18 6-6-6-6" />
+                        </svg>
+                        Activity history ({req.events.length})
+                      </button>
+                      {expandedHistoryId === req.id && (
+                        <ol className="mt-3 space-y-3">
+                          {req.events.map((event) => (
+                            <li key={event.id} className="relative pl-4">
+                              <span className="absolute left-0 top-1.5 h-1.5 w-1.5 rounded-full bg-slate-300" />
+                              <p className="text-xs font-medium text-slate-700">
+                                {eventLabel(event)}
+                              </p>
+                              {event.note && (
+                                <p className="mt-0.5 text-xs text-slate-500 italic">{event.note}</p>
+                              )}
+                              <p className="mt-0.5 text-[11px] text-slate-400">
+                                {formatDate(event.created_at)}
+                              </p>
+                            </li>
+                          ))}
+                        </ol>
+                      )}
+                    </div>
+                  )}
+                  {req.status === "pending_acceptance" && (
+                    <div className="mt-3 rounded-lg border border-indigo-100 bg-indigo-50/60 px-4 py-3">
+                      <p className="text-sm font-medium text-slate-700">
+                        Your property team marked this as completed. Did the work get done?
+                      </p>
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        <button
+                          type="button"
+                          onClick={() => void confirmCompletion(req.id)}
+                          disabled={confirmingId === req.id}
+                          className="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-semibold text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          {confirmingId === req.id ? "Confirming…" : "Confirm completed"}
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => openDisputePrompt(req.id)}
+                          disabled={confirmingId === req.id}
+                          className="rounded-lg border border-slate-300 bg-white px-4 py-2 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          Work not done
+                        </button>
+                      </div>
+                    </div>
+                  )}
                   {(req.status === "open" || req.status === "in_progress") && (
                     <div className="mt-3 flex justify-end">
                       <button
