@@ -41,6 +41,13 @@ export default async function MaintenancePage() {
           name: true,
         },
       },
+      users: {
+        select: {
+          first_name: true,
+          last_name: true,
+          email: true,
+        },
+      },
       events: {
         orderBy: { created_at: "asc" },
         select: {
@@ -63,6 +70,35 @@ export default async function MaintenancePage() {
     orderBy: { created_at: "desc" },
   });
 
+  const [vendorRows, userRows] = await Promise.all([
+    prisma.vendors.findMany({
+      where: { organization_id: access.orgDbId, is_active: true },
+      select: { id: true, name: true },
+      orderBy: { name: "asc" },
+    }),
+    prisma.users.findMany({
+      where: { organization_id: access.orgDbId, is_active: true, deleted_at: null },
+      select: { id: true, first_name: true, last_name: true, email: true },
+      orderBy: [{ first_name: "asc" }, { last_name: "asc" }],
+    }),
+  ]);
+
+  const vendors = vendorRows.map((vendor) => ({ id: vendor.id, name: vendor.name }));
+  const assignableUsers = userRows.map((user) => ({
+    id: user.id,
+    name:
+      [user.first_name, user.last_name].filter(Boolean).join(" ").trim() ||
+      user.email,
+  }));
+
+  // Response-time SLA targets per priority (hours from submission).
+  const SLA_TARGET_HOURS: Record<RequestPriority, number> = {
+    emergency: 24,
+    high: 72,
+    normal: 168,
+    low: 336,
+  };
+
   const initialProperties: Property[] = properties.map((property) => ({
     id: property.id,
     address: property.name,
@@ -75,12 +111,13 @@ export default async function MaintenancePage() {
     const normalizedPriority: RequestPriority =
       request.priority === "emergency" ||
       request.priority === "high" ||
-      request.priority === "medium" ||
+      request.priority === "normal" ||
       request.priority === "low"
         ? request.priority
-        : request.priority === "normal"
-          ? "medium"
-          : "medium";
+        : // legacy value
+          request.priority === "medium"
+          ? "normal"
+          : "normal";
     const normalizedStatus: RequestStatus =
       request.status === "open" ||
       request.status === "in_progress" ||
@@ -91,6 +128,18 @@ export default async function MaintenancePage() {
         : request.status === "resolved" || request.status === "closed"
           ? "completed"
           : "open";
+
+    const slaDueAt = new Date(
+      request.created_at.getTime() +
+        SLA_TARGET_HOURS[normalizedPriority] * 60 * 60 * 1000,
+    ).toISOString();
+    const assignedUserName =
+      [request.users?.first_name, request.users?.last_name]
+        .filter(Boolean)
+        .join(" ")
+        .trim() ||
+      request.users?.email ||
+      null;
 
     return {
       id: request.id,
@@ -103,8 +152,12 @@ export default async function MaintenancePage() {
       category: "general" as const,
       priority: normalizedPriority,
       status: normalizedStatus,
-      slaDueAt: request.scheduled_date?.toISOString() ?? null,
+      slaDueAt,
       escalatedAt: request.priority === "emergency" ? request.updated_at.toISOString() : null,
+      scheduledDate: request.scheduled_date?.toISOString() ?? null,
+      assignedUserId: request.assigned_to_user ?? null,
+      assignedUserName,
+      assignedVendorId: request.assigned_to_vendor ?? null,
       assignedVendor: request.vendors?.name ?? null,
       assignmentNote: request.vendors?.name ? "Vendor assigned." : null,
       createdAt: request.created_at.toISOString(),
@@ -128,6 +181,8 @@ export default async function MaintenancePage() {
         userId={userId}
         initialProperties={initialProperties}
         initialRequests={initialRequests}
+        vendors={vendors}
+        assignableUsers={assignableUsers}
       />
   );
 }

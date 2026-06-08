@@ -39,6 +39,34 @@ function userLastName(user: ClerkUser) {
   );
 }
 
+function userPhone(user: ClerkUser) {
+  return (
+    metadataString(user?.unsafeMetadata as Record<string, unknown> | null, "phoneNumber") ??
+    metadataString(user?.publicMetadata as Record<string, unknown> | null, "phoneNumber") ??
+    user?.primaryPhoneNumber?.phoneNumber ??
+    null
+  );
+}
+
+const USER_SYNC_SELECT = {
+  id: true,
+  clerk_user_id: true,
+  organization_id: true,
+  email: true,
+  first_name: true,
+  last_name: true,
+  phone: true,
+} as const;
+
+/**
+ * Mirror the Clerk identity into our local `users` row.
+ *
+ * Names/phone change only through the app (which writes them to Clerk), so we
+ * never need to overwrite on every request. We look the user up (required for
+ * `userDbId` regardless), compute the desired values, and only issue an UPDATE
+ * when something actually differs — so a normal authenticated request performs
+ * no write.
+ */
 async function upsertUserRecord({
   userId,
   orgDbId,
@@ -51,47 +79,57 @@ async function upsertUserRecord({
   const email = userEmail(userId, user);
   const firstName = userFirstName(user);
   const lastName = userLastName(user);
-  const data = {
+  const phone = userPhone(user);
+
+  const existing =
+    (await prisma.users.findUnique({
+      where: { clerk_user_id: userId },
+      select: USER_SYNC_SELECT,
+    })) ??
+    (await prisma.users.findUnique({
+      where: { email },
+      select: USER_SYNC_SELECT,
+    }));
+
+  if (!existing) {
+    return prisma.users.create({
+      data: {
+        clerk_user_id: userId,
+        organization_id: orgDbId,
+        email,
+        first_name: firstName ?? null,
+        last_name: lastName ?? null,
+        phone: phone ?? null,
+      },
+      select: { id: true },
+    });
+  }
+
+  // Preserve existing values when Clerk doesn't supply a fresher one.
+  const next = {
     clerk_user_id: userId,
     organization_id: orgDbId,
     email,
-    ...(firstName ? { first_name: firstName } : {}),
-    ...(lastName ? { last_name: lastName } : {}),
-    updated_at: new Date(),
+    first_name: firstName ?? existing.first_name,
+    last_name: lastName ?? existing.last_name,
+    phone: phone ?? existing.phone,
   };
 
-  const existingByClerk = await prisma.users.findUnique({
-    where: { clerk_user_id: userId },
-    select: { id: true },
-  });
+  const changed =
+    existing.clerk_user_id !== next.clerk_user_id ||
+    existing.organization_id !== next.organization_id ||
+    existing.email !== next.email ||
+    existing.first_name !== next.first_name ||
+    existing.last_name !== next.last_name ||
+    existing.phone !== next.phone;
 
-  if (existingByClerk) {
-    return prisma.users.update({
-      where: { id: existingByClerk.id },
-      data,
-      select: { id: true },
-    });
+  if (!changed) {
+    return { id: existing.id };
   }
 
-  const existingByEmail = await prisma.users.findUnique({
-    where: { email },
-    select: { id: true },
-  });
-
-  if (existingByEmail) {
-    return prisma.users.update({
-      where: { id: existingByEmail.id },
-      data,
-      select: { id: true },
-    });
-  }
-
-  return prisma.users.create({
-    data: {
-      ...data,
-      first_name: firstName ?? null,
-      last_name: lastName ?? null,
-    },
+  return prisma.users.update({
+    where: { id: existing.id },
+    data: { ...next, updated_at: new Date() },
     select: { id: true },
   });
 }
