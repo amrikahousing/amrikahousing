@@ -9,7 +9,6 @@ import {
   type ExtractedLeaseSchema,
 } from "@/lib/fill-lease";
 import { getOrgPermissionContext, requirePropertyPermission } from "@/lib/org-authorization";
-import { sanitizeLeasePreviewHtml } from "@/lib/lease-preview-html";
 import { z } from "zod";
 
 const bodySchema = z.object({
@@ -133,14 +132,13 @@ export async function POST(request: NextRequest) {
       tenantPaidUtilities: schema.tenantPaidUtilities,
     }, template.blob_url);
 
-    const mammoth = await import("mammoth");
-    const { value: rawPreviewHtml } = await mammoth.convertToHtml({ buffer: docxBuffer });
-    const previewHtml = sanitizeLeasePreviewHtml(rawPreviewHtml);
-
+    // Return the filled DOCX itself. The client renders these exact bytes with a
+    // layout-preserving renderer (docx-preview), so the preview matches the downloaded
+    // document — including tables, merged cells, and headers/footers that mammoth's HTML
+    // conversion would otherwise drop or mangle.
     return Response.json({
       fileBase64: docxBuffer.toString("base64"),
       format: "docx",
-      previewHtml,
     });
   } catch (err) {
     console.error("[fill-template]", err);

@@ -2,6 +2,7 @@
 
 import { useUser } from "@clerk/nextjs";
 import { useEffect, useRef, useState } from "react";
+import { DocxPreview } from "./DocxPreview";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -337,7 +338,7 @@ export function OnboardRenterWizard({
   const [selectedTemplateId, setSelectedTemplateId] = useState<string>("");
 
   const [filledLeaseUrl, setFilledLeaseUrl] = useState<string | null>(null);
-  const [filledLeaseHtml, setFilledLeaseHtml] = useState<string | null>(null);
+  const [filledLeaseBase64, setFilledLeaseBase64] = useState<string | null>(null);
   const [fillingLease, setFillingLease] = useState(false);
   const [fillError, setFillError] = useState<string | null>(null);
 
@@ -1328,7 +1329,7 @@ export function OnboardRenterWizard({
               if (leaseMode !== "generate") { setStep("confirm"); return; }
               if (filledLeaseUrl) { URL.revokeObjectURL(filledLeaseUrl); }
               setFilledLeaseUrl(null);
-              setFilledLeaseHtml(null);
+              setFilledLeaseBase64(null);
               setFillError(null);
               setFillingLease(true);
               setStep("preview-lease");
@@ -1352,7 +1353,7 @@ export function OnboardRenterWizard({
                     securityDeposit: form.securityDeposit || undefined,
                   }),
                 });
-                let data: { fileBase64?: string; previewHtml?: string; error?: string } = {};
+                let data: { fileBase64?: string; error?: string } = {};
                 try { data = await res.json(); } catch { /* non-JSON body */ }
                 if (!res.ok || !data.fileBase64) {
                   throw new Error(data.error ?? `Server error ${res.status} — check template format.`);
@@ -1361,7 +1362,7 @@ export function OnboardRenterWizard({
                 const mime = "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
                 const url = URL.createObjectURL(new Blob([bytes], { type: mime }));
                 setFilledLeaseUrl(url);
-                setFilledLeaseHtml(data.previewHtml ?? null);
+                setFilledLeaseBase64(data.fileBase64);
               } catch (err) {
                 setFillError(err instanceof Error ? err.message : "Could not generate lease preview.");
               } finally {
@@ -1397,37 +1398,27 @@ export function OnboardRenterWizard({
             <p className="font-medium text-red-600">Could not generate lease</p>
             <p className="text-slate-500">{fillError}</p>
           </div>
-        ) : filledLeaseHtml ? (
-          <>
-            <div className="overflow-hidden rounded-xl border border-slate-200 shadow-sm">
-              <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-4 py-2">
-                <span className="text-xs font-medium text-slate-500">Lease preview</span>
-                <a
-                  href={filledLeaseUrl ?? "#"}
-                  download="lease-preview.docx"
-                  className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm transition hover:bg-slate-50"
-                >
-                  <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
-                  </svg>
-                  Download .docx
-                </a>
-              </div>
-              <div
-                className="lease-preview h-[480px] overflow-y-auto bg-white px-10 py-8 text-sm leading-relaxed text-slate-800"
-                dangerouslySetInnerHTML={{ __html: filledLeaseHtml }}
-              />
+        ) : filledLeaseBase64 ? (
+          <div className="overflow-hidden rounded-xl border border-slate-200 shadow-sm">
+            <div className="flex items-center justify-between border-b border-slate-100 bg-slate-50 px-4 py-2">
+              <span className="text-xs font-medium text-slate-500">Lease preview</span>
+              <a
+                href={filledLeaseUrl ?? "#"}
+                download="lease-preview.docx"
+                className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm transition hover:bg-slate-50"
+              >
+                <svg className="h-3.5 w-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/>
+                </svg>
+                Download .docx
+              </a>
             </div>
-            <style>{`
-              .lease-preview h1, .lease-preview h2 { font-weight: 700; margin: 1em 0 0.4em; }
-              .lease-preview h1 { font-size: 1.15em; text-align: center; }
-              .lease-preview h2 { font-size: 1em; }
-              .lease-preview p { margin: 0.5em 0; }
-              .lease-preview table { width: 100%; border-collapse: collapse; margin: 0.75em 0; }
-              .lease-preview td, .lease-preview th { border: 1px solid #e2e8f0; padding: 6px 10px; vertical-align: top; }
-              .lease-preview strong, .lease-preview b { font-weight: 600; }
-            `}</style>
-          </>
+            <DocxPreview
+              base64={filledLeaseBase64}
+              fallbackHint="Use “Download .docx” to inspect the file."
+              className="lease-preview h-[480px] overflow-y-auto bg-white px-10 py-8 text-sm leading-relaxed text-slate-800"
+            />
+          </div>
         ) : null}
 
         <div className="flex items-center justify-between border-t border-slate-100 pt-2">
@@ -1436,7 +1427,7 @@ export function OnboardRenterWizard({
           </button>
           <button
             type="button"
-            disabled={fillingLease || !!fillError || !filledLeaseHtml}
+            disabled={fillingLease || !!fillError || !filledLeaseBase64}
             onClick={() => setStep("confirm")}
             className="h-11 rounded-lg bg-slate-950 px-4 text-sm font-bold text-white transition hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
           >

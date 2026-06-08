@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useToast } from "./ToastProvider";
+import { DocxPreview } from "./DocxPreview";
 
 type LeaseClause = {
   id: string;
@@ -191,7 +192,6 @@ type PendingWorkflowUpload = {
   fileName: string;
   name: string;
   review: LeaseReview;
-  previewHtml?: string | null;
   previewFileBase64?: string | null;
   previewError?: string | null;
 };
@@ -748,13 +748,85 @@ function placedTagStyle(kind: TagPaletteItem["kind"]) {
     : "border-emerald-300 bg-emerald-50/90 text-emerald-700 shadow-emerald-100";
 }
 
-function DragDropTagPreview({ previewHtml, loading }: { previewHtml: string | null; loading?: boolean }) {
+const ZOOM_MIN = 0.5;
+const ZOOM_MAX = 2;
+const ZOOM_STEP = 0.25;
+
+function clampZoom(value: number) {
+  return Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(value * 100) / 100));
+}
+
+function ZoomControls({
+  zoom,
+  onZoomChange,
+  className = "",
+}: {
+  zoom: number;
+  onZoomChange: (zoom: number) => void;
+  className?: string;
+}) {
+  return (
+    <div className={`flex items-center gap-0.5 rounded-lg bg-white p-0.5 ring-1 ring-slate-200 ${className}`}>
+      <button
+        type="button"
+        onClick={() => onZoomChange(clampZoom(zoom - ZOOM_STEP))}
+        disabled={zoom <= ZOOM_MIN}
+        aria-label="Zoom out"
+        className="flex h-7 w-7 items-center justify-center rounded-md text-slate-600 transition-colors hover:bg-slate-100 disabled:opacity-40 disabled:hover:bg-transparent"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d="M5 12h14" /></svg>
+      </button>
+      <button
+        type="button"
+        onClick={() => onZoomChange(1)}
+        aria-label="Reset zoom"
+        className="min-w-[3rem] rounded-md px-1.5 py-1 text-center text-xs font-semibold tabular-nums text-slate-600 transition-colors hover:bg-slate-100"
+      >
+        {Math.round(zoom * 100)}%
+      </button>
+      <button
+        type="button"
+        onClick={() => onZoomChange(clampZoom(zoom + ZOOM_STEP))}
+        disabled={zoom >= ZOOM_MAX}
+        aria-label="Zoom in"
+        className="flex h-7 w-7 items-center justify-center rounded-md text-slate-600 transition-colors hover:bg-slate-100 disabled:opacity-40 disabled:hover:bg-transparent"
+      >
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d="M12 5v14M5 12h14" /></svg>
+      </button>
+    </div>
+  );
+}
+
+const chevronLeftIcon = <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d="M15 18l-6-6 6-6" /></svg>;
+const chevronRightIcon = <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="h-4 w-4"><path d="M9 18l6-6-6-6" /></svg>;
+
+// Thin vertical rail shown when a side panel is collapsed. Clicking anywhere expands it
+// again; the freed width flows to the flex-1 document canvas between the two rails.
+function CollapsedPanelRail({ label, side, onExpand }: { label: string; side: "left" | "right"; onExpand: () => void }) {
+  return (
+    <button
+      type="button"
+      onClick={onExpand}
+      aria-label={`Expand ${label} panel`}
+      title={`Expand ${label}`}
+      className={`group flex w-9 flex-shrink-0 flex-col items-center gap-2 bg-white py-3 text-slate-400 transition-colors hover:bg-slate-50 hover:text-slate-600 ${side === "left" ? "border-r" : "border-l"} border-slate-100`}
+    >
+      <span className="flex h-6 w-6 items-center justify-center">{side === "left" ? chevronRightIcon : chevronLeftIcon}</span>
+      <span className="text-[11px] font-semibold uppercase tracking-wider [writing-mode:vertical-rl]">{label}</span>
+    </button>
+  );
+}
+
+function DragDropTagPreview({ base64, loading }: { base64: string | null; loading?: boolean }) {
   const [placedTags, setPlacedTags] = useState<PlacedTag[]>([
     { ...tagPalette[1], placementId: "seed-tenant-initials", x: 63, y: 28 },
     { ...tagPalette[3], placementId: "seed-manager-signature", x: 56, y: 78 },
   ]);
   const [draggedTagId, setDraggedTagId] = useState<string | null>(null);
   const [selectedPlaced, setSelectedPlaced] = useState<string | null>(null);
+  const [zoom, setZoom] = useState(1);
+  const [fieldsCollapsed, setFieldsCollapsed] = useState(false);
+  const [detailsCollapsed, setDetailsCollapsed] = useState(false);
 
   function handleDrop(event: React.DragEvent<HTMLDivElement>) {
     event.preventDefault();
@@ -781,9 +853,21 @@ function DragDropTagPreview({ previewHtml, loading }: { previewHtml: string | nu
     <div className="flex overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm" style={{ height: 620 }}>
 
       {/* ── Left sidebar ─────────────────────────────────────────── */}
+      {fieldsCollapsed ? (
+        <CollapsedPanelRail label="Fields" side="left" onExpand={() => setFieldsCollapsed(false)} />
+      ) : (
       <div className="flex w-48 flex-shrink-0 flex-col border-r border-slate-100 bg-white">
-        <div className="border-b border-slate-100 px-4 py-3">
+        <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
           <p className="text-sm font-semibold text-slate-900">Fields</p>
+          <button
+            type="button"
+            onClick={() => setFieldsCollapsed(true)}
+            aria-label="Collapse Fields panel"
+            title="Collapse"
+            className="flex h-6 w-6 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+          >
+            {chevronLeftIcon}
+          </button>
         </div>
         <div className="flex-1 overflow-y-auto py-3">
           {tagGroups.map((group) => (
@@ -806,13 +890,17 @@ function DragDropTagPreview({ previewHtml, loading }: { previewHtml: string | nu
           ))}
         </div>
       </div>
+      )}
 
       {/* ── Document canvas ──────────────────────────────────────── */}
       <div className="relative flex flex-1 flex-col overflow-hidden bg-[#f3f4f6]">
         {/* toolbar strip */}
         <div className="flex items-center justify-between border-b border-slate-200 bg-white px-4 py-2">
           <span className="text-xs text-slate-500">Drag a field onto the page · click a placed field to select</span>
-          <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">{placedTags.length} field{placedTags.length !== 1 ? "s" : ""} placed</span>
+          <div className="flex items-center gap-2">
+            <ZoomControls zoom={zoom} onZoomChange={setZoom} />
+            <span className="rounded-full bg-slate-100 px-2 py-0.5 text-xs font-medium text-slate-600">{placedTags.length} field{placedTags.length !== 1 ? "s" : ""} placed</span>
+          </div>
         </div>
 
         <div className="flex-1 overflow-auto px-8 py-6">
@@ -821,7 +909,8 @@ function DragDropTagPreview({ previewHtml, loading }: { previewHtml: string | nu
             onDragOver={(e) => e.preventDefault()}
             onDrop={handleDrop}
             onClick={() => setSelectedPlaced(null)}
-            className="relative mx-auto min-h-[500px] w-full max-w-[580px] rounded-sm bg-white shadow-[0_2px_16px_rgba(0,0,0,0.12)]"
+            style={zoom !== 1 ? { zoom } : undefined}
+            className="relative mx-auto min-h-[500px] w-full rounded-sm bg-white shadow-[0_2px_16px_rgba(0,0,0,0.12)]"
           >
             {loading ? (
               <div className="flex min-h-[500px] flex-col items-center justify-center gap-3 text-slate-400">
@@ -830,10 +919,10 @@ function DragDropTagPreview({ previewHtml, loading }: { previewHtml: string | nu
                 </svg>
                 <span className="text-sm">Generating document preview…</span>
               </div>
-            ) : previewHtml ? (
-              <div
+            ) : base64 ? (
+              <DocxPreview
+                base64={base64}
                 className="lease-preview pointer-events-none select-none overflow-hidden px-10 py-8 text-sm leading-relaxed text-slate-800"
-                dangerouslySetInnerHTML={{ __html: previewHtml }}
               />
             ) : (
               <div className="flex min-h-[500px] flex-col items-center justify-center gap-2 px-10 text-center text-slate-400">
@@ -876,9 +965,21 @@ function DragDropTagPreview({ previewHtml, loading }: { previewHtml: string | nu
       </div>
 
       {/* ── Right detail panel ───────────────────────────────────── */}
+      {detailsCollapsed ? (
+        <CollapsedPanelRail label="Details" side="right" onExpand={() => setDetailsCollapsed(false)} />
+      ) : (
       <div className="flex w-44 flex-shrink-0 flex-col border-l border-slate-100 bg-white">
-        <div className="border-b border-slate-100 px-4 py-3">
+        <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3">
           <p className="text-sm font-semibold text-slate-900">Details</p>
+          <button
+            type="button"
+            onClick={() => setDetailsCollapsed(true)}
+            aria-label="Collapse Details panel"
+            title="Collapse"
+            className="flex h-6 w-6 items-center justify-center rounded-md text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+          >
+            {chevronRightIcon}
+          </button>
         </div>
         {selected ? (
           <div className="p-4 space-y-4">
@@ -916,6 +1017,7 @@ function DragDropTagPreview({ previewHtml, loading }: { previewHtml: string | nu
           </div>
         )}
       </div>
+      )}
     </div>
   );
 }
@@ -979,6 +1081,7 @@ function LeaseCreationWorkflow({
   const [expandedClauses, setExpandedClauses] = useState<Set<string>>(new Set());
   const [selectedFixes, setSelectedFixes] = useState<Set<string>>(new Set());
   const [clauseTab, setClauseTab] = useState<"clauses" | "missing" | "statelaw" | "readability">("clauses");
+  const [previewZoom, setPreviewZoom] = useState(1);
   const lastAdvanceToken = useRef(advanceToken);
   const selectedTemplateReview = selectedTemplate?.reviewData as LeaseReview | null | undefined;
   const selectedTemplateLeaseName = selectedTemplateReview?.extractedTerms?.landlordName?.trim() || selectedTemplate?.name || "";
@@ -1093,7 +1196,7 @@ function LeaseCreationWorkflow({
 
   // Auto-generate preview when user reaches the Tags step so the document is visible
   useEffect(() => {
-    if (activeSection === "tags" && pendingUpload && !pendingUpload.previewHtml && busy !== "workflow-preview") {
+    if (activeSection === "tags" && pendingUpload && !pendingUpload.previewFileBase64 && busy !== "workflow-preview") {
       onGeneratePreview();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1871,7 +1974,7 @@ function LeaseCreationWorkflow({
     if (activeSection === "tags") {
       return (
         <div className="space-y-4">
-          <DragDropTagPreview previewHtml={pendingUpload?.previewHtml ?? null} loading={busy === "workflow-preview"} />
+          <DragDropTagPreview base64={pendingUpload?.previewFileBase64 ?? null} loading={busy === "workflow-preview"} />
           <div className="flex items-center gap-3">
             <BackButton />
             <button
@@ -1922,6 +2025,9 @@ function LeaseCreationWorkflow({
               <p className="text-xs text-slate-500">Review the tokenized template before saving.</p>
             </div>
             <div className="flex items-center gap-2">
+              {pendingUpload?.previewFileBase64 && busy !== "workflow-preview" ? (
+                <ZoomControls zoom={previewZoom} onZoomChange={setPreviewZoom} />
+              ) : null}
               {previewDownloadUrl ? (
                 <a
                   href={previewDownloadUrl}
@@ -1937,7 +2043,7 @@ function LeaseCreationWorkflow({
                 disabled={!pendingUpload || busy === "workflow-preview"}
                 className="inline-flex h-9 items-center justify-center rounded-lg bg-white px-3 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50 disabled:opacity-60"
               >
-                {busy === "workflow-preview" ? "Generating..." : pendingUpload?.previewHtml ? "Refresh preview" : "Generate preview"}
+                {busy === "workflow-preview" ? "Generating..." : pendingUpload?.previewFileBase64 ? "Refresh preview" : "Generate preview"}
               </button>
             </div>
           </div>
@@ -1945,22 +2051,13 @@ function LeaseCreationWorkflow({
             <div className="flex h-80 items-center justify-center bg-white text-sm text-slate-500">Generating template preview...</div>
           ) : pendingUpload?.previewError ? (
             <div className="bg-red-50 px-4 py-5 text-sm text-red-700">{pendingUpload.previewError}</div>
-          ) : pendingUpload?.previewHtml ? (
-            <>
-              <div
-                className="lease-preview h-[520px] overflow-y-auto bg-white px-10 py-8 text-sm leading-relaxed text-slate-800"
-                dangerouslySetInnerHTML={{ __html: pendingUpload.previewHtml }}
-              />
-              <style>{`
-                .lease-preview h1, .lease-preview h2 { font-weight: 700; margin: 1em 0 0.4em; }
-                .lease-preview h1 { font-size: 1.15em; text-align: center; }
-                .lease-preview h2 { font-size: 1em; }
-                .lease-preview p { margin: 0.5em 0; }
-                .lease-preview table { width: 100%; border-collapse: collapse; margin: 0.75em 0; }
-                .lease-preview td, .lease-preview th { border: 1px solid #e2e8f0; padding: 6px 10px; vertical-align: top; }
-                .lease-preview strong, .lease-preview b { font-weight: 600; }
-              `}</style>
-            </>
+          ) : pendingUpload?.previewFileBase64 ? (
+            <DocxPreview
+              base64={pendingUpload.previewFileBase64}
+              scale={previewZoom}
+              fallbackHint="Use “Download preview” to inspect the file."
+              className="lease-preview h-[520px] overflow-auto bg-white px-10 py-8 text-sm leading-relaxed text-slate-800"
+            />
           ) : (
             <div className="bg-white px-4 py-8 text-center text-sm text-slate-500">
               Generate a preview to inspect the tokenized lease template with extracted clauses.
@@ -1972,7 +2069,7 @@ function LeaseCreationWorkflow({
           <button
             type="button"
             onClick={onSaveTemplate}
-            disabled={!pendingUpload || busy === "workflow-save" || !acceptedSuggestions || !pendingUpload.previewHtml}
+            disabled={!pendingUpload || busy === "workflow-save" || !acceptedSuggestions || !pendingUpload.previewFileBase64}
             className="ui-btn ui-btn-primary h-10 flex-1 px-4 text-sm"
           >
             {busy === "workflow-save" ? "Saving..." : "Save template"}
@@ -2460,11 +2557,10 @@ export function LeaseWorkspaceClient({
           tenantPaidUtilities: computeTenantPaidUtilities() || undefined,
         }),
       });
-      const data = (await res.json().catch(() => ({}))) as { previewHtml?: string; fileBase64?: string };
-      if (res.ok && data.previewHtml) {
+      const data = (await res.json().catch(() => ({}))) as { fileBase64?: string };
+      if (res.ok && data.fileBase64) {
         setPendingWorkflowUpload((upload) => upload ? {
           ...upload,
-          previewHtml: data.previewHtml ?? null,
           previewFileBase64: data.fileBase64 ?? null,
           previewError: null,
         } : upload);
@@ -2494,13 +2590,11 @@ export function LeaseWorkspaceClient({
       });
       const data = (await res.json().catch(() => ({}))) as {
         error?: string;
-        previewHtml?: string;
         fileBase64?: string;
       };
-      if (!res.ok || !data.previewHtml) throw new Error(data.error ?? "Could not generate template preview.");
+      if (!res.ok || !data.fileBase64) throw new Error(data.error ?? "Could not generate template preview.");
       setPendingWorkflowUpload((upload) => upload ? {
         ...upload,
-        previewHtml: data.previewHtml ?? null,
         previewFileBase64: data.fileBase64 ?? null,
         previewError: null,
       } : upload);

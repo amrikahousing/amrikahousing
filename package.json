@@ -27,6 +27,7 @@
     "@types/pdf-parse": "^1.1.5",
     "@vercel/blob": "^2.3.3",
     "ai": "^6.0.168",
+    "docx-preview": "^0.3.7",
     "docxtemplater": "^3.68.7",
     "inngest": "^4.2.5",
     "mammoth": "^1.12.0",

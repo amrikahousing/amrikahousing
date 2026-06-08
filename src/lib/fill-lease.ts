@@ -156,8 +156,13 @@ Use e-signature anchor tags — NOT data tokens — when the blank slot is a sig
   • "Certification of Accuracy" / final signature table: Lessor and Agent signature lines → {{Sign;type=signature;role=Manager}}, Lessee lines → {{Sign;type=signature;role=Tenant 1}} (or Tenant 2 if a second Lessee row exists)
   • When the same blank (e.g. "________") appears in a lettered list under an acknowledgment heading, map all blanks in that heading's block to the same role — do NOT require a unique search string per item
   • Multi-column signature tables (e.g. Lessor/Date/Lessor/Date in two columns) — emit one pair per unique (search, token) combination; the engine will stamp both columns
-- Initials slots like "( )", "____", or small blanks beside "(Initials)" or "Initials:" labels should be mapped to the appropriate {{Initial;...}} tag
-- When a line reads "INITIALS:" or "Initials:" followed by TWO adjacent "( )" slots (e.g. "INITIALS: ( )( )"), emit TWO pairs: the first "( )" → {{Initial;type=initials;role=Tenant 1}} and the second "( )" → {{Initial;type=initials;role=Tenant 2}}. Because both pairs share the same search string, you MUST emit both — the replacement engine processes them sequentially, replacing one per pass.
+- Initials slots like "( )", "()", "____", or small blanks beside "(Initials)" or "Initials:" labels should be mapped to the appropriate {{Initial;...}} tag
+- CRITICAL — NEVER skip an "INITIALS:" / "Initials:" line. Any line containing the word "INITIALS" (in any casing) that is followed by parenthesis or underscore slots is a tenant-initials field and MUST be tagged. This includes ALL of these spacing variants — copy the slot EXACTLY as it appears (with or without the inner space) into "search":
+    "INITIALS: ( )( )"  → two slots, search "( )" ×2
+    "INITIALS:()()"     → two slots, search "()" ×2
+    "INITIALS: ()"       → one slot, search "()"
+    "INITIALS: ___ ___"  → two slots, search "___" ×2
+  For TWO adjacent slots emit TWO pairs: the first slot → {{Initial;type=initials;role=Tenant 1}} and the second identical slot → {{Initial;type=initials;role=Tenant 2}}. Because both pairs share the same search string, you MUST emit both — the replacement engine processes them sequentially, replacing one occurrence per pass. For a SINGLE slot emit one pair → {{Initial;type=initials;role=Tenant 1}}. The "search" value is ONLY the parenthesis/underscore slot itself — never include the word "INITIALS" or the colon.
 - When the same blank string appears in multiple acknowledgment blocks for different roles, emit one pair per (search, token) role combination
   Example: "___" appears under "Lessee's Initials:" and again under "Agent's Initials:"
     → { "search": "___", "token": "{{Initial;type=initials;role=Tenant 1}}" }
@@ -209,7 +214,11 @@ FINANCIAL TERMS
 - Monthly rent written in words (e.g. "ONE THOUSAND SEVEN HUNDRED" before "dollars ({{rent_amount}}) per month") → {{rent_amount_words}}. Do NOT leave the written rent words as fixed text when they are just the word form of the monthly rent.
 - "Security Deposit:", "Deposit:" → dollar value → {{security_deposit}}
 - "TERM:", "Term:", "Lease Term:", "Initial Term:" → duration value (e.g. "12 months", "month-to-month") → {{lease_term}}
-- Late fee flat dollar amount → {{late_fee_amount}}; grace period days → {{late_fee_grace_days}}; percentage-based late fee → {{late_fee_pct}}
+- Late fees / late charges — these labels are synonyms and ALL map to the late-fee tokens: "Late Fee", "Late Charge", "Late Payment Charge", "Late Payment Fee", "Late Penalty", "Delinquency Charge". Always tag the value:
+    • flat dollar amount charged after the grace period → {{late_fee_amount}}
+    • number of grace/grace-period days before the charge applies → {{late_fee_grace_days}}
+    • a percentage-of-rent late charge (e.g. "5%") instead of a flat amount → {{late_fee_pct}}
+  Do NOT leave a late charge dollar amount or percentage as fixed text — it is a per-property variable.
 - Pet fee amount or monthly rate → {{pet_fee_amount}}
 
 SPECIFIC CLAUSE VALUES (extract the variable values within these clauses, not the clause text itself)
@@ -353,12 +362,58 @@ function buildReplacementMap(data: LeaseData): Record<string, string> {
 
 // ─── Extraction helpers ───────────────────────────────────────────────────────
 
+// The model sometimes emits raw control characters (most often literal line
+// breaks in multi-line address/landlord values) inside JSON string literals,
+// which is invalid JSON and makes JSON.parse throw "Bad control character in
+// string literal". Walk the text and escape any control char that occurs while
+// inside a string, leaving structural whitespace untouched.
+function escapeControlCharsInStrings(s: string): string {
+  let out = "";
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (escaped) {
+      out += ch;
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      out += ch;
+      escaped = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      out += ch;
+      continue;
+    }
+    if (inString) {
+      const code = ch.charCodeAt(0);
+      if (code < 0x20) {
+        if (ch === "\n") out += "\\n";
+        else if (ch === "\r") out += "\\r";
+        else if (ch === "\t") out += "\\t";
+        else out += "\\u" + code.toString(16).padStart(4, "0");
+        continue;
+      }
+    }
+    out += ch;
+  }
+  return out;
+}
+
 function parseSubstitutionPairs(raw: string): Array<{ search: string; token: string }> {
   let parsed: unknown;
   try {
     const match = raw.match(/\[[\s\S]*\]/);
     if (!match) throw new Error("no JSON array found");
-    parsed = JSON.parse(match[0]);
+    try {
+      parsed = JSON.parse(match[0]);
+    } catch {
+      // Retry after escaping raw control characters the model left unescaped.
+      parsed = JSON.parse(escapeControlCharsInStrings(match[0]));
+    }
   } catch (e) {
     console.error("[fill-lease] raw AI response:", raw.slice(0, 500));
     throw new Error(`Could not parse substitution pairs from AI response: ${e instanceof Error ? e.message : String(e)}`);
