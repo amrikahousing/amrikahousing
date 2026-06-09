@@ -379,20 +379,24 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
 
   async function completeSignIn() {
     let didNavigate = false;
-    const { error: finalizeError } = await signIn.finalize({
-      navigate: async ({ session, decorateUrl }) => {
-        didNavigate = true;
-        const destination = await resolvePostSignInDestination();
-        if (session.currentTask) {
-          const tasksUrl = new URL("/login/tasks", window.location.origin);
-          tasksUrl.searchParams.set("redirect_url", destination);
-          navigateToUrl(decorateUrl(`${tasksUrl.pathname}${tasksUrl.search}`));
-          return;
-        }
+    const { error: finalizeError } = await withTimeout(
+      signIn.finalize({
+        navigate: async ({ session, decorateUrl }) => {
+          didNavigate = true;
+          const destination = await resolvePostSignInDestination();
+          if (session.currentTask) {
+            const tasksUrl = new URL("/login/tasks", window.location.origin);
+            tasksUrl.searchParams.set("redirect_url", destination);
+            navigateToUrl(decorateUrl(`${tasksUrl.pathname}${tasksUrl.search}`));
+            return;
+          }
 
-        navigateToUrl(decorateUrl(destination));
-      },
-    });
+          navigateToUrl(decorateUrl(destination));
+        },
+      }),
+      10000,
+      "Finishing sign-in",
+    );
     if (finalizeError) {
       setClientError(getErrorMessage(finalizeError, "We could not finish signing you in."));
       setIsSubmitting(false);
@@ -835,7 +839,11 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     setIsSubmitting(true);
 
     try {
-      const { error } = await signIn.mfa.verifyEmailCode({ code: verificationCode });
+      const { error } = await withTimeout(
+        signIn.mfa.verifyEmailCode({ code: verificationCode }),
+        12000,
+        "Verifying the code",
+      );
       if (error) {
         setClientError(getErrorMessage(error, "We could not verify that code."));
         setIsSubmitting(false);
