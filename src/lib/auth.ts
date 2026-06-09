@@ -194,22 +194,31 @@ export async function requireOrgAccess(): Promise<OrgContext | AccessError> {
   if (!userId) return { error: "Unauthorized", status: 401 };
   if (!orgId) return { error: "No active organization. Please join or create an organization.", status: 403 };
 
-  // Fetch real org name from Clerk
-  let orgName = orgId;
-  try {
-    const clerk = await clerkClient();
-    const clerkOrg = await clerk.organizations.getOrganization({ organizationId: orgId });
-    orgName = clerkOrg.name;
-  } catch {
-    // Non-fatal: fall back to orgId as name
-  }
-
-  const org = await prisma.organizations.upsert({
+  // The org name is display-only (no authz impact), so resolve the org locally
+  // first and only reach out to Clerk + write when the row doesn't exist yet.
+  // This removes a Clerk round-trip and a write from every authenticated request.
+  let org = await prisma.organizations.findUnique({
     where: { clerk_org_id: orgId },
-    update: { name: orgName },
-    create: { clerk_org_id: orgId, name: orgName },
     select: { id: true },
   });
+  if (!org) {
+    // Fetch real org name from Clerk
+    let orgName = orgId;
+    try {
+      const clerk = await clerkClient();
+      const clerkOrg = await clerk.organizations.getOrganization({ organizationId: orgId });
+      orgName = clerkOrg.name;
+    } catch {
+      // Non-fatal: fall back to orgId as name
+    }
+
+    org = await prisma.organizations.upsert({
+      where: { clerk_org_id: orgId },
+      update: { name: orgName },
+      create: { clerk_org_id: orgId, name: orgName },
+      select: { id: true },
+    });
+  }
   const userDbId = await syncLocalUser({
     userId,
     orgId,
