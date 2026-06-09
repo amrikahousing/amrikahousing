@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { auth, clerkClient, currentUser } from "@clerk/nextjs/server";
 import { prisma } from "./db";
 import { syncClerkMembershipAccess } from "./permissions";
@@ -184,8 +185,14 @@ export async function syncLocalUser({
  * Verifies the request has an authenticated user + active Clerk org.
  * Upserts the organization in DB using the real org name from Clerk.
  * Returns OrgContext on success, AccessError on failure.
+ *
+ * Memoized per request: layout, page, and any API handler that calls this
+ * during a single render share one execution (one identity sync), instead of
+ * racing duplicate membership writes.
  */
-export async function requireOrgAccess(): Promise<OrgContext | AccessError> {
+export const requireOrgAccess = cache(async function requireOrgAccess(): Promise<
+  OrgContext | AccessError
+> {
   const [{ userId, orgId, orgRole }, user] = await Promise.all([
     auth(),
     currentUser().catch(() => null),
@@ -235,7 +242,7 @@ export async function requireOrgAccess(): Promise<OrgContext | AccessError> {
     orgRole: orgRole ?? null,
     isOrgAdmin: orgRole === "org:admin",
   };
-}
+});
 
 export function isAccessError(v: OrgContext | AccessError): v is AccessError {
   return "error" in v;
