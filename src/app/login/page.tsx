@@ -551,19 +551,26 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
       }
 
       if (requiresEmailCodeChallenge(signIn.status)) {
-        const sendResult = await sendSignInEmailCode();
-        if (sendResult === "failed") {
+        if (!supportsEmailCodeChallenge(signIn)) {
+          setClientError(
+            `Sign-in requires an additional step (${String(signIn.status)}), but email code is not available for this account.`,
+          );
           setIsSubmitting(false);
           return;
         }
+
         setVerificationCode("");
         switchMode("signin_mfa");
-        setClientNotice(
-          sendResult === "timed_out"
-            ? "If you received a code, enter it below. Otherwise use Resend code."
-            : "We sent a verification code to your email.",
-        );
+        setClientNotice("Enter the code from your email.");
         setIsSubmitting(false);
+
+        void sendSignInEmailCode().then((sendResult) => {
+          if (sendResult === "sent") {
+            setClientNotice("We sent a verification code to your email.");
+          } else if (sendResult === "timed_out") {
+            setClientNotice("If you received a code, enter it below. Otherwise use Resend code.");
+          }
+        });
         return;
       }
 
