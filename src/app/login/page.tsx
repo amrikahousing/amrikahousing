@@ -141,6 +141,19 @@ function supportsEmailCodeChallenge(signIn: NonNullable<ReturnType<typeof useSig
   return signIn.supportedSecondFactors?.some((factor) => factor.strategy === "email_code") ?? false;
 }
 
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string) {
+  let timeoutId: number | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = window.setTimeout(() => {
+      reject(new Error(`${label} timed out. If you received a code, enter it below.`));
+    }, ms);
+  });
+
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timeoutId) window.clearTimeout(timeoutId);
+  });
+}
+
 export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode }) {
   const emailId = useId();
   const passwordId = useId();
@@ -396,16 +409,25 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
       setClientError(
         `Sign-in requires an additional step (${String(signIn.status)}), but email code is not available for this account.`,
       );
-      return false;
+      return "failed" as const;
     }
 
-    const { error: sendError } = await signIn.mfa.sendEmailCode();
-    if (sendError) {
-      setClientError(getErrorMessage(sendError, "We could not send a verification code."));
-      return false;
-    }
+    try {
+      const { error: sendError } = await withTimeout(
+        signIn.mfa.sendEmailCode(),
+        8000,
+        "Sending the verification code",
+      );
+      if (sendError) {
+        setClientError(getErrorMessage(sendError, "We could not send a verification code."));
+        return "failed" as const;
+      }
 
-    return true;
+      return "sent" as const;
+    } catch (error) {
+      setClientNotice(getErrorMessage(error, "If you received a code, enter it below."));
+      return "timed_out" as const;
+    }
   }
 
   function redirectToInviteLoginNotice() {
@@ -529,13 +551,18 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
       }
 
       if (requiresEmailCodeChallenge(signIn.status)) {
-        if (!(await sendSignInEmailCode())) {
+        const sendResult = await sendSignInEmailCode();
+        if (sendResult === "failed") {
           setIsSubmitting(false);
           return;
         }
         setVerificationCode("");
         switchMode("signin_mfa");
-        setClientNotice("We sent a verification code to your email.");
+        setClientNotice(
+          sendResult === "timed_out"
+            ? "If you received a code, enter it below. Otherwise use Resend code."
+            : "We sent a verification code to your email.",
+        );
         setIsSubmitting(false);
         return;
       }
@@ -821,9 +848,14 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     setIsSubmitting(true);
 
     try {
-      if (await sendSignInEmailCode()) {
+      const sendResult = await sendSignInEmailCode();
+      if (sendResult !== "failed") {
         setVerificationCode("");
-        setClientNotice("We sent a new verification code to your email.");
+        setClientNotice(
+          sendResult === "timed_out"
+            ? "If you received a code, enter it below. Otherwise try Resend code again."
+            : "We sent a new verification code to your email.",
+        );
       }
     } catch (error) {
       setClientError(getErrorMessage(error, "Something went wrong. Please try again."));
