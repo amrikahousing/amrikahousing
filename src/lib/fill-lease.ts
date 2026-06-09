@@ -913,6 +913,73 @@ async function buildPlainTextPdf(rawText: string): Promise<Buffer> {
   return Buffer.from(await pdfDoc.save());
 }
 
+// ─── INITIALS line removal + tag insertion ───────────────────────────────────
+// Finds every paragraph whose text contains "INITIALS:" and removes the label
+// plus any blank ( ) slots, then inserts the DocuSeal initials anchor tags.
+// Two cases:
+//   1. Tags already present (graphic-slot pass or previous replacement ran):
+//      strip the "INITIALS:" label and any leftover blank slots.
+//   2. No tags yet: replace the entire "INITIALS: ( ) ( )" block with tags.
+
+function replaceInitialsSlots(xml: string): string {
+  // label + optional spaces + any number of ( ) or underscore slot groups
+  const FULL_RE  = new RegExp("INITIALS\\s*:[\\s ]*(?:\\([\\s _]*\\)[\\s ]*)*", "i");
+  const LABEL_RE = new RegExp("INITIALS\\s*:[\\s ]*", "i");
+  const SLOT_RE  = new RegExp("\\([\\s _]*\\)");
+  const TAGS = "{{Initial;type=initials;role=Tenant 1}} {{Initial;type=initials;role=Tenant 2}}";
+
+  return xml.replace(/(<w:p\b(?:[^>]*)>)([\s\S]*?)(<\/w:p>)/g, (full, open, body, close) => {
+    const combined = collectRuns(body).map((r) => r.text).join("");
+
+    if (!/INITIALS\s*:/i.test(combined)) return full;
+
+    let newBody = body;
+
+    if (/;type=initials/.test(body)) {
+      // Tags already present — strip the label, then sweep out any leftover blank slots
+      // (orphaned when old cached schema pairs replaced only "INITIALS:" but not the slots).
+      let cur = collectRuns(newBody).map((r) => r.text).join("");
+      const labelM = LABEL_RE.exec(cur);
+      if (labelM) newBody = replaceParagraphBody(newBody, labelM[0], "");
+
+      for (;;) {
+        cur = collectRuns(newBody).map((r) => r.text).join("");
+        const slotM = SLOT_RE.exec(cur);
+        if (!slotM) break;
+        newBody = replaceParagraphBody(newBody, slotM[0], "");
+      }
+      return open + newBody + close;
+    }
+
+    // No tags yet — replace the entire "INITIALS: ( ) ( )" block with both tenant tags
+    const m = FULL_RE.exec(combined);
+    if (!m) return full;
+    newBody = replaceParagraphBody(newBody, m[0], TAGS);
+    return open + newBody + close;
+  });
+}
+
+async function applyInitialsSlotReplacement(docxBuffer: Buffer): Promise<Buffer> {
+  const PizZip = (await import("pizzip")).default;
+  const zip = new PizZip(docxBuffer);
+
+  const files = [
+    "word/document.xml",
+    "word/header1.xml",
+    "word/header2.xml",
+    "word/footer1.xml",
+    "word/footer2.xml",
+  ];
+
+  for (const filePath of files) {
+    const file = zip.file(filePath);
+    if (!file) continue;
+    zip.file(filePath, replaceInitialsSlots(file.asText()));
+  }
+
+  return Buffer.from(zip.generate({ type: "nodebuffer" }));
+}
+
 // ─── Public: generate filled lease (returns DOCX buffer) ─────────────────────
 
 export async function generateLease(
@@ -927,6 +994,10 @@ export async function generateLease(
       const map = buildReplacementMap(data);
       const replacements = schema.pairs
         .filter((p) => p.search && p.token)
+        // Drop stale "label expansion" pairs like { search:"INITIALS:", token:"INITIALS: {{Initial;...}}" }
+        // where the token embeds the search string — these orphan blank slots that can't be cleaned up.
+        // All INITIALS placement is handled entirely by applyInitialsSlotReplacement.
+        .filter((p) => !(p.token.includes(p.search) && p.token.includes(";type=")))
         .map((p) => {
           // DocuSeal anchor tags (contain ";type=") are used verbatim — not looked up in the data map
           if (p.token.includes(";type=")) {
@@ -935,7 +1006,10 @@ export async function generateLease(
           const key = p.token.replace(/^\{\{|\}\}$/g, "");
           return { search: p.search, value: map[key] ?? "" };
         });
-      return fillDocxDirect(buffer, replacements);
+      const filled = await fillDocxDirect(buffer, replacements);
+      // Ensure any INITIALS: ( ) slots not caught by exact-string pairs are
+      // replaced with DocuSeal anchor tags before the document reaches DocuSeal.
+      return applyInitialsSlotReplacement(filled);
     }
   }
   // PDF templates or stale schema: rebuild from clauses
@@ -988,7 +1062,10 @@ export async function generateTokenizedTemplate(schema: ExtractedLeaseSchema, bl
     if (buffer[0] === 0x50 && buffer[1] === 0x4b) {
       const replacements = schema.pairs
         .filter((p) => p.search && p.token)
+        .filter((p) => !(p.token.includes(p.search) && p.token.includes(";type=")))
         .map((p) => ({ search: p.search, value: p.token }));
+      // Apply Claude's extracted pairs first, then do a reliable regex-based
+      // pass for any INITIALS: ( ) slots whose spacing didn't match exactly.
       const tokenized = await fillDocxDirect(buffer, replacements);
       return applyBakedTokens(tokenized, schema);
     }
