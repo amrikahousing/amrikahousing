@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { auth, currentUser } from "@clerk/nextjs/server";
 import { syncLocalUser } from "@/lib/auth";
 import { getOrgPermissionContext } from "@/lib/org-authorization";
@@ -28,7 +29,7 @@ function metadataString(
   return typeof value === "string" && value.trim() ? value : null;
 }
 
-export async function getAppShellUser(): Promise<AppShellUser> {
+export const getAppShellUser = cache(async function getAppShellUser(): Promise<AppShellUser> {
   const { orgRole, userId, orgId } = await auth();
   const user = userId
     ? await currentUser().catch(() => null)
@@ -88,7 +89,7 @@ export async function getAppShellUser(): Promise<AppShellUser> {
           },
     ...portalAccess,
   };
-}
+});
 
 export async function AppShell({
   children,
