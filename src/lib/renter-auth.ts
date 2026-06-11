@@ -85,6 +85,11 @@ export async function resolveSharedUserIdentity(userId: string) {
   const clerkRole =
     metadataString(clerkUser?.unsafeMetadata as Record<string, unknown> | null, "role") ??
     metadataString(clerkUser?.publicMetadata as Record<string, unknown> | null, "role");
+  const phone =
+    metadataString(clerkUser?.unsafeMetadata as Record<string, unknown> | null, "phoneNumber") ??
+    metadataString(clerkUser?.publicMetadata as Record<string, unknown> | null, "phoneNumber") ??
+    clerkUser?.primaryPhoneNumber?.phoneNumber ??
+    null;
 
   if (!email) {
     return { clerkUser, email: null, sharedUser: null as SharedUser | null };
@@ -96,28 +101,25 @@ export async function resolveSharedUserIdentity(userId: string) {
     select: { organization_id: true },
   });
 
+  const sharedUserSelect = {
+    id: true,
+    clerk_user_id: true,
+    organization_id: true,
+    email: true,
+    first_name: true,
+    last_name: true,
+    phone: true,
+    role: true,
+  } as const;
+
   const existing =
     (await prisma.users.findUnique({
       where: { clerk_user_id: userId },
-      select: {
-        id: true,
-        organization_id: true,
-        email: true,
-        first_name: true,
-        last_name: true,
-        role: true,
-      },
+      select: sharedUserSelect,
     })) ??
     (await prisma.users.findUnique({
       where: { email },
-      select: {
-        id: true,
-        organization_id: true,
-        email: true,
-        first_name: true,
-        last_name: true,
-        role: true,
-      },
+      select: sharedUserSelect,
     }));
 
   const desiredRole =
@@ -129,40 +131,39 @@ export async function resolveSharedUserIdentity(userId: string) {
           ? "renter"
           : existing?.role ?? "renter";
 
-  const data = {
+  // Names/phone change only through the app (which writes them to Clerk), so we
+  // only write when a derived value actually differs — a steady-state renter
+  // request performs no user write.
+  const next = {
     clerk_user_id: userId,
     email,
     organization_id: existing?.organization_id ?? matchingTenant?.organization_id ?? null,
     first_name: firstName ?? existing?.first_name ?? null,
     last_name: lastName ?? existing?.last_name ?? null,
+    phone: phone ?? existing?.phone ?? null,
     role: desiredRole,
-    updated_at: new Date(),
   };
 
-  const sharedUser = existing
-    ? await prisma.users.update({
-        where: { id: existing.id },
-        data,
-        select: {
-          id: true,
-          organization_id: true,
-          email: true,
-          first_name: true,
-          last_name: true,
-          role: true,
-        },
-      })
-    : await prisma.users.create({
-        data,
-        select: {
-          id: true,
-          organization_id: true,
-          email: true,
-          first_name: true,
-          last_name: true,
-          role: true,
-        },
-      });
+  let sharedUser: SharedUser;
+  if (!existing) {
+    sharedUser = await prisma.users.create({ data: next, select: sharedUserSelect });
+  } else {
+    const changed =
+      existing.clerk_user_id !== next.clerk_user_id ||
+      existing.organization_id !== next.organization_id ||
+      existing.email !== next.email ||
+      existing.first_name !== next.first_name ||
+      existing.last_name !== next.last_name ||
+      existing.phone !== next.phone ||
+      existing.role !== next.role;
+    sharedUser = changed
+      ? await prisma.users.update({
+          where: { id: existing.id },
+          data: { ...next, updated_at: new Date() },
+          select: sharedUserSelect,
+        })
+      : existing;
+  }
 
   return { clerkUser, email, sharedUser };
 }

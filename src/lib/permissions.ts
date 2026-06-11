@@ -261,6 +261,23 @@ export function membershipRowsForAccess({
       ];
 }
 
+function membershipKey(row: {
+  role: string;
+  property_id: string | null;
+  is_active: boolean;
+}) {
+  return `${row.role}|${row.property_id ?? ""}|${row.is_active ? 1 : 0}`;
+}
+
+function sameMembershipSet(
+  current: Array<{ role: string; property_id: string | null; is_active: boolean }>,
+  desired: Array<{ role: string; property_id: string | null; is_active: boolean }>,
+) {
+  if (current.length !== desired.length) return false;
+  const currentKeys = new Set(current.map(membershipKey));
+  return desired.every((row) => currentKeys.has(membershipKey(row)));
+}
+
 export async function replaceMembershipAccess({
   userDbId,
   orgDbId,
@@ -274,18 +291,28 @@ export async function replaceMembershipAccess({
   propertyIds: string[];
   active: boolean;
 }) {
+  const desired = membershipRowsForAccess({
+    userDbId,
+    orgDbId,
+    role,
+    propertyIds,
+    active,
+  });
+
+  const current = await prisma.memberships.findMany({
+    where: { user_id: userDbId, organization_id: orgDbId },
+    select: { role: true, property_id: true, is_active: true },
+  });
+
+  // Only rewrite when the membership set actually differs.
+  if (sameMembershipSet(current, desired)) return;
+
   await prisma.$transaction([
     prisma.memberships.deleteMany({
       where: { user_id: userDbId, organization_id: orgDbId },
     }),
     prisma.memberships.createMany({
-      data: membershipRowsForAccess({
-        userDbId,
-        orgDbId,
-        role,
-        propertyIds,
-        active,
-      }),
+      data: desired,
       skipDuplicates: true,
     }),
   ]);
@@ -305,30 +332,55 @@ export async function syncClerkMembershipAccess({
   isOrgAdmin: boolean;
 }) {
   if (isOrgAdmin) {
-    await prisma.$transaction([
-      prisma.users.update({
+    const [currentUser, currentMemberships] = await Promise.all([
+      prisma.users.findUnique({
         where: { id: userDbId },
-        data: {
-          role: "admin",
-          is_active: true,
-          updated_at: new Date(),
-        },
+        select: { role: true, is_active: true },
       }),
-      prisma.memberships.deleteMany({
+      prisma.memberships.findMany({
         where: { user_id: userDbId, organization_id: orgDbId },
+        select: { role: true, property_id: true, is_active: true },
       }),
-      prisma.memberships.createMany({
-        data: [
-          {
-            user_id: userDbId,
-            organization_id: orgDbId,
-            role: "admin",
-            property_id: null,
-            is_active: true,
-          },
-        ],
-        skipDuplicates: true,
-      }),
+    ]);
+
+    const desiredMemberships = [
+      { role: "admin", property_id: null, is_active: true },
+    ];
+    const userOk =
+      currentUser?.role === "admin" && currentUser.is_active === true;
+    const membershipsOk = sameMembershipSet(currentMemberships, desiredMemberships);
+
+    // Already in the desired state — no write needed.
+    if (userOk && membershipsOk) return;
+
+    await prisma.$transaction([
+      ...(userOk
+        ? []
+        : [
+            prisma.users.update({
+              where: { id: userDbId },
+              data: { role: "admin", is_active: true, updated_at: new Date() },
+            }),
+          ]),
+      ...(membershipsOk
+        ? []
+        : [
+            prisma.memberships.deleteMany({
+              where: { user_id: userDbId, organization_id: orgDbId },
+            }),
+            prisma.memberships.createMany({
+              data: [
+                {
+                  user_id: userDbId,
+                  organization_id: orgDbId,
+                  role: "admin",
+                  property_id: null,
+                  is_active: true,
+                },
+              ],
+              skipDuplicates: true,
+            }),
+          ]),
     ]);
     return;
   }
@@ -359,14 +411,23 @@ export async function syncClerkMembershipAccess({
     : [];
 
   const propertyIds = validProperties.map((property) => property.id);
-  await prisma.users.update({
+  const currentUser = await prisma.users.findUnique({
     where: { id: userDbId },
-    data: {
-      role: metadata.permissionRole,
-      is_active: metadata.active,
-      updated_at: new Date(),
-    },
+    select: { role: true, is_active: true },
   });
+  if (
+    currentUser?.role !== metadata.permissionRole ||
+    currentUser?.is_active !== metadata.active
+  ) {
+    await prisma.users.update({
+      where: { id: userDbId },
+      data: {
+        role: metadata.permissionRole,
+        is_active: metadata.active,
+        updated_at: new Date(),
+      },
+    });
+  }
   await replacePropertyAssignments(userDbId, propertyIds);
   await replaceMembershipAccess({
     userDbId,
@@ -381,6 +442,21 @@ export async function replacePropertyAssignments(
   userDbId: string,
   propertyIds: string[],
 ) {
+  const desired = new Set(propertyIds);
+  const current = await prisma.property_assignments.findMany({
+    where: { user_id: userDbId },
+    select: { property_id: true },
+  });
+  const currentSet = new Set(current.map((row) => row.property_id));
+
+  // Only rewrite when the assigned-property set actually differs.
+  if (
+    currentSet.size === desired.size &&
+    [...desired].every((id) => currentSet.has(id))
+  ) {
+    return;
+  }
+
   await prisma.$transaction([
     prisma.property_assignments.deleteMany({
       where: { user_id: userDbId },

@@ -3,7 +3,7 @@
 import { useMemo, useRef, useState } from "react";
 
 export type UserRole = "manager" | "tenant";
-export type RequestPriority = "low" | "medium" | "high" | "emergency";
+export type RequestPriority = "low" | "normal" | "high" | "emergency";
 export type RequestStatus =
   | "open"
   | "in_progress"
@@ -52,6 +52,10 @@ export type MaintenanceRequest = {
   status: RequestStatus;
   slaDueAt: string | null;
   escalatedAt: string | null;
+  scheduledDate: string | null;
+  assignedUserId: string | null;
+  assignedUserName: string | null;
+  assignedVendorId: string | null;
   assignedVendor: string | null;
   assignmentNote: string | null;
   createdAt: string;
@@ -59,11 +63,18 @@ export type MaintenanceRequest = {
   events: MaintenanceActivityEvent[];
 };
 
+export type AssignableOption = {
+  id: string;
+  name: string;
+};
+
 type MaintenanceClientProps = {
   role: UserRole;
   userId: string;
   initialProperties: Property[];
   initialRequests: MaintenanceRequest[];
+  vendors?: AssignableOption[];
+  assignableUsers?: AssignableOption[];
 };
 
 const inputClass =
@@ -75,7 +86,7 @@ function priorityRank(priority: RequestPriority) {
   const ranks: Record<RequestPriority, number> = {
     emergency: 0,
     high: 1,
-    medium: 2,
+    normal: 2,
     low: 3,
   };
   return ranks[priority];
@@ -120,7 +131,7 @@ function priorityClass(priority: RequestPriority) {
       return "border-red-600 bg-red-500 text-white";
     case "high":
       return "border-red-200 bg-red-100 text-red-700";
-    case "medium":
+    case "normal":
       return "border-amber-200 bg-amber-100 text-amber-700";
     default:
       return "border-sky-200 bg-sky-100 text-sky-700";
@@ -146,6 +157,15 @@ function statusText(status: string | null) {
   if (!status) return "";
   if (status === "pending_acceptance") return "Awaiting tenant";
   return status.replaceAll("_", " ");
+}
+
+function isClosedStatus(status: RequestStatus) {
+  return status === "completed" || status === "cancelled" || status === "rejected";
+}
+
+function isPast(iso: string) {
+  const time = new Date(iso).getTime();
+  return !Number.isNaN(time) && time < Date.now();
 }
 
 function activityActor(event: MaintenanceActivityEvent) {
@@ -257,6 +277,36 @@ function Badge({
   );
 }
 
+function SlaBadge({
+  slaDueAt,
+  status,
+}: {
+  slaDueAt: string | null;
+  status: RequestStatus;
+}) {
+  if (!slaDueAt) return null;
+  // SLA indicators are only meaningful for active work.
+  const active =
+    status === "open" || status === "in_progress" || status === "pending_acceptance";
+  if (!active) return null;
+  const due = new Date(slaDueAt).getTime();
+  if (Number.isNaN(due)) return null;
+  const overdue = isPast(slaDueAt);
+  const rel = relativeDate(slaDueAt);
+  return (
+    <Badge
+      className={
+        overdue
+          ? "border-red-300 bg-red-50 text-red-700"
+          : "border-slate-200 bg-white text-slate-700"
+      }
+    >
+      <Icon name="clock" className="h-3 w-3" />
+      {overdue ? `Overdue ${rel}` : `SLA due ${rel}`}
+    </Badge>
+  );
+}
+
 function Toggle({
   checked,
   onChange,
@@ -302,6 +352,8 @@ export function MaintenanceClient({
   userId,
   initialProperties,
   initialRequests,
+  vendors = [],
+  assignableUsers = [],
 }: MaintenanceClientProps) {
   const [requests, setRequests] =
     useState<MaintenanceRequest[]>(initialRequests);
@@ -324,6 +376,9 @@ export function MaintenanceClient({
     status: RequestStatus;
   } | null>(null);
   const [resolutionNote, setResolutionNote] = useState("");
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [noteDrafts, setNoteDrafts] = useState<Record<string, string>>({});
+  const [savingDetailId, setSavingDetailId] = useState<string | null>(null);
   const [expandedActivityId, setExpandedActivityId] = useState<string | null>(null);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -480,13 +535,29 @@ export function MaintenanceClient({
     );
     setPendingStatusChange(null);
     setResolutionNote("");
+    setActionError(null);
+
+    function revert() {
+      if (!previousStatus) return;
+      setRequests((current) =>
+        current.map((request) =>
+          request.id === id ? { ...request, status: previousStatus } : request,
+        ),
+      );
+    }
 
     void fetch(`/api/maintenance/${id}`, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ status, actorName: "Manager", resolutionNote: note }),
-    }).then(async (res) => {
-      if (res.ok) {
+    })
+      .then(async (res) => {
+        if (!res.ok) {
+          const errorData = (await res.json().catch(() => ({}))) as { error?: string };
+          revert();
+          setActionError(errorData.error ?? "Could not update the request.");
+          return;
+        }
         const data = (await res.json()) as {
           request: { status: RequestStatus; status_change_note: string };
         };
@@ -513,8 +584,63 @@ export function MaintenanceClient({
               : request,
           ),
         );
+      })
+      .catch(() => {
+        revert();
+        setActionError("Could not update the request.");
+      });
+  }
+
+  // Update assignment / scheduling / team note without changing status.
+  async function updateDetails(id: string, patch: Record<string, unknown>) {
+    const previous = requests.find((request) => request.id === id);
+    if (!previous) return;
+    setActionError(null);
+    setSavingDetailId(id);
+
+    const optimistic: MaintenanceRequest = { ...previous };
+    if ("assigned_to_vendor" in patch) {
+      const vid = (patch.assigned_to_vendor as string) || null;
+      optimistic.assignedVendorId = vid;
+      optimistic.assignedVendor = vendors.find((v) => v.id === vid)?.name ?? null;
+    }
+    if ("assigned_to_user" in patch) {
+      const uid = (patch.assigned_to_user as string) || null;
+      optimistic.assignedUserId = uid;
+      optimistic.assignedUserName = assignableUsers.find((u) => u.id === uid)?.name ?? null;
+    }
+    if ("scheduled_date" in patch) {
+      const d = patch.scheduled_date as string | null;
+      optimistic.scheduledDate = d ? new Date(d).toISOString() : null;
+    }
+    if ("status_change_note" in patch) {
+      optimistic.statusChangeNote = (patch.status_change_note as string) || null;
+    }
+    setRequests((current) =>
+      current.map((request) => (request.id === id ? optimistic : request)),
+    );
+
+    try {
+      const res = await fetch(`/api/maintenance/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ actorName: "Manager", ...patch }),
+      });
+      if (!res.ok) {
+        const errorData = (await res.json().catch(() => ({}))) as { error?: string };
+        setRequests((current) =>
+          current.map((request) => (request.id === id ? previous : request)),
+        );
+        setActionError(errorData.error ?? "Could not update the request.");
       }
-    });
+    } catch {
+      setRequests((current) =>
+        current.map((request) => (request.id === id ? previous : request)),
+      );
+      setActionError("Could not update the request.");
+    } finally {
+      setSavingDetailId(null);
+    }
   }
 
   function submitTenantRequest(event: React.FormEvent<HTMLFormElement>) {
@@ -539,10 +665,14 @@ export function MaintenanceClient({
       title: title.trim(),
       description: description.trim(),
       category: "general",
-      priority: "medium",
+      priority: "normal",
       status: "open",
       slaDueAt: null,
       escalatedAt: null,
+      scheduledDate: null,
+      assignedUserId: null,
+      assignedUserName: null,
+      assignedVendorId: null,
       assignedVendor: null,
       assignmentNote: "Your property team has been notified.",
       createdAt: new Date().toISOString(),
@@ -970,6 +1100,7 @@ export function MaintenanceClient({
               }
               className="min-h-[100px] w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/15"
             />
+            <p className="mt-1.5 text-xs text-slate-400">A note is required.</p>
             <div className="mt-4 flex justify-end gap-3">
               <button
                 type="button"
@@ -980,6 +1111,7 @@ export function MaintenanceClient({
               </button>
               <button
                 type="button"
+                disabled={!resolutionNote.trim()}
                 onClick={() =>
                   commitStatusChange(
                     pendingStatusChange.id,
@@ -987,7 +1119,7 @@ export function MaintenanceClient({
                     resolutionNote.trim(),
                   )
                 }
-                className={`rounded-lg px-4 py-2 text-sm font-semibold text-white ${
+                className={`rounded-lg px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 ${
                   pendingStatusChange.status === "completed"
                     ? "bg-emerald-600 hover:bg-emerald-700"
                     : "bg-rose-600 hover:bg-rose-700"
@@ -997,6 +1129,19 @@ export function MaintenanceClient({
               </button>
             </div>
           </div>
+        </div>
+      ) : null}
+
+      {actionError ? (
+        <div className="flex items-center justify-between gap-3 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+          <span>{actionError}</span>
+          <button
+            type="button"
+            onClick={() => setActionError(null)}
+            className="text-xs font-semibold uppercase tracking-wider text-red-500 hover:text-red-700"
+          >
+            Dismiss
+          </button>
         </div>
       ) : null}
 
@@ -1053,12 +1198,7 @@ export function MaintenanceClient({
                         {request.assignmentNote}
                       </span>
                     ) : null}
-                    {request.slaDueAt ? (
-                      <Badge className="border-slate-200 bg-white text-slate-700">
-                        <Icon name="clock" className="h-3 w-3" />
-                        SLA {relativeDate(request.slaDueAt)}
-                      </Badge>
-                    ) : null}
+                    <SlaBadge slaDueAt={request.slaDueAt} status={request.status} />
                     {request.escalatedAt ? (
                       <Badge className="border-red-600 bg-red-600 text-white">
                         Escalated
@@ -1152,6 +1292,116 @@ export function MaintenanceClient({
                         <option value="cancelled">Cancelled</option>
                       ) : null}
                     </select>
+                  </label>
+
+                  <label className="flex flex-col items-start gap-2 text-sm font-medium text-slate-700">
+                    Vendor:
+                    <select
+                      value={request.assignedVendorId ?? ""}
+                      disabled={isClosedStatus(request.status) || savingDetailId === request.id}
+                      onChange={(event) =>
+                        void updateDetails(request.id, {
+                          assigned_to_vendor: event.target.value || null,
+                        })
+                      }
+                      className="h-9 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/15 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <option value="">Unassigned</option>
+                      {vendors.map((vendor) => (
+                        <option key={vendor.id} value={vendor.id}>
+                          {vendor.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="flex flex-col items-start gap-2 text-sm font-medium text-slate-700">
+                    Assignee:
+                    <select
+                      value={request.assignedUserId ?? ""}
+                      disabled={isClosedStatus(request.status) || savingDetailId === request.id}
+                      onChange={(event) =>
+                        void updateDetails(request.id, {
+                          assigned_to_user: event.target.value || null,
+                        })
+                      }
+                      className="h-9 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/15 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      <option value="">Unassigned</option>
+                      {assignableUsers.map((member) => (
+                        <option key={member.id} value={member.id}>
+                          {member.name}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+
+                  <label className="flex flex-col items-start gap-2 text-sm font-medium text-slate-700">
+                    Scheduled date:
+                    <input
+                      type="date"
+                      value={request.scheduledDate ? request.scheduledDate.slice(0, 10) : ""}
+                      disabled={isClosedStatus(request.status) || savingDetailId === request.id}
+                      onChange={(event) =>
+                        void updateDetails(request.id, {
+                          scheduled_date: event.target.value || null,
+                        })
+                      }
+                      className="h-9 w-full rounded-lg border border-slate-300 bg-white px-3 text-sm outline-none focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/15 disabled:cursor-not-allowed disabled:opacity-60"
+                    />
+                  </label>
+
+                  <label className="flex flex-col items-start gap-2 text-sm font-medium text-slate-700">
+                    Team note:
+                    <textarea
+                      value={noteDrafts[request.id] ?? request.statusChangeNote ?? ""}
+                      disabled={isClosedStatus(request.status) || savingDetailId === request.id}
+                      onChange={(event) =>
+                        setNoteDrafts((current) => ({
+                          ...current,
+                          [request.id]: event.target.value,
+                        }))
+                      }
+                      placeholder="Visible to your team."
+                      rows={2}
+                      className="w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-900 outline-none placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/15 disabled:cursor-not-allowed disabled:opacity-60"
+                    />
+                    {noteDrafts[request.id] !== undefined &&
+                    noteDrafts[request.id] !== (request.statusChangeNote ?? "") ? (
+                      <div className="flex gap-2">
+                        <button
+                          type="button"
+                          disabled={savingDetailId === request.id}
+                          onClick={() =>
+                            void updateDetails(request.id, {
+                              status_change_note: noteDrafts[request.id].trim() || null,
+                            }).then(() =>
+                              setNoteDrafts((current) => {
+                                const next = { ...current };
+                                delete next[request.id];
+                                return next;
+                              }),
+                            )
+                          }
+                          className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          Save note
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setNoteDrafts((current) => {
+                              const next = { ...current };
+                              delete next[request.id];
+                              return next;
+                            })
+                          }
+                          className="rounded-lg border border-slate-300 px-3 py-1.5 text-xs font-medium text-slate-600 transition-colors hover:bg-slate-50"
+                        >
+                          Discard
+                        </button>
+                      </div>
+                    ) : null}
                   </label>
 
                 </div>

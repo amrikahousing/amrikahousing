@@ -137,6 +137,23 @@ function requiresEmailCodeChallenge(status: unknown) {
   return status === "needs_second_factor" || status === "needs_client_trust";
 }
 
+function supportsEmailCodeChallenge(signIn: NonNullable<ReturnType<typeof useSignIn>["signIn"]>) {
+  return signIn.supportedSecondFactors?.some((factor) => factor.strategy === "email_code") ?? false;
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, label: string) {
+  let timeoutId: number | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = window.setTimeout(() => {
+      reject(new Error(`${label} timed out. If you received a code, enter it below.`));
+    }, ms);
+  });
+
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timeoutId) window.clearTimeout(timeoutId);
+  });
+}
+
 export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode }) {
   const emailId = useId();
   const passwordId = useId();
@@ -341,24 +358,80 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     }
   }
 
-  async function navigateAfterAuth(destination: string) {
+  function navigateToUrl(url: string) {
+    window.location.assign(url);
+  }
+
+  async function navigateAfterAuth(
+    destination: string,
+    decorateUrl: (url: string) => string = (url) => url,
+  ) {
     const activeTask = clerk.session?.currentTask;
     if (activeTask) {
-      await clerk.redirectToTasks({ redirectUrl: destination });
+      const tasksUrl = new URL("/login/tasks", window.location.origin);
+      tasksUrl.searchParams.set("redirect_url", destination);
+      navigateToUrl(decorateUrl(`${tasksUrl.pathname}${tasksUrl.search}`));
       return;
     }
 
-    window.location.href = destination;
+    navigateToUrl(decorateUrl(destination));
   }
 
   async function completeSignIn() {
-    const { error: finalizeError } = await signIn.finalize();
+    let didNavigate = false;
+    const { error: finalizeError } = await withTimeout(
+      signIn.finalize({
+        navigate: async ({ session, decorateUrl }) => {
+          didNavigate = true;
+          const destination = await resolvePostSignInDestination();
+          if (session.currentTask) {
+            const tasksUrl = new URL("/login/tasks", window.location.origin);
+            tasksUrl.searchParams.set("redirect_url", destination);
+            navigateToUrl(decorateUrl(`${tasksUrl.pathname}${tasksUrl.search}`));
+            return;
+          }
+
+          navigateToUrl(decorateUrl(destination));
+        },
+      }),
+      10000,
+      "Finishing sign-in",
+    );
     if (finalizeError) {
       setClientError(getErrorMessage(finalizeError, "We could not finish signing you in."));
+      setIsSubmitting(false);
       return;
     }
 
-    await navigateAfterAuth(await resolvePostSignInDestination());
+    if (!didNavigate) {
+      await navigateAfterAuth(await resolvePostSignInDestination());
+    }
+  }
+
+  async function sendSignInEmailCode() {
+    if (!supportsEmailCodeChallenge(signIn)) {
+      setClientError(
+        `Sign-in requires an additional step (${String(signIn.status)}), but email code is not available for this account.`,
+      );
+      return "failed" as const;
+    }
+
+    try {
+      const { error: sendError } = await withTimeout(
+        signIn.mfa.sendEmailCode(),
+        8000,
+        "Sending the verification code",
+      );
+      if (sendError) {
+        setClientError(getErrorMessage(sendError, "We could not send a verification code."));
+        return "failed" as const;
+      }
+
+      return "sent" as const;
+    } catch (error) {
+      setClientNotice(getErrorMessage(error, "If you received a code, enter it below."));
+      return "timed_out" as const;
+    }
   }
 
   function redirectToInviteLoginNotice() {
@@ -482,15 +555,26 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
       }
 
       if (requiresEmailCodeChallenge(signIn.status)) {
-        const { error: sendError } = await signIn.mfa.sendEmailCode();
-        if (sendError) {
-          setClientError(getErrorMessage(sendError, "We could not send a verification code."));
+        if (!supportsEmailCodeChallenge(signIn)) {
+          setClientError(
+            `Sign-in requires an additional step (${String(signIn.status)}), but email code is not available for this account.`,
+          );
           setIsSubmitting(false);
           return;
         }
+
         setVerificationCode("");
         switchMode("signin_mfa");
+        setClientNotice("Enter the code from your email.");
         setIsSubmitting(false);
+
+        void sendSignInEmailCode().then((sendResult) => {
+          if (sendResult === "sent") {
+            setClientNotice("We sent a verification code to your email.");
+          } else if (sendResult === "timed_out") {
+            setClientNotice("If you received a code, enter it below. Otherwise use Resend code.");
+          }
+        });
         return;
       }
 
@@ -755,7 +839,11 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     setIsSubmitting(true);
 
     try {
-      const { error } = await signIn.mfa.verifyEmailCode({ code: verificationCode });
+      const { error } = await withTimeout(
+        signIn.mfa.verifyEmailCode({ code: verificationCode }),
+        12000,
+        "Verifying the code",
+      );
       if (error) {
         setClientError(getErrorMessage(error, "We could not verify that code."));
         setIsSubmitting(false);
@@ -765,6 +853,28 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
       await completeSignIn();
     } catch (error) {
       setClientError(getErrorMessage(error, "Something went wrong. Please try again."));
+      setIsSubmitting(false);
+    }
+  }
+
+  async function handleResendSignInCode() {
+    setClientError(null);
+    setClientNotice(null);
+    setIsSubmitting(true);
+
+    try {
+      const sendResult = await sendSignInEmailCode();
+      if (sendResult !== "failed") {
+        setVerificationCode("");
+        setClientNotice(
+          sendResult === "timed_out"
+            ? "If you received a code, enter it below. Otherwise try Resend code again."
+            : "We sent a new verification code to your email.",
+        );
+      }
+    } catch (error) {
+      setClientError(getErrorMessage(error, "Something went wrong. Please try again."));
+    } finally {
       setIsSubmitting(false);
     }
   }
@@ -1101,11 +1211,13 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                       </label>
                       <input
                         id={codeId}
-                        className={fieldClass("h-12 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 text-center text-lg font-semibold tracking-[0.25em] text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20", "verificationCode")}
+                        className={fieldClass("h-12 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 text-lg font-semibold text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20", "verificationCode")}
                         type="text"
                         inputMode="numeric"
+                        name="verificationCode"
                         maxLength={6}
-                        placeholder="------"
+                        placeholder="Enter code"
+                        autoFocus
                         required
                         value={verificationCode}
                         onChange={(e) => {
@@ -1455,11 +1567,12 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                       </label>
                       <input
                         id={codeId}
-                        className={fieldClass("h-12 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 text-center text-lg font-semibold tracking-[0.25em] text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20", "verificationCode")}
+                        className={fieldClass("h-12 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 text-lg font-semibold text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20", "verificationCode")}
                         type="text"
                         inputMode="numeric"
+                        name="verificationCode"
                         maxLength={6}
-                        placeholder="------"
+                        placeholder="Enter code"
                         required
                         value={verificationCode}
                         onChange={(e) => {
@@ -1511,11 +1624,13 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                       </label>
                       <input
                         id={codeId}
-                        className={fieldClass("h-12 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 text-center text-lg font-semibold tracking-[0.25em] text-slate-100 outline-none transition placeholder:text-slate-500 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20", "verificationCode")}
+                        className={fieldClass("h-12 w-full rounded-md border border-slate-600 bg-slate-900/80 px-3 text-lg font-semibold text-slate-100 outline-none transition placeholder:text-slate-400 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/20", "verificationCode")}
                         type="text"
                         inputMode="numeric"
+                        name="verificationCode"
                         maxLength={6}
-                        placeholder="------"
+                        placeholder="Enter code"
+                        autoFocus
                         required
                         value={verificationCode}
                         onChange={(e) => {
@@ -1536,12 +1651,27 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                       </p>
                     )}
 
+                    {clientNotice && (
+                      <p className="rounded-md border border-emerald-400/30 bg-emerald-950/35 px-3 py-2 text-sm text-emerald-100">
+                        {clientNotice}
+                      </p>
+                    )}
+
                     <button
                       className="h-12 w-full rounded-md bg-emerald-500 px-4 text-base font-semibold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
                       type="submit"
                       disabled={isLoading}
                     >
                       {isLoading ? "Verifying..." : "Verify & sign in"}
+                    </button>
+
+                    <button
+                      type="button"
+                      className="w-full text-sm font-medium text-slate-200 underline underline-offset-2 hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+                      onClick={handleResendSignInCode}
+                      disabled={isLoading}
+                    >
+                      Resend code
                     </button>
 
                     <button
