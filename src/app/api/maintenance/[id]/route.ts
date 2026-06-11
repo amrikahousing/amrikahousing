@@ -2,8 +2,12 @@ import { isAccessError } from "@/lib/auth";
 import { getOrgPermissionContext, requirePermission } from "@/lib/org-authorization";
 import { prisma } from "@/lib/db";
 import { logMaintenanceEvent } from "@/lib/maintenance-audit";
+import { inngest } from "@/inngest/client";
 
 const VALID_STATUSES = ["open", "in_progress", "completed", "rejected"];
+
+// Status transitions the tenant should be texted about.
+const NOTIFY_STATUSES = ["in_progress", "pending_acceptance", "completed", "rejected"];
 
 function hasKey(body: Record<string, unknown>, key: string) {
   return Object.prototype.hasOwnProperty.call(body, key);
@@ -206,6 +210,23 @@ export async function PATCH(
       toStatus: existing.status,
       note: eventNotes.join("; "),
     });
+  }
+
+  // Text the tenant about relevant status changes (best-effort; never blocks the response).
+  if (isStatusChange && existing.submitted_by_tenant && NOTIFY_STATUSES.includes(effectiveStatus)) {
+    await inngest
+      .send({
+        name: "maintenance/status.changed",
+        data: {
+          requestId: id,
+          organizationId: access.orgDbId,
+          toStatus: effectiveStatus,
+          note: updated.status_change_note,
+        },
+      })
+      .catch((err) =>
+        console.error("[maintenance] failed to enqueue status notification", err),
+      );
   }
 
   return Response.json({

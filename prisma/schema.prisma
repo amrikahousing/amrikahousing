@@ -496,6 +496,30 @@ model property_assignments {
   @@schema("public")
 }
 
+/// Outbound notification log (SMS today; channel-shaped for future WhatsApp).
+/// Standalone table — stores ids without Prisma relations to keep the model
+/// decoupled from the entities it references. Updated by the Twilio delivery webhook.
+model notifications_sent {
+  id              String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  organization_id String   @db.Uuid
+  tenant_id       String?  @db.Uuid
+  channel         String   @default("sms")
+  recipient_type  String?
+  to_phone        String
+  body            String
+  provider_sid    String?
+  status          String   @default("queued")
+  related_type    String?
+  related_id      String?  @db.Uuid
+  created_at      DateTime @default(now()) @db.Timestamptz(6)
+  updated_at      DateTime @default(now()) @db.Timestamptz(6)
+
+  @@index([provider_sid], map: "idx_notifications_sent_provider_sid")
+  @@index([related_type, related_id], map: "idx_notifications_sent_related")
+  @@index([organization_id], map: "idx_notifications_sent_org")
+  @@schema("public")
+}
+
 model memberships {
   id              String        @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   user_id         String        @db.Uuid

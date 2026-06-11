@@ -1,6 +1,7 @@
 import { requireTenantAccess, isTenantAccessError } from "@/lib/renter-auth";
 import { prisma } from "@/lib/db";
 import { logMaintenanceEvent } from "@/lib/maintenance-audit";
+import { inngest } from "@/inngest/client";
 
 export async function GET() {
   const ctx = await requireTenantAccess();
@@ -117,6 +118,16 @@ export async function POST(request: Request) {
     note: "Request submitted by tenant",
     metadata: { category: categoryLabel, priority: validPriority },
   });
+
+  // Notify the property's manager/owner/admin (best-effort; never blocks the response).
+  await inngest
+    .send({
+      name: "maintenance/request.created",
+      data: { requestId: req.id, organizationId: ctx.organizationId },
+    })
+    .catch((err) =>
+      console.error("[maintenance] failed to enqueue created notification", err),
+    );
 
   return Response.json({ request: req }, { status: 201 });
 }
