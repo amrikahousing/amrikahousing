@@ -914,52 +914,45 @@ async function buildPlainTextPdf(rawText: string): Promise<Buffer> {
 }
 
 // ─── INITIALS line removal + tag insertion ───────────────────────────────────
-// Finds every paragraph whose text contains "INITIALS:" and removes the label
-// plus any blank ( ) slots, then inserts the DocuSeal initials anchor tags.
-// Two cases:
-//   1. Tags already present (graphic-slot pass or previous replacement ran):
-//      strip the "INITIALS:" label and any leftover blank slots.
-//   2. No tags yet: replace the entire "INITIALS: ( ) ( )" block with tags.
+// Port of the local python-docx cleaning script, hardened for documents whose
+// initials slots may already be partially tagged. For every paragraph (body and
+// table cells — table paragraphs are also <w:p> in document.xml) whose combined
+// run text contains an initials construct, the WHOLE construct is collapsed to a
+// single Tenant-1 DocuSeal anchor:
+//   • "INITIALS: ( ) ( )"                                  → {{Initial;...Tenant 1}}
+//   • "INITIALS: ( )"                                      → {{Initial;...Tenant 1}}
+//   • "INITIALS: {{Initial;...Tenant 1}}(   )"  (leftover) → {{Initial;...Tenant 1}}
+//   • "INITIAL AT LETTER D"                                → {{Initial;...Tenant 1}}
+// A "slot" is either a parenthesis group "( ... )" OR an already-inserted initials
+// tag, so the label + every following slot/tag (in any combination) is consumed —
+// this is what eliminates the leftover "(   )" that the old two-paren regex missed.
+// Working on the combined run text (via collectRuns) mirrors python-docx's
+// paragraph.text, so matches survive when the construct is split across <w:r> runs.
+// Idempotent: a bare tag with no trailing slot does not match, so re-running is a no-op.
 
-function replaceInitialsSlots(xml: string): string {
-  // label + optional spaces + any number of ( ) or underscore slot groups
-  const FULL_RE  = new RegExp("INITIALS\\s*:[\\s ]*(?:\\([\\s _]*\\)[\\s ]*)*", "i");
-  const LABEL_RE = new RegExp("INITIALS\\s*:[\\s ]*", "i");
-  const SLOT_RE  = new RegExp("\\([\\s _]*\\)");
-  const TAGS = "{{Initial;type=initials;role=Tenant 1}} {{Initial;type=initials;role=Tenant 2}}";
+function replaceInitialsSlots(xml: string): { xml: string; count: number } {
+  const TAG = "{{Initial;type=initials;role=Tenant 1}}";
+  // A slot is a parenthesis group OR an existing initials anchor tag.
+  const SLOT = "(?:\\{\\{Initial;type=initials;role=[^}]*\\}\\}|\\([^)]*\\))";
+  // "initials" label + optional :/- + at least one slot, then any more slots.
+  const INITIALS_RE = new RegExp(
+    `\\binitials\\b\\s*[:\\-]?\\s*${SLOT}(?:\\s*${SLOT})*`,
+    "i",
+  );
+  const LETTER_D_RE = /INITIAL\s+AT\s+LETTER\s+D/i;
 
-  return xml.replace(/(<w:p\b(?:[^>]*)>)([\s\S]*?)(<\/w:p>)/g, (full, open, body, close) => {
+  let count = 0;
+  const out = xml.replace(/(<w:p\b(?:[^>]*)>)([\s\S]*?)(<\/w:p>)/g, (full, open, body, close) => {
     const combined = collectRuns(body).map((r) => r.text).join("");
-
-    if (!/INITIALS\s*:/i.test(combined)) return full;
-
-    let newBody = body;
-
-    if (/;type=initials/.test(body)) {
-      // Tags already present — strip the label, then sweep out any leftover blank slots
-      // (orphaned when old cached schema pairs replaced only "INITIALS:" but not the slots).
-      let cur = collectRuns(newBody).map((r) => r.text).join("");
-      const labelM = LABEL_RE.exec(cur);
-      if (labelM) newBody = replaceParagraphBody(newBody, labelM[0], "");
-
-      for (;;) {
-        cur = collectRuns(newBody).map((r) => r.text).join("");
-        const slotM = SLOT_RE.exec(cur);
-        if (!slotM) break;
-        newBody = replaceParagraphBody(newBody, slotM[0], "");
-      }
-      return open + newBody + close;
-    }
-
-    // No tags yet — replace the entire "INITIALS: ( ) ( )" block with both tenant tags
-    const m = FULL_RE.exec(combined);
+    const m = INITIALS_RE.exec(combined) ?? LETTER_D_RE.exec(combined);
     if (!m) return full;
-    newBody = replaceParagraphBody(newBody, m[0], TAGS);
-    return open + newBody + close;
+    count++;
+    return open + replaceParagraphBody(body, m[0], TAG) + close;
   });
+  return { xml: out, count };
 }
 
-async function applyInitialsSlotReplacement(docxBuffer: Buffer): Promise<Buffer> {
+export async function applyInitialsSignTags(docxBuffer: Buffer): Promise<Buffer> {
   const PizZip = (await import("pizzip")).default;
   const zip = new PizZip(docxBuffer);
 
@@ -971,12 +964,16 @@ async function applyInitialsSlotReplacement(docxBuffer: Buffer): Promise<Buffer>
     "word/footer2.xml",
   ];
 
+  let total = 0;
   for (const filePath of files) {
     const file = zip.file(filePath);
     if (!file) continue;
-    zip.file(filePath, replaceInitialsSlots(file.asText()));
+    const { xml, count } = replaceInitialsSlots(file.asText());
+    if (count > 0) zip.file(filePath, xml);
+    total += count;
   }
 
+  console.log(`[initials-tags] replaced ${total} INITIALS slot(s) with Tenant-1 anchors`);
   return Buffer.from(zip.generate({ type: "nodebuffer" }));
 }
 
@@ -994,9 +991,13 @@ export async function generateLease(
       const map = buildReplacementMap(data);
       const replacements = schema.pairs
         .filter((p) => p.search && p.token)
+        // INITIALS are handled EXCLUSIVELY by applyInitialsSignTags (single Tenant-1
+        // anchor). Drop every initials pair the Claude extraction produced — otherwise
+        // its Tenant-1/Tenant-2 pairs partially match the oddly-spaced "( )( )" slots and
+        // re-introduce stray Tenant 2 tags and leftover parens.
+        .filter((p) => !p.token.includes(";type=initials"))
         // Drop stale "label expansion" pairs like { search:"INITIALS:", token:"INITIALS: {{Initial;...}}" }
         // where the token embeds the search string — these orphan blank slots that can't be cleaned up.
-        // All INITIALS placement is handled entirely by applyInitialsSlotReplacement.
         .filter((p) => !(p.token.includes(p.search) && p.token.includes(";type=")))
         .map((p) => {
           // DocuSeal anchor tags (contain ";type=") are used verbatim — not looked up in the data map
@@ -1007,9 +1008,11 @@ export async function generateLease(
           return { search: p.search, value: map[key] ?? "" };
         });
       const filled = await fillDocxDirect(buffer, replacements);
-      // Ensure any INITIALS: ( ) slots not caught by exact-string pairs are
-      // replaced with DocuSeal anchor tags before the document reaches DocuSeal.
-      return applyInitialsSlotReplacement(filled);
+      // Apply the INITIALS → single Tenant-1 anchor transform on the filled document.
+      // It is the sole owner of initials handling and is idempotent (a bare tag with no
+      // trailing slot is a no-op), so this also cleans up templates uploaded before the
+      // upload-time transform existed, without double-tagging fresh ones.
+      return applyInitialsSignTags(filled);
     }
   }
   // PDF templates or stale schema: rebuild from clauses
@@ -1062,12 +1065,16 @@ export async function generateTokenizedTemplate(schema: ExtractedLeaseSchema, bl
     if (buffer[0] === 0x50 && buffer[1] === 0x4b) {
       const replacements = schema.pairs
         .filter((p) => p.search && p.token)
+        // INITIALS are owned exclusively by applyInitialsSignTags — drop Claude's
+        // initials pairs so they don't re-introduce Tenant 2 tags / leftover parens.
+        .filter((p) => !p.token.includes(";type=initials"))
         .filter((p) => !(p.token.includes(p.search) && p.token.includes(";type=")))
         .map((p) => ({ search: p.search, value: p.token }));
-      // Apply Claude's extracted pairs first, then do a reliable regex-based
-      // pass for any INITIALS: ( ) slots whose spacing didn't match exactly.
+      // Apply Claude's extracted pairs, bake property constants, then do the reliable
+      // regex-based INITIALS → single Tenant-1 anchor pass (idempotent).
       const tokenized = await fillDocxDirect(buffer, replacements);
-      return applyBakedTokens(tokenized, schema);
+      const baked = await applyBakedTokens(tokenized, schema);
+      return applyInitialsSignTags(baked);
     }
   }
   const fromClauses = await buildTemplateDocxFromClauses(schema);
