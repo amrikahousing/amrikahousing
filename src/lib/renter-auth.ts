@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { auth, clerkClient, currentUser } from "@clerk/nextjs/server";
 import { prisma } from "./db";
 
@@ -22,6 +23,15 @@ type SharedUser = {
 function metadataString(metadata: Record<string, unknown> | null | undefined, key: string) {
   const value = metadata?.[key];
   return typeof value === "string" && value.trim() ? value.trim() : null;
+}
+
+function isUniqueConstraintError(error: unknown) {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    error.code === "P2002"
+  );
 }
 
 export async function findExistingSharedUserIdentity({
@@ -67,7 +77,7 @@ export async function findExistingSharedUserIdentity({
   };
 }
 
-export async function resolveSharedUserIdentity(userId: string) {
+export const resolveSharedUserIdentity = cache(async function resolveSharedUserIdentity(userId: string) {
   const clerkUser =
     (await currentUser().catch(() => null)) ??
     (await clerkClient()
@@ -146,7 +156,29 @@ export async function resolveSharedUserIdentity(userId: string) {
 
   let sharedUser: SharedUser;
   if (!existing) {
-    sharedUser = await prisma.users.create({ data: next, select: sharedUserSelect });
+    try {
+      sharedUser = await prisma.users.create({ data: next, select: sharedUserSelect });
+    } catch (error) {
+      if (!isUniqueConstraintError(error)) {
+        throw error;
+      }
+
+      const racedExisting =
+        (await prisma.users.findUnique({
+          where: { clerk_user_id: userId },
+          select: sharedUserSelect,
+        })) ??
+        (await prisma.users.findUnique({
+          where: { email },
+          select: sharedUserSelect,
+        }));
+
+      if (!racedExisting) {
+        throw error;
+      }
+
+      sharedUser = racedExisting;
+    }
   } else {
     const changed =
       existing.clerk_user_id !== next.clerk_user_id ||
@@ -166,7 +198,7 @@ export async function resolveSharedUserIdentity(userId: string) {
   }
 
   return { clerkUser, email, sharedUser };
-}
+});
 
 export async function findTenantForAuthenticatedUser(userId: string) {
   const { email, sharedUser } = await resolveSharedUserIdentity(userId);
