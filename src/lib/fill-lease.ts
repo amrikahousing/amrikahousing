@@ -930,15 +930,28 @@ async function buildPlainTextPdf(rawText: string): Promise<Buffer> {
 // paragraph.text, so matches survive when the construct is split across <w:r> runs.
 // Idempotent: a bare tag with no trailing slot does not match, so re-running is a no-op.
 
-function replaceInitialsSlots(xml: string): { xml: string; count: number } {
-  const TAG = "{{Initial;type=initials;role=Tenant 1}}";
+// Separator placed between adjacent per-tenant initials anchors. Tune this single
+// constant to control how the boxes are spaced in the rendered document.
+const INITIALS_ANCHOR_SEPARATOR = " ";
+
+function replaceInitialsSlots(xml: string, tenantCount: number): { xml: string; count: number } {
+  const n = Math.max(1, tenantCount);
+  // One initials anchor per tenant: Tenant 1 … Tenant N, placed side by side.
+  const TAGS = Array.from({ length: n }, (_, i) =>
+    `{{Initial;type=initials;role=Tenant ${i + 1}}}`,
+  ).join(INITIALS_ANCHOR_SEPARATOR);
+
+  const TAG_ANY = "\\{\\{Initial;type=initials;role=[^}]*\\}\\}"; // any existing initials anchor
   // A slot is a parenthesis group OR an existing initials anchor tag.
-  const SLOT = "(?:\\{\\{Initial;type=initials;role=[^}]*\\}\\}|\\([^)]*\\))";
-  // "initials" label + optional :/- + at least one slot, then any more slots.
-  const INITIALS_RE = new RegExp(
-    `\\binitials\\b\\s*[:\\-]?\\s*${SLOT}(?:\\s*${SLOT})*`,
-    "i",
-  );
+  const SLOT = `(?:${TAG_ANY}|\\([^)]*\\))`;
+  // (a) labeled: "INITIALS:" + optional :/- + at least one slot, then any more slots
+  //     (raw templates, e.g. "INITIALS: ( )( )" or a half-tagged "INITIALS: {{tag}}( )").
+  const LABELED = `\\binitials\\b\\s*[:\\-]?\\s*${SLOT}(?:\\s*${SLOT})*`;
+  // (b) bare: one or more already-normalized initials anchors with no label —
+  //     this is what an uploaded template looks like at fill time, so the single
+  //     Tenant-1 anchor can be expanded into one anchor per tenant.
+  const BARE = `${TAG_ANY}(?:\\s*${TAG_ANY})*`;
+  const INITIALS_RE = new RegExp(`(?:${LABELED}|${BARE})`, "i");
   const LETTER_D_RE = /INITIAL\s+AT\s+LETTER\s+D/i;
 
   let count = 0;
@@ -947,12 +960,18 @@ function replaceInitialsSlots(xml: string): { xml: string; count: number } {
     const m = INITIALS_RE.exec(combined) ?? LETTER_D_RE.exec(combined);
     if (!m) return full;
     count++;
-    return open + replaceParagraphBody(body, m[0], TAG) + close;
+    return open + replaceParagraphBody(body, m[0], TAGS) + close;
   });
   return { xml: out, count };
 }
 
-export async function applyInitialsSignTags(docxBuffer: Buffer): Promise<Buffer> {
+// Replaces every INITIALS construct with one initials anchor per tenant (Tenant 1…N).
+// Defaults to a single Tenant-1 anchor (tenantCount = 1), which is what upload-time
+// normalization and the tenant-agnostic tokenized template use.
+export async function applyInitialsSignTags(
+  docxBuffer: Buffer,
+  tenantCount = 1,
+): Promise<Buffer> {
   const PizZip = (await import("pizzip")).default;
   const zip = new PizZip(docxBuffer);
 
@@ -968,12 +987,14 @@ export async function applyInitialsSignTags(docxBuffer: Buffer): Promise<Buffer>
   for (const filePath of files) {
     const file = zip.file(filePath);
     if (!file) continue;
-    const { xml, count } = replaceInitialsSlots(file.asText());
+    const { xml, count } = replaceInitialsSlots(file.asText(), tenantCount);
     if (count > 0) zip.file(filePath, xml);
     total += count;
   }
 
-  console.log(`[initials-tags] replaced ${total} INITIALS slot(s) with Tenant-1 anchors`);
+  console.log(
+    `[initials-tags] replaced ${total} INITIALS slot(s) with ${Math.max(1, tenantCount)} tenant anchor(s) each`,
+  );
   return Buffer.from(zip.generate({ type: "nodebuffer" }));
 }
 
@@ -1008,11 +1029,11 @@ export async function generateLease(
           return { search: p.search, value: map[key] ?? "" };
         });
       const filled = await fillDocxDirect(buffer, replacements);
-      // Apply the INITIALS → single Tenant-1 anchor transform on the filled document.
-      // It is the sole owner of initials handling and is idempotent (a bare tag with no
-      // trailing slot is a no-op), so this also cleans up templates uploaded before the
-      // upload-time transform existed, without double-tagging fresh ones.
-      return applyInitialsSignTags(filled);
+      // Expand every INITIALS construct into one anchor per tenant (Tenant 1…N), driven
+      // by how many tenants are on this lease. This is the sole owner of initials handling
+      // and also normalizes templates uploaded before the upload-time transform existed.
+      const tenantCount = 1 + (data.additionalTenants?.length ?? 0);
+      return applyInitialsSignTags(filled, tenantCount);
     }
   }
   // PDF templates or stale schema: rebuild from clauses
