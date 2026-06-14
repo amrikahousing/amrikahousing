@@ -53,9 +53,20 @@ export async function POST(request: Request) {
   const sid = params.MessageSid || params.SmsSid;
   const status = params.MessageStatus || params.SmsStatus;
   if (sid && status) {
+    // On undelivered/failed, Twilio includes the carrier ErrorCode (e.g. 30032
+    // toll-free not verified, 30007 carrier filtered). Persist it so the reason
+    // a message never reached the handset is visible in the DB, not just logs.
+    const errorReason =
+      params.ErrorCode && params.ErrorCode !== "0"
+        ? `twilio_${params.ErrorCode}${params.ErrorMessage ? `: ${params.ErrorMessage}` : ""}`
+        : undefined;
     await prisma.notifications_sent.updateMany({
       where: { provider_sid: sid },
-      data: { status: mapTwilioStatus(status), updated_at: new Date() },
+      data: {
+        status: mapTwilioStatus(status),
+        ...(errorReason ? { error_reason: errorReason } : {}),
+        updated_at: new Date(),
+      },
     });
   }
 
