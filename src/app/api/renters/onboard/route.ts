@@ -141,6 +141,7 @@ export async function POST(request: NextRequest) {
           city: true,
           state: true,
           zip: true,
+          property_manager_email: true,
           organizations: {
             select: { name: true, email: true, phone: true },
           },
@@ -198,7 +199,11 @@ export async function POST(request: NextRequest) {
         select: { email: true, first_name: true, last_name: true },
       })
     : null;
-  const managerEmail = manager?.email ?? unit.properties.organizations.email;
+  const managerEmail =
+    manager?.email ||
+    unit.properties.organizations.email ||
+    unit.properties.property_manager_email ||
+    null;
   if (leaseMode === "generate" && !managerEmail) {
     return Response.json(
       { error: "Add a manager or organization email before sending leases for e-signature." },

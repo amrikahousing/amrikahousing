@@ -9,6 +9,7 @@
     "dev": "next dev",
     "build": "prisma generate && next build",
     "db:migrate:deploy": "node scripts/prisma-migrate-deploy.mjs --label database",
+    "verify:inngest": "node scripts/verify-inngest.mjs",
     "deploy:test": "node scripts/release-test.mjs",
     "deploy:prod": "node scripts/promote-prod.mjs",
     "hotfix": "node scripts/hotfix-prod.mjs",
@@ -27,6 +28,7 @@
     "@types/pdf-parse": "^1.1.5",
     "@vercel/blob": "^2.3.3",
     "ai": "^6.0.168",
+    "docx-preview": "^0.3.7",
     "docxtemplater": "^3.68.7",
     "inngest": "^4.2.5",
     "mammoth": "^1.12.0",
@@ -41,6 +43,7 @@
     "sanitize-html": "^2.17.4",
     "sonner": "^2.0.7",
     "stripe": "^22.1.0",
+    "twilio": "^6.0.2",
     "unpdf": "^1.6.2",
     "zod": "^4.3.6"
   },

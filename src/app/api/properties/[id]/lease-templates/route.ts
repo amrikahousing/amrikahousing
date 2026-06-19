@@ -4,16 +4,18 @@ import { put } from "@vercel/blob";
 import { NextRequest } from "next/server";
 import { getBlobToken } from "@/lib/blob-token";
 import { prisma } from "@/lib/db";
-import { extractLeaseSchema } from "@/lib/fill-lease";
+import { applyInitialsSignTags, extractLeaseSchema } from "@/lib/fill-lease";
 import { syncLeaseTemplateClauses } from "@/lib/lease-template-clauses";
 import {
   getOrgPermissionContext,
   requirePropertyPermission,
 } from "@/lib/org-authorization";
 
+const DOCX_MIME =
+  "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 const ALLOWED_TEMPLATE_MIME = new Set([
   "application/pdf",
-  "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+  DOCX_MIME,
   "application/rtf",
   "text/rtf",
 ]);
@@ -117,7 +119,25 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
   const ext = file.name.split(".").pop() ?? "pdf";
   const dateStamp = new Date().toISOString().replace(/[:.]/g, "-");
   const path = `lease-templates/${ctx.orgDbId}/${propertyId}/template-${dateStamp}.${ext}`;
-  const blob = await put(path, file, { access: "private", token: getBlobToken() });
+
+  // DOCX preprocessing: replace INITIALS slots with DocuSeal initials anchor tags
+  // before storage, so the cached schema and every future fill inherit the tags.
+  // PDF/RTF pass through unchanged. Non-fatal: on failure, store the original file.
+  let uploadBody: File | Buffer = file;
+  if (file.type === DOCX_MIME) {
+    try {
+      const buf = Buffer.from(await file.arrayBuffer());
+      uploadBody = await applyInitialsSignTags(buf);
+      console.log(`[lease-template] initials sign-tag transform applied to "${file.name}"`);
+    } catch (err) {
+      console.error("[initials-tags] transform failed, uploading original:", err);
+    }
+  }
+  const blob = await put(path, uploadBody, {
+    access: "private",
+    token: getBlobToken(),
+    contentType: file.type,
+  });
 
   const template = await prisma.$transaction(async (tx) => {
     await tx.lease_templates.updateMany({

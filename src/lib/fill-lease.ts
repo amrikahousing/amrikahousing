@@ -156,8 +156,13 @@ Use e-signature anchor tags — NOT data tokens — when the blank slot is a sig
   • "Certification of Accuracy" / final signature table: Lessor and Agent signature lines → {{Sign;type=signature;role=Manager}}, Lessee lines → {{Sign;type=signature;role=Tenant 1}} (or Tenant 2 if a second Lessee row exists)
   • When the same blank (e.g. "________") appears in a lettered list under an acknowledgment heading, map all blanks in that heading's block to the same role — do NOT require a unique search string per item
   • Multi-column signature tables (e.g. Lessor/Date/Lessor/Date in two columns) — emit one pair per unique (search, token) combination; the engine will stamp both columns
-- Initials slots like "( )", "____", or small blanks beside "(Initials)" or "Initials:" labels should be mapped to the appropriate {{Initial;...}} tag
-- When a line reads "INITIALS:" or "Initials:" followed by TWO adjacent "( )" slots (e.g. "INITIALS: ( )( )"), emit TWO pairs: the first "( )" → {{Initial;type=initials;role=Tenant 1}} and the second "( )" → {{Initial;type=initials;role=Tenant 2}}. Because both pairs share the same search string, you MUST emit both — the replacement engine processes them sequentially, replacing one per pass.
+- Initials slots like "( )", "()", "____", or small blanks beside "(Initials)" or "Initials:" labels should be mapped to the appropriate {{Initial;...}} tag
+- CRITICAL — NEVER skip an "INITIALS:" / "Initials:" line. Any line containing the word "INITIALS" (in any casing) that is followed by parenthesis or underscore slots is a tenant-initials field and MUST be tagged. This includes ALL of these spacing variants — copy the slot EXACTLY as it appears (with or without the inner space) into "search":
+    "INITIALS: ( )( )"  → two slots, search "( )" ×2
+    "INITIALS:()()"     → two slots, search "()" ×2
+    "INITIALS: ()"       → one slot, search "()"
+    "INITIALS: ___ ___"  → two slots, search "___" ×2
+  For TWO adjacent slots emit TWO pairs: the first slot → {{Initial;type=initials;role=Tenant 1}} and the second identical slot → {{Initial;type=initials;role=Tenant 2}}. Because both pairs share the same search string, you MUST emit both — the replacement engine processes them sequentially, replacing one occurrence per pass. For a SINGLE slot emit one pair → {{Initial;type=initials;role=Tenant 1}}. The "search" value is ONLY the parenthesis/underscore slot itself — never include the word "INITIALS" or the colon.
 - When the same blank string appears in multiple acknowledgment blocks for different roles, emit one pair per (search, token) role combination
   Example: "___" appears under "Lessee's Initials:" and again under "Agent's Initials:"
     → { "search": "___", "token": "{{Initial;type=initials;role=Tenant 1}}" }
@@ -209,7 +214,11 @@ FINANCIAL TERMS
 - Monthly rent written in words (e.g. "ONE THOUSAND SEVEN HUNDRED" before "dollars ({{rent_amount}}) per month") → {{rent_amount_words}}. Do NOT leave the written rent words as fixed text when they are just the word form of the monthly rent.
 - "Security Deposit:", "Deposit:" → dollar value → {{security_deposit}}
 - "TERM:", "Term:", "Lease Term:", "Initial Term:" → duration value (e.g. "12 months", "month-to-month") → {{lease_term}}
-- Late fee flat dollar amount → {{late_fee_amount}}; grace period days → {{late_fee_grace_days}}; percentage-based late fee → {{late_fee_pct}}
+- Late fees / late charges — these labels are synonyms and ALL map to the late-fee tokens: "Late Fee", "Late Charge", "Late Payment Charge", "Late Payment Fee", "Late Penalty", "Delinquency Charge". Always tag the value:
+    • flat dollar amount charged after the grace period → {{late_fee_amount}}
+    • number of grace/grace-period days before the charge applies → {{late_fee_grace_days}}
+    • a percentage-of-rent late charge (e.g. "5%") instead of a flat amount → {{late_fee_pct}}
+  Do NOT leave a late charge dollar amount or percentage as fixed text — it is a per-property variable.
 - Pet fee amount or monthly rate → {{pet_fee_amount}}
 
 SPECIFIC CLAUSE VALUES (extract the variable values within these clauses, not the clause text itself)
@@ -353,12 +362,58 @@ function buildReplacementMap(data: LeaseData): Record<string, string> {
 
 // ─── Extraction helpers ───────────────────────────────────────────────────────
 
+// The model sometimes emits raw control characters (most often literal line
+// breaks in multi-line address/landlord values) inside JSON string literals,
+// which is invalid JSON and makes JSON.parse throw "Bad control character in
+// string literal". Walk the text and escape any control char that occurs while
+// inside a string, leaving structural whitespace untouched.
+function escapeControlCharsInStrings(s: string): string {
+  let out = "";
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (escaped) {
+      out += ch;
+      escaped = false;
+      continue;
+    }
+    if (ch === "\\") {
+      out += ch;
+      escaped = true;
+      continue;
+    }
+    if (ch === '"') {
+      inString = !inString;
+      out += ch;
+      continue;
+    }
+    if (inString) {
+      const code = ch.charCodeAt(0);
+      if (code < 0x20) {
+        if (ch === "\n") out += "\\n";
+        else if (ch === "\r") out += "\\r";
+        else if (ch === "\t") out += "\\t";
+        else out += "\\u" + code.toString(16).padStart(4, "0");
+        continue;
+      }
+    }
+    out += ch;
+  }
+  return out;
+}
+
 function parseSubstitutionPairs(raw: string): Array<{ search: string; token: string }> {
   let parsed: unknown;
   try {
     const match = raw.match(/\[[\s\S]*\]/);
     if (!match) throw new Error("no JSON array found");
-    parsed = JSON.parse(match[0]);
+    try {
+      parsed = JSON.parse(match[0]);
+    } catch {
+      // Retry after escaping raw control characters the model left unescaped.
+      parsed = JSON.parse(escapeControlCharsInStrings(match[0]));
+    }
   } catch (e) {
     console.error("[fill-lease] raw AI response:", raw.slice(0, 500));
     throw new Error(`Could not parse substitution pairs from AI response: ${e instanceof Error ? e.message : String(e)}`);
@@ -858,6 +913,91 @@ async function buildPlainTextPdf(rawText: string): Promise<Buffer> {
   return Buffer.from(await pdfDoc.save());
 }
 
+// ─── INITIALS line removal + tag insertion ───────────────────────────────────
+// Port of the local python-docx cleaning script, hardened for documents whose
+// initials slots may already be partially tagged. For every paragraph (body and
+// table cells — table paragraphs are also <w:p> in document.xml) whose combined
+// run text contains an initials construct, the WHOLE construct is collapsed to a
+// single Tenant-1 DocuSeal anchor:
+//   • "INITIALS: ( ) ( )"                                  → {{Initial;...Tenant 1}}
+//   • "INITIALS: ( )"                                      → {{Initial;...Tenant 1}}
+//   • "INITIALS: {{Initial;...Tenant 1}}(   )"  (leftover) → {{Initial;...Tenant 1}}
+//   • "INITIAL AT LETTER D"                                → {{Initial;...Tenant 1}}
+// A "slot" is either a parenthesis group "( ... )" OR an already-inserted initials
+// tag, so the label + every following slot/tag (in any combination) is consumed —
+// this is what eliminates the leftover "(   )" that the old two-paren regex missed.
+// Working on the combined run text (via collectRuns) mirrors python-docx's
+// paragraph.text, so matches survive when the construct is split across <w:r> runs.
+// Idempotent: a bare tag with no trailing slot does not match, so re-running is a no-op.
+
+// Separator placed between adjacent per-tenant initials anchors. Tune this single
+// constant to control how the boxes are spaced in the rendered document.
+const INITIALS_ANCHOR_SEPARATOR = " ";
+
+function replaceInitialsSlots(xml: string, tenantCount: number): { xml: string; count: number } {
+  const n = Math.max(1, tenantCount);
+  // One initials anchor per tenant: Tenant 1 … Tenant N, placed side by side.
+  const TAGS = Array.from({ length: n }, (_, i) =>
+    `{{Initial;type=initials;role=Tenant ${i + 1}}}`,
+  ).join(INITIALS_ANCHOR_SEPARATOR);
+
+  const TAG_ANY = "\\{\\{Initial;type=initials;role=[^}]*\\}\\}"; // any existing initials anchor
+  // A slot is a parenthesis group OR an existing initials anchor tag.
+  const SLOT = `(?:${TAG_ANY}|\\([^)]*\\))`;
+  // (a) labeled: "INITIALS:" + optional :/- + at least one slot, then any more slots
+  //     (raw templates, e.g. "INITIALS: ( )( )" or a half-tagged "INITIALS: {{tag}}( )").
+  const LABELED = `\\binitials\\b\\s*[:\\-]?\\s*${SLOT}(?:\\s*${SLOT})*`;
+  // (b) bare: one or more already-normalized initials anchors with no label —
+  //     this is what an uploaded template looks like at fill time, so the single
+  //     Tenant-1 anchor can be expanded into one anchor per tenant.
+  const BARE = `${TAG_ANY}(?:\\s*${TAG_ANY})*`;
+  const INITIALS_RE = new RegExp(`(?:${LABELED}|${BARE})`, "i");
+  const LETTER_D_RE = /INITIAL\s+AT\s+LETTER\s+D/i;
+
+  let count = 0;
+  const out = xml.replace(/(<w:p\b(?:[^>]*)>)([\s\S]*?)(<\/w:p>)/g, (full, open, body, close) => {
+    const combined = collectRuns(body).map((r) => r.text).join("");
+    const m = INITIALS_RE.exec(combined) ?? LETTER_D_RE.exec(combined);
+    if (!m) return full;
+    count++;
+    return open + replaceParagraphBody(body, m[0], TAGS) + close;
+  });
+  return { xml: out, count };
+}
+
+// Replaces every INITIALS construct with one initials anchor per tenant (Tenant 1…N).
+// Defaults to a single Tenant-1 anchor (tenantCount = 1), which is what upload-time
+// normalization and the tenant-agnostic tokenized template use.
+export async function applyInitialsSignTags(
+  docxBuffer: Buffer,
+  tenantCount = 1,
+): Promise<Buffer> {
+  const PizZip = (await import("pizzip")).default;
+  const zip = new PizZip(docxBuffer);
+
+  const files = [
+    "word/document.xml",
+    "word/header1.xml",
+    "word/header2.xml",
+    "word/footer1.xml",
+    "word/footer2.xml",
+  ];
+
+  let total = 0;
+  for (const filePath of files) {
+    const file = zip.file(filePath);
+    if (!file) continue;
+    const { xml, count } = replaceInitialsSlots(file.asText(), tenantCount);
+    if (count > 0) zip.file(filePath, xml);
+    total += count;
+  }
+
+  console.log(
+    `[initials-tags] replaced ${total} INITIALS slot(s) with ${Math.max(1, tenantCount)} tenant anchor(s) each`,
+  );
+  return Buffer.from(zip.generate({ type: "nodebuffer" }));
+}
+
 // ─── Public: generate filled lease (returns DOCX buffer) ─────────────────────
 
 export async function generateLease(
@@ -872,6 +1012,14 @@ export async function generateLease(
       const map = buildReplacementMap(data);
       const replacements = schema.pairs
         .filter((p) => p.search && p.token)
+        // INITIALS are handled EXCLUSIVELY by applyInitialsSignTags (single Tenant-1
+        // anchor). Drop every initials pair the Claude extraction produced — otherwise
+        // its Tenant-1/Tenant-2 pairs partially match the oddly-spaced "( )( )" slots and
+        // re-introduce stray Tenant 2 tags and leftover parens.
+        .filter((p) => !p.token.includes(";type=initials"))
+        // Drop stale "label expansion" pairs like { search:"INITIALS:", token:"INITIALS: {{Initial;...}}" }
+        // where the token embeds the search string — these orphan blank slots that can't be cleaned up.
+        .filter((p) => !(p.token.includes(p.search) && p.token.includes(";type=")))
         .map((p) => {
           // DocuSeal anchor tags (contain ";type=") are used verbatim — not looked up in the data map
           if (p.token.includes(";type=")) {
@@ -880,7 +1028,12 @@ export async function generateLease(
           const key = p.token.replace(/^\{\{|\}\}$/g, "");
           return { search: p.search, value: map[key] ?? "" };
         });
-      return fillDocxDirect(buffer, replacements);
+      const filled = await fillDocxDirect(buffer, replacements);
+      // Expand every INITIALS construct into one anchor per tenant (Tenant 1…N), driven
+      // by how many tenants are on this lease. This is the sole owner of initials handling
+      // and also normalizes templates uploaded before the upload-time transform existed.
+      const tenantCount = 1 + (data.additionalTenants?.length ?? 0);
+      return applyInitialsSignTags(filled, tenantCount);
     }
   }
   // PDF templates or stale schema: rebuild from clauses
@@ -933,9 +1086,16 @@ export async function generateTokenizedTemplate(schema: ExtractedLeaseSchema, bl
     if (buffer[0] === 0x50 && buffer[1] === 0x4b) {
       const replacements = schema.pairs
         .filter((p) => p.search && p.token)
+        // INITIALS are owned exclusively by applyInitialsSignTags — drop Claude's
+        // initials pairs so they don't re-introduce Tenant 2 tags / leftover parens.
+        .filter((p) => !p.token.includes(";type=initials"))
+        .filter((p) => !(p.token.includes(p.search) && p.token.includes(";type=")))
         .map((p) => ({ search: p.search, value: p.token }));
+      // Apply Claude's extracted pairs, bake property constants, then do the reliable
+      // regex-based INITIALS → single Tenant-1 anchor pass (idempotent).
       const tokenized = await fillDocxDirect(buffer, replacements);
-      return applyBakedTokens(tokenized, schema);
+      const baked = await applyBakedTokens(tokenized, schema);
+      return applyInitialsSignTags(baked);
     }
   }
   const fromClauses = await buildTemplateDocxFromClauses(schema);

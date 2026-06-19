@@ -5,6 +5,19 @@ import { prisma } from "@/lib/db";
 import { requireOrganizationStripeRentDestination } from "@/lib/organization-payment-destinations";
 import { getStripeServer } from "@/lib/stripe";
 
+// Stripe returns a `resource_missing` error when a stored customer id no longer
+// exists in the account the current keys point to — e.g. the keys were rotated
+// or this database was copied from another environment (preview seeded from
+// production). We treat that as "provision a fresh customer" rather than fatal.
+function isMissingStripeResourceError(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "resource_missing"
+  );
+}
+
 function roundCurrency(value: number) {
   return Math.round((value + Number.EPSILON) * 100) / 100;
 }
@@ -166,14 +179,25 @@ export async function ensureStripeCustomerForTenant(ctx: TenantContext) {
     throw new Error("Tenant record not found.");
   }
 
-  if (tenant.renter_payment_settings?.stripe_customer_id) {
-    return {
-      tenant,
-      stripeCustomerId: tenant.renter_payment_settings.stripe_customer_id,
-    };
+  const stripe = getStripeServer();
+
+  const storedCustomerId = tenant.renter_payment_settings?.stripe_customer_id ?? null;
+  if (storedCustomerId) {
+    try {
+      const existingCustomer = await stripe.customers.retrieve(storedCustomerId);
+      const isDeleted = "deleted" in existingCustomer && existingCustomer.deleted === true;
+      if (!isDeleted) {
+        return { tenant, stripeCustomerId: storedCustomerId };
+      }
+    } catch (error) {
+      // Stored id the current Stripe account doesn't recognize: don't fail the
+      // tenant forever — fall through and provision a fresh customer below.
+      if (!isMissingStripeResourceError(error)) {
+        throw error;
+      }
+    }
   }
 
-  const stripe = getStripeServer();
   const customer = await stripe.customers.create({
     email: tenant.email,
     name: [tenant.first_name, tenant.last_name].filter(Boolean).join(" ") || undefined,

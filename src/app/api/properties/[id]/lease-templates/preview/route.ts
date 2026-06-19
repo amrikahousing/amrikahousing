@@ -12,7 +12,6 @@ import {
   getOrgPermissionContext,
   requirePropertyPermission,
 } from "@/lib/org-authorization";
-import { escapeHtmlText, sanitizeLeasePreviewHtml } from "@/lib/lease-preview-html";
 
 type RouteContext = { params: Promise<{ id: string }> };
 
@@ -69,24 +68,13 @@ export async function POST(request: NextRequest, context: RouteContext) {
       schema.propertyState = property.state;
       schema.propertyZip = property.zip;
     }
+    // Return the tokenized DOCX itself. The client renders these exact bytes with a
+    // layout-preserving renderer (docx-preview), so the on-screen preview matches the
+    // downloaded document — including tables, merged cells, and headers/footers that
+    // mammoth's HTML conversion would otherwise drop or mangle.
     const docxBuffer = await generateTokenizedTemplate(schema, body.blobUrl);
-    const mammoth = await import("mammoth");
-    let { value: previewHtml } = await mammoth.convertToHtml({ buffer: docxBuffer });
-
-    // Substitute form-entered party values directly so they show as real text in the preview
-    const substitutions: [string, string][] = [
-      ["{{organization_name}}", body.organizationName ?? ""],
-      ["{{landlord_signatory}}", body.landlordSignatory ?? ""],
-      ["{{property_manager_name}}", body.propertyManagerName ?? ""],
-      ["{{property_manager_email}}", body.propertyManagerEmail ?? ""],
-    ];
-    for (const [token, value] of substitutions) {
-      if (value) previewHtml = previewHtml.split(token).join(escapeHtmlText(value));
-    }
-    previewHtml = sanitizeLeasePreviewHtml(previewHtml);
 
     return Response.json({
-      previewHtml,
       fileBase64: docxBuffer.toString("base64"),
       schema,
     });
