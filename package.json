@@ -9,6 +9,7 @@
     "dev": "next dev",
     "build": "prisma generate && next build",
     "db:migrate:deploy": "node scripts/prisma-migrate-deploy.mjs --label database",
+    "verify:inngest": "node scripts/verify-inngest.mjs",
     "deploy:test": "node scripts/release-test.mjs",
     "deploy:prod": "node scripts/promote-prod.mjs",
     "hotfix": "node scripts/hotfix-prod.mjs",
