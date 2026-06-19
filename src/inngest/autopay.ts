@@ -13,8 +13,14 @@ export const autopayChargeDueRent = inngest.createFunction(
   {
     id: "autopay-charge-due-rent",
     name: "Auto-pay due rent charges",
+    // The daily cron must only run in production. Preview/branch environments
+    // register the same function, but must never charge rent on a schedule —
+    // so the cron trigger is added only when VERCEL_ENV is "production". The
+    // manual `renter/autopay.run` event stays enabled everywhere for testing.
     triggers: [
-      { cron: "TZ=America/New_York 0 8 * * *" },
+      ...(process.env.VERCEL_ENV === "production"
+        ? [{ cron: "TZ=America/New_York 0 8 * * *" }]
+        : []),
       { event: "renter/autopay.run" },
     ],
   },
