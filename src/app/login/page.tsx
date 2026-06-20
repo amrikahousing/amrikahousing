@@ -1004,6 +1004,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
         documentUrl={PRIVACY_POLICY_URL}
         onReviewed={() => {
           setPolicyReviewed(true);
+          setAcceptedTerms(true);
           clearFieldError("terms");
           setPolicyModalOpen(false);
         }}

@@ -42,11 +42,28 @@ export function PolicyConsentModal({
     const win = iframeRef.current?.contentWindow;
     const doc = iframeRef.current?.contentDocument;
     const scroller = doc?.scrollingElement ?? doc?.documentElement;
-    if (!win || !scroller) {
+    if (!win || !scroller || !doc) {
       // Can't observe scroll (shouldn't happen for a same-origin doc) — don't
       // trap the user behind an un-scrollable gate.
       setReachedBottom(true);
       return;
+    }
+
+    // The document is a wide two-column layout (a table forces min-width:
+    // 640px, and grid/flex children default to min-width: auto), which makes
+    // it overflow a narrow modal horizontally. Neutralize that for the modal
+    // view only — this injects display CSS, not document bytes, so the stored
+    // content hash is unaffected.
+    try {
+      const fix = doc.createElement("style");
+      fix.textContent =
+        "html,body{overflow-x:hidden}" +
+        ".wrap,main,header,section,article{min-width:0}" +
+        "table{min-width:0}" +
+        "img,svg,video{max-width:100%;height:auto}";
+      doc.head?.appendChild(fix);
+    } catch {
+      // Non-fatal: fall back to the document's own (scrollable) layout.
     }
 
     const check = () => {
@@ -78,7 +95,7 @@ export function PolicyConsentModal({
       onClick={onClose}
     >
       <div
-        className="flex h-[85vh] w-full max-w-2xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
+        className="flex h-[85vh] w-full max-w-3xl flex-col overflow-hidden rounded-2xl bg-white shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-center justify-between border-b border-slate-200 px-5 py-3">
