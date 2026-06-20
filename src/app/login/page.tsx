@@ -3,12 +3,17 @@
 import { useEffect, useId, useMemo, useState } from "react";
 import { useAuth, useClerk, useSignIn, useSignUp, useUser } from "@clerk/nextjs";
 import { isClerkAPIResponseError } from "@clerk/nextjs/errors";
+import {
+  PRIVACY_POLICY_URL,
+  TERMS_OF_SERVICE_URL,
+} from "@/lib/policy";
+import { PolicyConsentModal } from "./policy-consent-modal";
 
 type LoginRole = "property_manager" | "renter";
 type AuthMode = "signin" | "signup" | "verify" | "forgot" | "reset" | "signin_mfa";
 type AuthFieldErrors = Partial<
   Record<
-    "email" | "password" | "confirmPassword" | "firstName" | "organizationName" | "verificationCode",
+    "email" | "password" | "confirmPassword" | "firstName" | "organizationName" | "verificationCode" | "terms",
     string
   >
 >;
@@ -176,6 +181,9 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
   const [lastName, setLastName] = useState("");
   const [organizationName, setOrganizationName] = useState("");
   const [verificationCode, setVerificationCode] = useState("");
+  const [acceptedTerms, setAcceptedTerms] = useState(false);
+  const [policyReviewed, setPolicyReviewed] = useState(false);
+  const [policyModalOpen, setPolicyModalOpen] = useState(false);
   const [clientError, setClientError] = useState<string | null>(null);
   const [clientNotice, setClientNotice] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<AuthFieldErrors>({});
@@ -209,6 +217,58 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     return fieldErrors[field] ? (
       <p className="text-xs font-medium text-red-200">{fieldErrors[field]}</p>
     ) : null;
+  }
+
+  function openPolicyModal() {
+    setClientError(null);
+    setPolicyModalOpen(true);
+  }
+
+  function renderTermsCheckbox() {
+    return (
+      <div className="space-y-1">
+        <div className="flex items-start gap-2 text-[13px] leading-[1.45] text-slate-300">
+          <input
+            type="checkbox"
+            name="acceptTerms"
+            aria-label="I have read and agree to the Privacy Policy and Terms of Service"
+            className="mt-0.5 h-4 w-4 shrink-0 cursor-pointer rounded border-slate-500 bg-slate-900 accent-emerald-500 disabled:cursor-not-allowed disabled:opacity-50"
+            checked={acceptedTerms}
+            disabled={!policyReviewed}
+            onChange={(e) => {
+              setAcceptedTerms(e.target.checked);
+              clearFieldError("terms");
+            }}
+            aria-invalid={!!fieldErrors.terms}
+          />
+          <span className={policyReviewed ? "" : "text-slate-400"}>
+            I have read and agree to the{" "}
+            <button
+              type="button"
+              className="text-emerald-300 underline underline-offset-2 hover:text-emerald-200"
+              onClick={openPolicyModal}
+            >
+              Privacy Policy
+            </button>{" "}
+            and{" "}
+            <button
+              type="button"
+              className="text-emerald-300 underline underline-offset-2 hover:text-emerald-200"
+              onClick={openPolicyModal}
+            >
+              Terms of Service
+            </button>
+            .
+          </span>
+        </div>
+        {!policyReviewed ? (
+          <p className="text-[11px] text-slate-400">
+            Open the policy and scroll to the end to enable this.
+          </p>
+        ) : null}
+        {fieldError("terms")}
+      </div>
+    );
   }
 
   function clearFieldError(field: keyof AuthFieldErrors) {
@@ -362,6 +422,21 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     window.location.assign(url);
   }
 
+  // Persist the user's acceptance of the current policy. Called after a
+  // successful auth (the acceptance checkbox is required on both forms), once a
+  // session exists so the server can attribute it to the Clerk user.
+  async function recordTermsAcceptance() {
+    try {
+      await fetch("/api/internal/terms", {
+        method: "POST",
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+    } catch {
+      // Non-fatal: the user re-confirms on next sign-in if this didn't land.
+    }
+  }
+
   async function navigateAfterAuth(
     destination: string,
     decorateUrl: (url: string) => string = (url) => url,
@@ -383,6 +458,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
       signIn.finalize({
         navigate: async ({ session, decorateUrl }) => {
           didNavigate = true;
+          await recordTermsAcceptance();
           const destination = await resolvePostSignInDestination();
           if (session.currentTask) {
             const tasksUrl = new URL("/login/tasks", window.location.origin);
@@ -404,6 +480,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     }
 
     if (!didNavigate) {
+      await recordTermsAcceptance();
       await navigateAfterAuth(await resolvePostSignInDestination());
     }
   }
@@ -469,6 +546,9 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
 
     if (sessionId) {
       await clerk.setActive({ session: sessionId, navigate: async () => {} });
+      // The signup form requires the acceptance checkbox, so persist it now
+      // that the session is active, then skip the re-prompt gate.
+      await recordTermsAcceptance();
       await createOrganizationIfNeeded();
       const dest =
         role === "renter"
@@ -490,6 +570,9 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     const errors: AuthFieldErrors = {};
     if (!email.trim()) errors.email = "Email is required.";
     if (!password) errors.password = "Password is required.";
+    if (!acceptedTerms) {
+      errors.terms = "Please accept the Privacy Policy and Terms of Service to continue.";
+    }
     if (setAuthFieldErrors(errors)) return;
     setIsSubmitting(true);
 
@@ -510,6 +593,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
       const trimmedEmail = email.trim().toLowerCase();
 
       if (activeEmail?.toLowerCase() === trimmedEmail) {
+        await recordTermsAcceptance();
         await navigateAfterAuth(await resolvePostSignInDestination());
         return;
       }
@@ -714,6 +798,9 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     }
     if (!password) errors.password = "Password is required.";
     if (!confirmPassword) errors.confirmPassword = "Please confirm your password.";
+    if (!acceptedTerms) {
+      errors.terms = "Please accept the Privacy Policy and Terms of Service to continue.";
+    }
     if (setAuthFieldErrors(errors)) return;
     if (password !== confirmPassword) {
       setFieldErrors({ confirmPassword: "Passwords do not match." });
@@ -912,6 +999,16 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
 
   return (
     <main className="relative min-h-screen overflow-hidden bg-slate-950 text-slate-100">
+      <PolicyConsentModal
+        open={policyModalOpen}
+        documentUrl={PRIVACY_POLICY_URL}
+        onReviewed={() => {
+          setPolicyReviewed(true);
+          clearFieldError("terms");
+          setPolicyModalOpen(false);
+        }}
+        onClose={() => setPolicyModalOpen(false)}
+      />
       <div
         aria-hidden="true"
         className="pointer-events-none absolute inset-0 bg-cover bg-center"
@@ -1099,6 +1196,8 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                       </div>
                       {fieldError("password")}
                     </div>
+
+                    {renderTermsCheckbox()}
 
                     {displayError && (
                       <p
@@ -1524,6 +1623,8 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                       </p>
                     )}
 
+                    {renderTermsCheckbox()}
+
                     <div
                       id="clerk-captcha"
                       data-cl-theme="dark"
@@ -1688,14 +1789,18 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                   This site is protected by reCAPTCHA and the Google{" "}
                   <a
                     className="text-slate-300 underline underline-offset-2 hover:text-slate-100"
-                    href="#"
+                    href={PRIVACY_POLICY_URL}
+                    target="_blank"
+                    rel="noreferrer"
                   >
                     Privacy Policy
                   </a>
                   ,{" "}
                   <a
                     className="text-slate-300 underline underline-offset-2 hover:text-slate-100"
-                    href="#"
+                    href={TERMS_OF_SERVICE_URL}
+                    target="_blank"
+                    rel="noreferrer"
                   >
                     Terms of Service
                   </a>{" "}

@@ -684,6 +684,25 @@ model users {
   @@schema("public")
 }
 
+/// Records a user's acceptance of the Privacy Policy / Terms of Service.
+/// Keyed by Clerk user id so it covers both property managers and renters,
+/// regardless of which local identity row (if any) exists for them.
+model policy_acceptances {
+  id            String   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
+  clerk_user_id String
+  email         String?
+  policy        String   @default("privacy_and_terms")
+  version       String?
+  content_hash  String?
+  accepted_at   DateTime @default(now()) @db.Timestamptz(6)
+  ip            String?
+  user_agent    String?
+
+  @@unique([clerk_user_id, policy], map: "policy_acceptances_user_policy_unique")
+  @@index([clerk_user_id], map: "idx_policy_acceptances_clerk")
+  @@schema("public")
+}
+
 model renter_payment_methods {
   id                        String                   @id @default(dbgenerated("gen_random_uuid()")) @db.Uuid
   tenant_id                 String                   @db.Uuid

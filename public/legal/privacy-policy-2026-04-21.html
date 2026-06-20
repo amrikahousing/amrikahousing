@@ -1,0 +1,436 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Privacy Policy — Amrika Housing</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Source+Serif+4:opsz,wght@8..60,400;8..60,600;8..60,700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --teal: #1F4E5F;
+    --teal-deep: #163b48;
+    --ink: #20292d;
+    --muted: #5d6b71;
+    --line: #e3ddd2;
+    --paper: #faf8f3;
+    --surface: #ffffff;
+    --amber: #c0892f;
+    --amber-soft: #f6ead2;
+    --maxw: 1180px;
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) { html { scroll-behavior: auto; } }
+  body {
+    margin: 0;
+    font-family: 'Inter', system-ui, sans-serif;
+    color: var(--ink);
+    background: var(--paper);
+    line-height: 1.65;
+    font-size: 16px;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  /* Masthead */
+  .masthead {
+    background: var(--teal);
+    color: #fff;
+    border-bottom: 4px solid var(--amber);
+  }
+  .masthead-inner {
+    max-width: var(--maxw);
+    margin: 0 auto;
+    padding: 44px 32px 38px;
+  }
+  .brand {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px;
+    letter-spacing: 0.22em;
+    text-transform: uppercase;
+    color: var(--amber-soft);
+    margin-bottom: 18px;
+  }
+  .masthead h1 {
+    font-family: 'Source Serif 4', serif;
+    font-weight: 700;
+    font-size: clamp(2rem, 5vw, 3.1rem);
+    line-height: 1.05;
+    margin: 0 0 14px;
+    letter-spacing: -0.01em;
+  }
+  .masthead .sub {
+    color: #cfe0e4;
+    max-width: 60ch;
+    margin: 0;
+    font-size: 1.02rem;
+  }
+  .effdate {
+    display: inline-block;
+    margin-top: 22px;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 12.5px;
+    letter-spacing: 0.04em;
+    padding: 7px 14px;
+    border: 1px solid rgba(255,255,255,.35);
+    border-radius: 999px;
+    color: #fff;
+  }
+
+  /* Layout */
+  .wrap {
+    max-width: var(--maxw);
+    margin: 0 auto;
+    padding: 0 32px 80px;
+    display: grid;
+    grid-template-columns: 268px 1fr;
+    gap: 56px;
+    align-items: start;
+  }
+
+  /* TOC */
+  nav.toc {
+    position: sticky;
+    top: 24px;
+    align-self: start;
+    margin-top: 40px;
+  }
+  nav.toc .toc-label {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11px;
+    letter-spacing: 0.2em;
+    text-transform: uppercase;
+    color: var(--muted);
+    padding: 0 0 12px 14px;
+    border-bottom: 1px solid var(--line);
+    margin-bottom: 10px;
+  }
+  nav.toc ol { list-style: none; margin: 0; padding: 0; }
+  nav.toc a {
+    display: flex;
+    gap: 12px;
+    align-items: baseline;
+    text-decoration: none;
+    color: var(--muted);
+    padding: 7px 14px;
+    border-left: 2px solid transparent;
+    font-size: 14px;
+    line-height: 1.35;
+    transition: color .15s, border-color .15s, background .15s;
+  }
+  nav.toc a .tnum {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 11.5px;
+    color: var(--amber);
+    min-width: 16px;
+  }
+  nav.toc a:hover { color: var(--ink); background: rgba(31,78,95,.04); }
+  nav.toc a.active {
+    color: var(--teal);
+    border-left-color: var(--amber);
+    font-weight: 600;
+    background: rgba(192,137,47,.07);
+  }
+  nav.toc a.active .tnum { color: var(--teal); }
+
+  /* Content */
+  main {
+    background: var(--surface);
+    border: 1px solid var(--line);
+    border-radius: 4px;
+    padding: 52px 56px;
+    margin-top: 40px;
+    box-shadow: 0 1px 0 rgba(0,0,0,.02);
+  }
+  main section { scroll-margin-top: 20px; padding-top: 8px; }
+  main section + section { margin-top: 14px; }
+  h2 {
+    font-family: 'Source Serif 4', serif;
+    font-size: 1.55rem;
+    font-weight: 700;
+    color: var(--teal);
+    margin: 38px 0 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--line);
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    letter-spacing: -0.01em;
+  }
+  section:first-child h2 { margin-top: 0; }
+  h2 .num {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.95rem;
+    color: var(--amber);
+    font-weight: 500;
+  }
+  h3 {
+    font-family: 'Inter', sans-serif;
+    font-size: 1.06rem;
+    font-weight: 600;
+    color: var(--teal-deep);
+    margin: 30px 0 10px;
+  }
+  p { margin: 0 0 15px; }
+  .effective { display: none; } /* shown in masthead instead */
+  ul { margin: 0 0 18px; padding-left: 0; list-style: none; }
+  ul li {
+    position: relative;
+    padding-left: 26px;
+    margin-bottom: 9px;
+  }
+  ul li::before {
+    content: "";
+    position: absolute;
+    left: 6px;
+    top: 0.7em;
+    width: 6px; height: 6px;
+    background: var(--amber);
+    border-radius: 50%;
+  }
+  strong { color: var(--teal-deep); font-weight: 600; }
+
+  /* Placeholder chips */
+  .ph {
+    background: var(--amber-soft);
+    color: #8a5e16;
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 0.82em;
+    padding: 1px 6px;
+    border-radius: 4px;
+    border: 1px dashed #d9b25f;
+    white-space: nowrap;
+  }
+
+  /* Table */
+  .table-wrap { overflow-x: auto; margin: 0 0 22px; border: 1px solid var(--line); border-radius: 4px; }
+  table { border-collapse: collapse; width: 100%; min-width: 640px; font-size: 14px; }
+  thead th {
+    background: var(--teal);
+    color: #fff;
+    text-align: left;
+    font-weight: 600;
+    padding: 11px 14px;
+    font-size: 13px;
+  }
+  tbody td { padding: 11px 14px; border-top: 1px solid var(--line); vertical-align: top; color: var(--ink); }
+  tbody tr:nth-child(even) { background: #f6f8f9; }
+
+  /* Footer */
+  .pagefoot {
+    max-width: var(--maxw);
+    margin: 0 auto;
+    padding: 28px 32px 60px;
+    color: var(--muted);
+    font-size: 13px;
+    border-top: 1px solid var(--line);
+  }
+  .top-link { color: var(--teal); text-decoration: none; font-weight: 500; }
+  .top-link:hover { text-decoration: underline; }
+
+  a:focus-visible, nav.toc a:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; border-radius: 3px; }
+
+  /* Responsive */
+  @media (max-width: 900px) {
+    .wrap { grid-template-columns: 1fr; gap: 0; padding: 0 18px 60px; }
+    nav.toc {
+      position: static; margin: 24px 0 0;
+    }
+    nav.toc ol {
+      display: flex; flex-wrap: wrap; gap: 4px;
+      border: 1px solid var(--line); border-radius: 6px; padding: 8px; background: var(--surface);
+    }
+    nav.toc a { border-left: none; border-radius: 4px; padding: 6px 10px; }
+    nav.toc a.active { border-left: none; }
+    main { padding: 30px 22px; margin-top: 18px; }
+    .masthead-inner { padding: 34px 20px 30px; }
+  }
+
+  @media print {
+    nav.toc, .pagefoot { display: none; }
+    body { background: #fff; }
+    .masthead { background: #fff; color: #000; border-bottom: 2px solid #000; }
+    .masthead .brand, .masthead .sub { color: #333; }
+    .masthead h1 { color: #000; }
+    .effdate { color: #000; border-color: #000; }
+    .wrap { display: block; padding: 0; }
+    main { border: none; box-shadow: none; padding: 0; margin: 16px 0; }
+    h2 { color: #000; }
+    .ph { border: 1px solid #999; background: #f0f0f0; color: #000; }
+  }
+</style>
+</head>
+<body>
+  <header class="masthead">
+    <div class="masthead-inner">
+      <div class="brand">Amrika Housing, Inc.</div>
+      <h1>Privacy Policy</h1>
+      <p class="sub">How we collect, use, share, and protect your personal information across the Amrika Housing Services.</p>
+      <span class="effdate">Effective April 21, 2026</span>
+    </div>
+  </header>
+
+  <div class="wrap">
+    <nav class="toc" aria-label="Table of contents">
+      <div class="toc-label">Contents</div>
+      <ol>
+        <li><a href="#s1" data-target="s1"><span class="tnum">1</span><span>Acceptance of Privacy Policy</span></a></li>
+<li><a href="#s2" data-target="s2"><span class="tnum">2</span><span>Information We Collect</span></a></li>
+<li><a href="#s3" data-target="s3"><span class="tnum">3</span><span>How We Collect Information</span></a></li>
+<li><a href="#s4" data-target="s4"><span class="tnum">4</span><span>Tracking Tools, Behavioral Advertising, and Opt Out Options</span></a></li>
+<li><a href="#s5" data-target="s5"><span class="tnum">5</span><span>How We Use Your Information</span></a></li>
+<li><a href="#s6" data-target="s6"><span class="tnum">6</span><span>How We Share Your Information</span></a></li>
+<li><a href="#s7" data-target="s7"><span class="tnum">7</span><span>Storage and Security of Information</span></a></li>
+<li><a href="#s8" data-target="s8"><span class="tnum">8</span><span>Your Choices</span></a></li>
+<li><a href="#s9" data-target="s9"><span class="tnum">9</span><span>How Long We Retain Your Information</span></a></li>
+<li><a href="#s10" data-target="s10"><span class="tnum">10</span><span>Information Provided on Behalf of Children and Others</span></a></li>
+<li><a href="#s11" data-target="s11"><span class="tnum">11</span><span>Third Party Web Services</span></a></li>
+<li><a href="#s12" data-target="s12"><span class="tnum">12</span><span>Updates and Changes to Privacy Policy</span></a></li>
+<li><a href="#s13" data-target="s13"><span class="tnum">13</span><span>Contact Us</span></a></li>
+      </ol>
+    </nav>
+    <main>
+      <p class="effective"><strong>Effective Date: April 21, 2026</strong></p>
+<section id="s1"><h2><span class="num">1</span>Acceptance of Privacy Policy</h2>
+<p>Welcome to Amrika Housing, Inc. ("Amrika Housing," "we" or "us") and our Privacy Policy ("Privacy Policy"). This Privacy Policy is important and affects your legal rights, so please read carefully.</p>
+<p>By accessing or using https://www.amrikahousing.com/ and various related websites and services (collectively, the "Amrika Housing Services"), you agree to be bound by this Privacy Policy and all of the terms incorporated herein by reference. By using the Amrika Housing Services and/or submitting or collecting any personal data via the Amrika Housing Services, you accept and expressly consent and agree to our practices surrounding the collection, use, and sharing of your personal information in accordance with this Privacy Policy. This Privacy Policy does not address our practices regarding information that we collect through any website, or by any other means, other than through the Site; nor does this Privacy Policy govern the collection, use or disclosure of information by any of our affiliates ("Affiliated Entities") or by third parties. If you do not consent and agree with the terms of this Privacy Policy, you cannot, and we do not authorize you to, access, browse, or use the Amrika Housing Services.</p>
+<p>Our processing of personal information, such as your name, address, e-mail address, or telephone number, shall be undertaken consistent with the requirements of applicable privacy laws.</p>
+</section>
+<section id="s2"><h2><span class="num">2</span>Information We Collect</h2>
+<h3>2.1 Personal Information We Collect Directly from You</h3>
+<p>We receive personal information directly from you when you voluntarily provide us with such personal information, including, without limitation, the following:</p>
+<p>(1) personal information (such as your e-mail address and phone number);</p>
+<p>(2) financial information (such as income level and credit card number);</p>
+<p>(3) demographic information (such as your age and zip code); and</p>
+<p>(4) other identifying information that you voluntarily choose to provide to us, including without limitation unique identifiers such as passwords, and personal information in messages you send to us.</p>
+<p>We may also collect additional information, which may be personal information, as otherwise described to you at the point of collection or pursuant to your consent.</p>
+<h3>2.2 Information We Automatically Collect When You Use Our Site</h3>
+<p>In order to access and use certain areas or features of the Amrika Housing Services, you consent to our collection and use of certain information about your use of the Amrika Housing Services through the use of tracking technologies or by other passive means. Your consent to our access and use of this "passively collected" information includes, but is not limited to, the domain name of the website that allowed you to navigate to the Amrika Housing Services, search engines used, the internet protocol (IP) address used, the length of time spent on the Amrika Housing Services, the pages you looked at on the Amrika Housing Services, other webpages you visited before and after visiting the Amrika Housing Services, the type of device and/or internet browser you have, the frequency of your visits to the Amrika Housing Services, and other relevant statistics (collectively "Traffic Data").</p>
+<h3>2.3 Information from Tenant Screening and Consumer Reporting Agencies</h3>
+<p>In connection with rental, leasing, and residency applications, we may collect, request, or obtain information about you from third-party tenant screening companies and consumer reporting agencies. This information may include, without limitation, your credit history and credit score, rental and eviction history, income and employment verification, criminal background information (where permitted by applicable law), and identity verification data (which may include your Social Security number, date of birth, and government-issued identification).</p>
+<p>We obtain and use this information to evaluate rental applications, verify eligibility, manage leases, and comply with our legal obligations. Where we obtain a "consumer report" or "investigative consumer report" about you from a consumer reporting agency, we do so only with a permissible purpose and, where required, with your authorization, in accordance with the federal Fair Credit Reporting Act ("FCRA") and any applicable state tenant-screening or consumer-reporting laws.</p>
+<p>If we take an adverse action with respect to your application or tenancy (for example, denying an application, requiring a higher deposit or guarantor, or otherwise conditioning approval) based in whole or in part on information contained in a consumer report, we will provide you with an adverse action notice as required by the FCRA and applicable state law. That notice will identify the consumer reporting agency that supplied the report, inform you that the agency did not make the decision and cannot explain the specific reasons for it, and advise you of your right to obtain a free copy of your report from that agency and to dispute the accuracy or completeness of any information in it.</p>
+</section>
+<section id="s3"><h2><span class="num">3</span>How We Collect Information</h2>
+<p>We collect information (including personal information and Traffic Data) when you use and interact with the Amrika Housing Services, and in some cases from third party sources. Such means of collection include:</p>
+<ul><li>When you use the Amrika Housing Services' interactive tools and services;</li><li>When you voluntarily provide information in free-form text boxes through the Amrika Housing Services or through responses to surveys, questionnaires and the like;</li><li>If you use a location-enabled browser, we may receive information about your location and mobile device, as applicable;</li><li>Through Cookies, web beacons, analytics services and other tracking technology (collectively, "Tracking Tools"), as described below; and</li><li>When you use the "Contact Us" function on the Amrika Housing Services, send us an email or otherwise contact us.</li></ul>
+</section>
+<section id="s4"><h2><span class="num">4</span>Tracking Tools, Behavioral Advertising, and Opt Out Options</h2>
+<h3>4.1. Tracking Tools</h3>
+<p>We may use tools outlined below in order to provide the Amrika Housing Services, advertise to, and better understand users.</p>
+<p>Automated technologies or interactions. As you interact with us via the Amrika Housing Services, we will automatically collect data about your equipment, browsing actions, activity, and patterns. We collect this data by using cookies, server logs, and other similar technologies. We will also collect data about your usage of Amrika Housing Services. We may also receive data about you if you visit other websites employing our cookies.</p>
+<p><strong>Cookies.</strong> You can set your browser to refuse all or some browser cookies, or to alert you when websites set or access cookies. If you disable or refuse cookies, please note that some parts of the Amrika Housing Services may become inaccessible or not function properly. For more information about the cookies we use, please review the Cookie Preferences available on the Site.</p>
+<h3>4.2. Behavioral Advertising</h3>
+<p>We may use a type of advertising commonly known as interest-based or online behavioral advertising. This means that some of our partners use Tracking Tools to collect information about a user's online activities to display Amrika Housing ads to the user based on the user's interests ("Behavioral Advertising"). Such partners may include third-party service providers, advertisers, advertising networks or platforms, traffic measurement service providers, marketing analytics service providers, and other third party service providers (collectively, "Advertising Service Providers"). Other Tracking Tools used by our partners may collect information when you use the Site, such as IP address, mobile device ID, operating system, browser, web page interactions, geographic location and demographic information, such as gender and age range. These Tracking Tools help Amrika Housing learn more about our users' demographics and internet behaviors.</p>
+<h3>4.3. Options for Opting out of Cookies and Mobile Device Identifiers</h3>
+<p>If we process Cookies based on your consent (as indicated at the time of collection of such data), you have the right to withdraw your consent at any point in time by contacting us at admin@amrikahousing.com. Please note, that if you exercise this right, you may have to then provide your consent on a case-by-case basis for the use by us or disclosure of certain Cookies, if such use or disclosure is necessary to enable you to utilize some or all of our services.</p>
+<p>Some web browsers allow you to reject Cookies or to alert you when a Cookie is placed on your computer, tablet or mobile device. You may be able to reject mobile device identifiers by activating the appropriate setting on your mobile device. Although you are not required to accept Amrika Housing's Cookies or mobile device identifiers, if you block or reject them, you may not have access to all features available through the Amrika Housing Services.</p>
+<ul><li>You may opt out of receiving certain Cookies and certain trackers by visiting the Network Advertising Initiative (NAI) opt out page or the Digital Advertising Alliance (DAA), or by installing the DAA's AppChoice app on your mobile computing device. When you use these opt-out features, an "opt-out" Cookie will be placed on your computer, tablet or mobile computing device indicating that you do not want to receive interest-based advertising from NAI or DAA member companies. If you delete Cookies on your computer, tablet or mobile computing device, you may need to opt out again. For information about how to opt out of interest-based advertising on mobile devices, you may consider third party sources such as Applicationprivacy.org. You will need to opt out of each browser and device for which you desire to apply these opt-out features.</li></ul>
+<ul><li>Even after opting out of Behavioral Advertising, you may still see Amrika Housing advertisements that are not interest-based (i.e., not targeted toward you). Also, opting out does not mean that Amrika Housing is no longer using Tracking Tools — Amrika Housing still may collect information about your use of the Amrika Housing Services even after you have opted out of Behavioral Advertising and may still serve advertisements to you via the Amrika Housing Services based on information it collects via the Amrika Housing Services.</li></ul>
+<p>This Privacy Policy does not cover the use of Cookies and other Tracking Tools by any third parties, and we aren't responsible for their privacy policies and practices. Please be aware that some Cookies placed by third parties can continue to track your activities online even after you have left the Amrika Housing Services.</p>
+<h3>4.4. How Amrika Housing Responds to Browser "Do Not Track" (DNT) and Universal Opt-Out Preference Signals</h3>
+<p>Some web browsers (including Safari, Internet Explorer, Firefox and Chrome) incorporate a "Do Not Track" (DNT) or similar feature that signals to web services that a visitor does not want to have their online activity and behavior tracked. Historically, there has not been consensus on what constitutes a DNT signal, so many web sites do not honor them, including this one.</p>
+<p>New standards are being developed for a Universal Opt-Out Preference Signal, such as the Global Privacy Control (GPC), which allow users with GPC-enabled browsers and devices to send a signal that will communicate the user's request to opt-out of sales of their personal information and to opt-out of certain sharing of their personal information. The CPRA and other laws allow for the acceptance of Opt-Out Preference Signals such as the GPC, as an option for users to transmit an Opt-Out of selling/sharing personal information. Our website is designed to recognize such a signal from your device or browser. As an alternative, if you wish to opt-out of the selling or sharing of your personal information for these purposes, please access the following link: <strong>DO NOT SELL/SHARE MY DATA</strong> <span class="ph">[INSERT LINK]</span>.</p>
+</section>
+<section id="s5"><h2><span class="num">5</span>How We Use Your Information</h2>
+<p>We may use information (including information that has been de-identified and/or aggregated) to better understand who uses the Amrika Housing Services and how we can deliver a better user experience.</p>
+<p>We do not engage in automated decision making. We use information, including personal information, to provide the Amrika Housing Services and to help improve the Amrika Housing Services, to develop new services, and to advertise (for example, to display Amrika Housing ads on other web services). Specifically, such use may include:</p>
+<ul><li>Providing you with the products, services and information you request, including <span class="ph">[DESCRIBE YOUR ONLINE RESIDENT SERVICES — e.g., online rent payment, maintenance/service requests, lease application or renewal]</span>;</li><li>Corresponding with you;</li><li>Providing, maintaining, administering or expanding the Amrika Housing Services, performing business analyses, or for other internal purposes to support, improve or enhance our business, the Amrika Housing Services, and other products and services we offer;</li><li>Sending you information about Amrika Housing or our products or the Amrika Housing Services;</li><li>Combining information received from third parties with information that we have from or about you and using the combined information for any of the purposes described in this Privacy Policy;</li><li>Showing you advertisements, including interest-based or online behavioral advertising;</li><li>Providing you with access to other products or services that you may be interested in;</li><li>Using statistical information that we collect in any way permitted by law, including from third parties in connection with their commercial and marketing efforts;</li><li>Fulfilling our legally required obligations, such as preventing, detecting and investigating security incidents and potentially illegal or prohibited activities;</li><li>Protecting against or deterring fraudulent, illegal, or harmful actions; and</li><li>Enforcing our Privacy Policy and other agreements.</li></ul>
+<p>By providing your e-mail and/or phone number and checking a box, clicking the "complete" button, or some other affirmative act, you are consenting to receive e-mails and/or calls and text messages, including live, prerecorded, and/or automated calls and text messages and alerts, to that phone number. After signing up, you will receive a confirmation e-mail or text message from Amrika Housing on your mobile number. This agreement is not entered into as a term or requirement of any purchase or promotion. Normal message and data rates may apply. Message frequency may vary. Neither we nor the participating carriers guarantee that messages will be delivered. We may discontinue these programs at any time without notice.</p>
+</section>
+<section id="s6"><h2><span class="num">6</span>How We Share Your Information</h2>
+<p>In certain circumstances, and in order to perform the Amrika Housing Services, we may share certain information, including sensitive personal information, that we collect from you, as described in this section:</p>
+<ul><li>We may share your personal information with third parties that Amrika Housing believes will provide our customers with goods and services that they may be interested in. This sharing may constitute a sale of your personal information. If you wish to opt-out of the selling or sharing of your personal information for these purposes, please access the following link <strong>DO NOT SELL/SHARE MY DATA</strong> <span class="ph">[INSERT LINK]</span>.</li><li>We may share your personal information with third party service providers to facilitate administration of your lease.</li><li>We may share your personal information with third party real estate properties about which information is provided on the Amrika Housing Services.</li><li>We may share your personal information with our partners to customize or display our advertising.</li><li>We may share your personal information and/or Traffic Data with our partners who perform operational services (such as hosting, billing, fulfillment, data storage, security, insurance verification, web service analytics, or ad serving) and/or who make certain services, features or functionality available to our users.</li><li>To determine if users have interacted with content across multiple devices and to match such devices, we work with partners who analyze device activity data and/or rely on your information (including demographic, geographic and interest-based data). To supplement this analysis, we also provide de-identified data to these partners. Based on this data, we may then display targeted advertisements across devices that we believe are associated or use this data to further analyze usage of the Amrika Housing Services across devices.</li><li>We may transfer your personal information to another company in connection with a proposed merger, sale, acquisition or other change of ownership or control by or of Amrika Housing (whether in whole or in part). Should one of these events occur, we will make reasonable efforts to notify you before your information becomes subject to different privacy and security policies and practices.</li><li>We also may need to disclose your personal information or any other information we collect about you if we determine in good faith that such disclosure is needed to: (1) comply with or fulfill our obligations under applicable law, regulation, court order or other legal process; (2) protect the rights, property or safety of you, Amrika Housing or another party; (3) enforce this Privacy Policy or other agreements with you; or (4) respond to claims that any posting or other content violates third-party rights.</li></ul>
+</section>
+<section id="s7"><h2><span class="num">7</span>Storage and Security of Information</h2>
+<p>Please note that any information you send to us electronically, while using the Amrika Housing Services or otherwise interacting with us, may not be secure when it is transmitted to us. We recommend that you do not use unsecure channels to communicate sensitive or confidential information to us. Please be aware though that, despite our best efforts, no security measures are perfect or impenetrable, and we cannot guarantee "perfect security." Any information you send us through any means is transmitted at your own risk.</p>
+</section>
+<section id="s8"><h2><span class="num">8</span>Your Choices</h2>
+<h3>8.1 Information You Provide</h3>
+<p>You can always choose whether or not to provide personal information through the Amrika Housing Services. However, if you choose not to disclose certain personal information, you may not be able to register as a user of the Amrika Housing Services, which may limit your access to certain portions of the Amrika Housing Services. We will not discriminate against you for exercising any of your rights, including otherwise denying you goods or services, providing you with a different level or quality of services, or charging you different prices or rates for services.</p>
+<h3>8.2 Correcting Your Information</h3>
+<p>Visitors may correct or update their Personal Information at any time by emailing us at admin@amrikahousing.com. Furthermore, upon your request, we will make reasonable efforts to remove your Personal Information from our active databases. To make this request, please submit a privacy request or call 203-522-8888. Such information will be corrected or deactivated as soon as reasonably possible. Please note that we may need to retain certain information for record-keeping purposes, or as required to comply with our legal obligations, and there may also be residual information that will remain within our databases and other records.</p>
+<h3>8.3 California Privacy Rights</h3>
+<p>In the preceding 12 months, we collected and disclosed for a business purpose, including potential sale, of the following categories of personal information about California consumers:</p>
+<div class="table-wrap"><table>
+<thead><tr><th>#</th><th>Category</th><th>Examples</th><th>Collected?</th><th>Categories of Recipients</th></tr></thead>
+<tbody>
+<tr><td>1</td><td>Identifiers</td><td>Name, address, e-mail address, IP address</td><td>Yes</td><td>Organizations providing services to Amrika Housing</td></tr>
+<tr><td>2</td><td>Personal information categories listed in the California Customer Records statute</td><td>Name, professional-related information; and employment-related information</td><td>Yes</td><td>Organizations providing services to Amrika Housing</td></tr>
+<tr><td>3</td><td>Protected classification characteristics under California or federal law</td><td>Name, age, citizenship, nationality, ancestry, religion or creed, marital status, medical condition, physical or mental disability, sex (including gender, gender identity, gender expression, pregnancy or childbirth and related medical conditions), sexual orientation, veteran or military status, proof of eligibility to work</td><td>Yes</td><td>Organizations providing services to Amrika Housing</td></tr>
+<tr><td>4</td><td>Internet or other similar network activity</td><td>Browsing history, search history, information on a consumer's interaction with the Website</td><td>Yes</td><td>No</td></tr>
+<tr><td>5</td><td>Geolocation data</td><td>IP address data</td><td>Yes</td><td>No</td></tr>
+<tr><td>6</td><td>Professional or employment-related information</td><td>Proof of eligibility to work, resumé, other professional-related information and employment-related information</td><td>Yes</td><td>Organizations providing services to Amrika Housing</td></tr>
+<tr><td>7</td><td>Biometric information</td><td>None</td><td>No</td><td>No</td></tr>
+<tr><td>8</td><td>Education Information</td><td>None</td><td>Yes</td><td>No</td></tr>
+<tr><td>9</td><td>Inferences from the foregoing</td><td>None</td><td>Yes</td><td>Organizations that Amrika Housing believes will provide goods and services that our customers are interested in</td></tr>
+</tbody></table></div>
+<p><strong>Purposes for Collection, Use, and Sharing.</strong> We use and disclose the personal information we collect for our commercial purposes, as further described in this Privacy Policy, including for our business purposes with our partners, service providers, and third parties as follows:</p>
+<ul><li>Auditing related to our interactions with you;</li><li>Legal compliance;</li><li>Detecting security incidents, protecting against malicious, deceptive, fraudulent, or illegal activity, and exercising our related rights;</li><li>Debugging;</li><li>Performing services (for us or our service provider);</li><li>Internal research for technological improvement;</li><li>Internal operations;</li><li>Activities to maintain and improve our services;</li><li>To provide Amrika Housing customers with other third-party goods and services that they may be interested in; and</li><li>Other one-time or short-term uses.</li></ul>
+<p><strong>Your Rights.</strong> Where applicable, if you are a California resident you may have the following rights under the CCPA in relation to personal information we have collected about you, to the extent required by the CCPA and subject to verification and any applicable exceptions:</p>
+<p><strong>Right to Know/Access:</strong> You have the right to request that we disclose certain information to you about our collection and use of certain personal information about you as described below:</p>
+<ul><li>The specific pieces of personal information collected;</li><li>The categories of personal information collected;</li><li>The categories of sources from whom the personal information is collected;</li><li>The purpose for collecting the personal information; and</li><li>The categories of third parties with whom we have shared the personal information.</li></ul>
+<p><strong>Right to Delete:</strong> You have the right to request that we delete your personal information.</p>
+<p><strong>Right to Correct:</strong> You have the right to request that we correct information that is inaccurate.</p>
+<p><strong>Freedom from Discrimination:</strong> You have the right to be free from unlawful discrimination for exercising any of the rights above.</p>
+<p><strong>Right to Opt Out of Sale or Sharing of Personal Information:</strong> You will be opted in by default to the sale and sharing of Personal Information. You can opt out of the sale or sharing of Personal Information at any time by contacting us via the following link <strong>DO NOT SELL/SHARE MY DATA</strong> <span class="ph">[INSERT LINK]</span> or pursuant to Section 13 below. Please note that we do not track users across devices, so you will have to opt out from each device where you access the Amrika Housing Services.</p>
+<p><strong>Right to Limit Use of Sensitive Personal Information:</strong> You have the right to limit the use of your Sensitive Personal Information. When you exercise this right, Amrika Housing only processes your sensitive information in limited circumstances to perform the necessary services requested by you. You can opt out of the sale or sharing of Sensitive Personal Information at any time by contacting us via the following link <strong>PRIVACY REQUEST</strong> <span class="ph">[INSERT LINK]</span> or pursuant to Section 13 below.</p>
+<p>To make a request in relation to the above rights, please contact us using the information in Section 13 below. To fulfil your request, we will need to verify your identity.</p>
+<p>Only you, or someone legally authorized to act on your behalf, may make a request related to personal information collected about you. To designate an authorized agent, the authorized agent must provide sufficient information that allows us to reasonably verify that they have been authorized by you to act on their behalf.</p>
+<h3>8.4 Privacy Rights for Residents of Other U.S. States</h3>
+<p>In addition to the California rights described above, a growing number of U.S. states have enacted comprehensive consumer privacy laws. If you are a resident of a U.S. state that grants privacy rights to its residents, you may have some or all of the rights described in this Section 8.4, in each case only to the extent provided by, and subject to the exceptions and verification requirements of, the law of your state of residence. The specific rights available to you, the categories of information covered, and the thresholds that determine whether a right applies depend on your state's law. Where your state's law does not grant a particular right, that right does not apply to you.</p>
+<p><strong>Rights that may be available to you.</strong> Depending on your state of residence, you may have the right to:</p>
+<ul><li><strong>Confirm and access.</strong> Confirm whether we are processing your personal information and request access to that information.</li><li><strong>Correct.</strong> Request that we correct inaccurate personal information we maintain about you.</li><li><strong>Delete.</strong> Request that we delete personal information we have collected from or about you.</li><li><strong>Portability.</strong> Obtain a copy of your personal information in a portable and, to the extent technically feasible, readily usable format.</li><li><strong>Opt out of "sale."</strong> Direct us not to sell your personal information.</li><li><strong>Opt out of "targeted advertising" / "sharing."</strong> Direct us not to process your personal information for targeted advertising or to share it for cross-context behavioral advertising.</li><li><strong>Opt out of profiling.</strong> Opt out of profiling in furtherance of decisions that produce legal or similarly significant effects concerning you (where your state's law provides this right).</li><li><strong>Limit the use of sensitive personal information.</strong> Limit our use and disclosure of your sensitive personal information to that which is necessary to provide the services you have requested.</li><li><strong>Non-discrimination.</strong> Exercise any of your rights without receiving discriminatory or retaliatory treatment.</li></ul>
+<p><strong>Sensitive personal information.</strong> Many state laws treat certain categories of data — such as Social Security and other government identifiers, financial account information, precise geolocation, and data revealing characteristics like race, religion, health, or immigration status — as "sensitive." Unlike California's opt-out approach, several states require your affirmative opt-in consent before we may process your sensitive personal information for certain purposes. Where your state's law requires it, we will obtain your consent before processing your sensitive personal information for those purposes, or will provide a means for you to limit such processing. At least one state (Maryland) prohibits the sale of sensitive personal information altogether; where applicable, we will not sell your sensitive personal information.</p>
+<p><strong>Universal opt-out / Global Privacy Control.</strong> As described in Section 4.4, our website is designed to recognize an Opt-Out Preference Signal, such as the Global Privacy Control (GPC). A number of states require businesses to honor such signals as a valid request to opt out of the sale of personal information and/or processing for targeted advertising. Where applicable law requires it, we will treat a recognized signal from your browser or device as a request to opt out for the device or browser from which it is sent.</p>
+<p><strong>How to exercise your rights.</strong> To exercise any of the rights above, please submit a request using the contact information in Section 13, or, for opt-out rights, by using the <strong>DO NOT SELL/SHARE MY DATA</strong> <span class="ph">[INSERT LINK]</span> and <strong>PRIVACY REQUEST</strong> <span class="ph">[INSERT LINK]</span> links. To protect your information, we will take reasonable steps to verify your identity before fulfilling a request, and we may decline to act on a request, or charge a reasonable fee, where permitted by law (for example, for manifestly unfounded or excessive requests). You may use an authorized agent to submit a request on your behalf, subject to our verification of the agent's authority and, where required, of your identity.</p>
+<p><strong>Right to appeal.</strong> Several states give you the right to appeal our refusal to act on a request. If we decline to take action on your request and your state's law provides an appeal right, we will inform you of our decision and the reasons for it, and you may appeal by contacting us using the information in Section 13. Within the timeframe required by your state's law, we will inform you in writing of any action taken or not taken in response to the appeal, including the reasons for our decision. If your appeal is denied, you may have the right to contact your state Attorney General to submit a complaint.</p>
+<p><strong>A note on Nevada.</strong> Nevada law does not provide a comprehensive set of privacy rights but does allow Nevada residents to submit a verified request directing a business not to make certain sales of covered information. If you are a Nevada resident and wish to submit such a request, please contact us using the information in Section 13.</p>
+<h3>8.5 International Users</h3>
+<p>The Site is controlled and operated by us from the United States, and is not intended to subject us or any Affiliated Entity to the laws or jurisdiction of any state, country or territory other than that of the United States. We do not represent or warrant that the Site, or any part thereof, is appropriate or available for use in any particular jurisdiction. Those who choose to access the Site do so on their own initiative and at their own risk, and are responsible for complying with all local laws, rules and regulations. We may limit the Site's availability, in whole or in part, to any person, geographic area or jurisdiction we choose, at any time and in our sole discretion.</p>
+</section>
+<section id="s9"><h2><span class="num">9</span>How Long We Retain Your Information</h2>
+<p>We retain personal information about you for as long as necessary to provide you the Amrika Housing Services. In some cases, we retain personal information for longer, if doing so is necessary to comply with our legal obligations, resolve disputes or collect fees owed, prevent fraud, enforce this Privacy Policy, or as otherwise permitted or required by applicable law, rule or regulation. Afterwards, we retain some information in a de-identified and/or aggregated form but not in a way that would identify you personally.</p>
+</section>
+<section id="s10"><h2><span class="num">10</span>Information Provided on Behalf of Children and Others</h2>
+<p>The Amrika Housing Services is not intended for use by children and individuals under the age of 18 are prohibited from using the Amrika Housing Services. Amrika Housing does not knowingly collect any information from children, nor is the Amrika Housing Services directed to children. If you are under 18, please do not attempt to register for the Amrika Housing Services or send any personal information about yourself to us. By accessing, using and/or submitting information to or through the Amrika Housing Services, you represent that you are not younger than age 18. If you are a parent or legal guardian of a minor child, you may, in compliance with this Privacy Policy, use the Amrika Housing Services on behalf of such minor child. Any information that you provide us while using the Amrika Housing Services on behalf of your minor child will be treated as personal information as otherwise provided herein. If you use the Amrika Housing Services on behalf of another person, regardless of age, you represent and warrant that you have authority to do so.</p>
+</section>
+<section id="s11"><h2><span class="num">11</span>Third Party Web Services</h2>
+<p>The Site contains links to or embedded content from third party web services. A link to or embedded content from a non-Amrika Housing web service does not mean that we endorse that web service, the quality or accuracy of information presented on the non-Amrika Housing web service or the persons or entities associated with the non-Amrika Housing web service. If you decide to visit a third party web service, you are subject to the privacy policy of the third party web service as applicable and we are not responsible for the policies and practices of the third party web service. We encourage you to ask questions before you disclose your information to others.</p>
+</section>
+<section id="s12"><h2><span class="num">12</span>Updates and Changes to Privacy Policy</h2>
+<p>The effective date of this Privacy Policy is set forth at the top of this webpage. We will notify you of any material change by posting notice on this webpage. Your continued use of the Amrika Housing Services after the effective date constitutes your acceptance of the amended Privacy Policy. We encourage you to periodically review this page for the latest information on our privacy practices. Any amended Privacy Policy supersedes all previous versions. IF YOU DO NOT AGREE TO FUTURE CHANGES TO THIS PRIVACY POLICY, YOU MUST STOP USING THE AMRIKA HOUSING SERVICES AFTER THE EFFECTIVE DATE OF SUCH CHANGES.</p>
+</section>
+<section id="s13"><h2><span class="num">13</span>Contact Us</h2>
+<p>If you have any comments, concerns or questions about this Privacy Policy, please follow the link <strong>PRIVACY REQUEST</strong> <span class="ph">[INSERT LINK]</span>, or contact us at admin@amrikahousing.com or at:</p>
+<p>Amrika Housing, Inc.</p>
+<p>Attn: Privacy Office</p>
+<p>306 Danbury Road, Unit 4, Wilton, CT 06897</p>
+<p>203-522-8888</p>
+</section>
+    </main>
+  </div>
+
+  <footer class="pagefoot">
+    <p>&copy; 2026 Amrika Housing, Inc. &middot; 306 Danbury Road, Unit 4, Wilton, CT 06897 &middot; admin@amrikahousing.com &middot; 203-522-8888 &nbsp;|&nbsp; <a class="top-link" href="#top" onclick="window.scrollTo({top:0,behavior:'smooth'});return false;">Back to top &uarr;</a></p>
+  </footer>
+
+<script>
+  // Scroll-spy: highlight the TOC entry for the section in view
+  const links = Array.from(document.querySelectorAll('nav.toc a'));
+  const map = new Map(links.map(l => [l.dataset.target, l]));
+  const sections = links.map(l => document.getElementById(l.dataset.target)).filter(Boolean);
+  const obs = new IntersectionObserver((entries) => {
+    entries.forEach(e => {
+      if (e.isIntersecting) {
+        links.forEach(l => l.classList.remove('active'));
+        const a = map.get(e.target.id);
+        if (a) a.classList.add('active');
+      }
+    });
+  }, { rootMargin: '-10% 0px -75% 0px', threshold: 0 });
+  sections.forEach(s => obs.observe(s));
+</script>
+</body>
+</html>
