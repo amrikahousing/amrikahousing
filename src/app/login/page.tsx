@@ -10,7 +10,14 @@ import {
 import { PolicyConsentModal } from "./policy-consent-modal";
 
 type LoginRole = "property_manager" | "renter";
-type AuthMode = "signin" | "signup" | "verify" | "forgot" | "reset" | "signin_mfa";
+type AuthMode =
+  | "signin"
+  | "signup"
+  | "verify"
+  | "forgot"
+  | "reset"
+  | "signin_mfa"
+  | "accept_terms";
 type AuthFieldErrors = Partial<
   Record<
     "email" | "password" | "confirmPassword" | "firstName" | "organizationName" | "verificationCode" | "terms",
@@ -184,6 +191,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
   const [acceptedTerms, setAcceptedTerms] = useState(false);
   const [policyReviewed, setPolicyReviewed] = useState(false);
   const [policyModalOpen, setPolicyModalOpen] = useState(false);
+  const [pendingRedirect, setPendingRedirect] = useState<string | null>(null);
   const [clientError, setClientError] = useState<string | null>(null);
   const [clientNotice, setClientNotice] = useState<string | null>(null);
   const [fieldErrors, setFieldErrors] = useState<AuthFieldErrors>({});
@@ -361,7 +369,9 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
             ? "Create new password"
             : mode === "signin_mfa"
               ? "Check your email"
-              : "Sign in";
+              : mode === "accept_terms"
+                ? "One more step"
+                : "Sign in";
   const description =
     mode === "signup"
       ? "Set up access in under a minute."
@@ -373,7 +383,9 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
             ? "Enter the code we sent and choose a new password."
             : mode === "signin_mfa"
               ? "Enter the 6-digit code we sent to your email."
-              : "";
+              : mode === "accept_terms"
+                ? "Please review and accept our policies to continue."
+                : "";
 
   function switchMode(nextMode: AuthMode) {
     setMode(nextMode);
@@ -422,9 +434,8 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     window.location.assign(url);
   }
 
-  // Persist the user's acceptance of the current policy. Called after a
-  // successful auth (the acceptance checkbox is required on both forms), once a
-  // session exists so the server can attribute it to the Clerk user.
+  // Persist the user's acceptance of the current policy, once a session exists
+  // so the server can attribute it to the Clerk user.
   async function recordTermsAcceptance() {
     try {
       await fetch("/api/internal/terms", {
@@ -433,11 +444,29 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
         cache: "no-store",
       });
     } catch {
-      // Non-fatal: the user re-confirms on next sign-in if this didn't land.
+      // Non-fatal: the user is re-prompted on next sign-in if this didn't land.
     }
   }
 
-  async function navigateAfterAuth(
+  // Whether the now-authenticated user already accepted the current policy
+  // version. Fail-open to `true` on network error so a flaky endpoint never
+  // traps a returning user behind the gate.
+  async function hasAcceptedTerms() {
+    try {
+      const response = await fetch("/api/internal/terms", {
+        method: "GET",
+        credentials: "same-origin",
+        cache: "no-store",
+      });
+      if (!response.ok) return false;
+      const data = (await response.json()) as { accepted?: boolean };
+      return data.accepted === true;
+    } catch {
+      return true;
+    }
+  }
+
+  function buildPostAuthUrl(
     destination: string,
     decorateUrl: (url: string) => string = (url) => url,
   ) {
@@ -445,11 +474,52 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     if (activeTask) {
       const tasksUrl = new URL("/login/tasks", window.location.origin);
       tasksUrl.searchParams.set("redirect_url", destination);
-      navigateToUrl(decorateUrl(`${tasksUrl.pathname}${tasksUrl.search}`));
+      return decorateUrl(`${tasksUrl.pathname}${tasksUrl.search}`);
+    }
+    return decorateUrl(destination);
+  }
+
+  // Gate post-auth navigation on policy acceptance. Returning users who already
+  // accepted go straight through; anyone missing the current version is shown
+  // the acceptance step (with their destination stashed) instead of redirecting.
+  async function gateAndNavigate(finalUrl: string) {
+    if (await hasAcceptedTerms()) {
+      navigateToUrl(finalUrl);
       return;
     }
+    setPendingRedirect(finalUrl);
+    setAcceptedTerms(false);
+    setPolicyReviewed(false);
+    switchMode("accept_terms");
+    setIsSubmitting(false);
+  }
 
-    navigateToUrl(decorateUrl(destination));
+  async function navigateAfterAuth(
+    destination: string,
+    decorateUrl: (url: string) => string = (url) => url,
+    options: { skipTermsGate?: boolean } = {},
+  ) {
+    const finalUrl = buildPostAuthUrl(destination, decorateUrl);
+    if (options.skipTermsGate) {
+      navigateToUrl(finalUrl);
+      return;
+    }
+    await gateAndNavigate(finalUrl);
+  }
+
+  async function handleAcceptTerms(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setClientError(null);
+    if (!acceptedTerms) {
+      setAuthFieldErrors({
+        terms: "Please accept the Privacy Policy and Terms of Service to continue.",
+      });
+      return;
+    }
+    setFieldErrors({});
+    setIsSubmitting(true);
+    await recordTermsAcceptance();
+    navigateToUrl(pendingRedirect ?? (await resolvePostSignInDestination()));
   }
 
   async function completeSignIn() {
@@ -458,16 +528,15 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
       signIn.finalize({
         navigate: async ({ session, decorateUrl }) => {
           didNavigate = true;
-          await recordTermsAcceptance();
           const destination = await resolvePostSignInDestination();
+          let target = destination;
           if (session.currentTask) {
             const tasksUrl = new URL("/login/tasks", window.location.origin);
             tasksUrl.searchParams.set("redirect_url", destination);
-            navigateToUrl(decorateUrl(`${tasksUrl.pathname}${tasksUrl.search}`));
-            return;
+            target = `${tasksUrl.pathname}${tasksUrl.search}`;
           }
 
-          navigateToUrl(decorateUrl(destination));
+          await gateAndNavigate(decorateUrl(target));
         },
       }),
       10000,
@@ -480,7 +549,6 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     }
 
     if (!didNavigate) {
-      await recordTermsAcceptance();
       await navigateAfterAuth(await resolvePostSignInDestination());
     }
   }
@@ -556,7 +624,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
           : inviteTicket || role === "property_manager"
             ? "/onboard"
             : "/dashboard";
-      await navigateAfterAuth(dest);
+      await navigateAfterAuth(dest, undefined, { skipTermsGate: true });
       return;
     }
 
@@ -570,9 +638,6 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     const errors: AuthFieldErrors = {};
     if (!email.trim()) errors.email = "Email is required.";
     if (!password) errors.password = "Password is required.";
-    if (!acceptedTerms) {
-      errors.terms = "Please accept the Privacy Policy and Terms of Service to continue.";
-    }
     if (setAuthFieldErrors(errors)) return;
     setIsSubmitting(true);
 
@@ -593,7 +658,6 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
       const trimmedEmail = email.trim().toLowerCase();
 
       if (activeEmail?.toLowerCase() === trimmedEmail) {
-        await recordTermsAcceptance();
         await navigateAfterAuth(await resolvePostSignInDestination());
         return;
       }
@@ -1198,8 +1262,6 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                       {fieldError("password")}
                     </div>
 
-                    {renderTermsCheckbox()}
-
                     {displayError && (
                       <p
                         role="alert"
@@ -1782,6 +1844,39 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
                       onClick={() => switchMode("signin")}
                     >
                       Back to sign in
+                    </button>
+                  </form>
+                ) : null}
+
+                {mode === "accept_terms" ? (
+                  <form
+                    className="space-y-4"
+                    onSubmit={handleAcceptTerms}
+                    noValidate
+                  >
+                    <p className="text-sm leading-[1.5] text-slate-300">
+                      Before you continue, please review and accept our policies.
+                      Your acceptance is saved to your account, so we won&apos;t
+                      ask again unless the policy changes.
+                    </p>
+
+                    {renderTermsCheckbox()}
+
+                    {displayError && (
+                      <p
+                        role="alert"
+                        className="rounded-md border border-red-400/30 bg-red-950/45 px-3 py-2 text-sm text-red-200"
+                      >
+                        {displayError}
+                      </p>
+                    )}
+
+                    <button
+                      className="h-12 w-full rounded-md bg-emerald-500 px-4 text-base font-semibold text-white transition hover:bg-emerald-600 disabled:cursor-not-allowed disabled:opacity-60"
+                      type="submit"
+                      disabled={isLoading}
+                    >
+                      {isLoading ? "Saving..." : "Accept & continue"}
                     </button>
                   </form>
                 ) : null}
