@@ -290,6 +290,7 @@ function Icon({ name, className = "" }: { name: string; className?: string }) {
   if (name === "key") return <svg {...shared}><circle cx="8" cy="15" r="4" /><path d="m11 12 8-8M17 6l2 2M14.5 8.5l2 2" /></svg>;
   if (name === "list") return <svg {...shared}><path d="M8 6h13M8 12h13M8 18h13" /><path d="M3 6h.01M3 12h.01M3 18h.01" /></svg>;
   if (name === "refresh") return <svg {...shared}><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8" /><path d="M3 3v5h5" /></svg>;
+  if (name === "download") return <svg {...shared}><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><path d="m7 10 5 5 5-5" /><path d="M12 15V3" /></svg>;
   return <svg {...shared}><path d="M4 5h16v14H4z" /><path d="M8 9h8M8 13h5" /></svg>;
 }
 
@@ -910,7 +911,12 @@ function DragDropTagPreview({ base64, loading }: { base64: string | null; loadin
             onDrop={handleDrop}
             onClick={() => setSelectedPlaced(null)}
             style={zoom !== 1 ? { zoom } : undefined}
-            className="relative mx-auto min-h-[500px] w-full rounded-sm bg-white shadow-[0_2px_16px_rgba(0,0,0,0.12)]"
+            className={[
+              "relative mx-auto min-h-[500px] rounded-sm bg-white shadow-[0_2px_16px_rgba(0,0,0,0.12)]",
+              // Shrink the paper to the rendered document's real page width so it
+              // looks like an actual page; fall back to full width for the empty state.
+              base64 ? "w-fit" : "w-full",
+            ].join(" ")}
           >
             {loading ? (
               <div className="flex min-h-[500px] flex-col items-center justify-center gap-3 text-slate-400">
@@ -922,7 +928,7 @@ function DragDropTagPreview({ base64, loading }: { base64: string | null; loadin
             ) : base64 ? (
               <DocxPreview
                 base64={base64}
-                className="lease-preview pointer-events-none select-none overflow-hidden px-10 py-8 text-sm leading-relaxed text-slate-800"
+                className="lease-preview pointer-events-none select-none"
               />
             ) : (
               <div className="flex min-h-[500px] flex-col items-center justify-center gap-2 px-10 text-center text-slate-400">
@@ -1233,35 +1239,50 @@ function LeaseCreationWorkflow({
               ) : (
 	                templatesForSelectedProperty.map((template) => {
 	                  return (
-	                    <button
-	                      key={template.id}
-		                      type="button"
-		                      onClick={() => {
-		                        onSelectTemplate(template.id);
-		                        setStartPanel("choose");
-		                      }}
+	                    <div
+                      key={template.id}
                       className={[
-                        "group flex w-full items-start gap-4 p-4 text-left",
+                        "group relative flex w-full items-start gap-4 p-4 text-left",
                         selectedTemplate?.id === template.id ? "ui-card-selected" : "",
                         "ui-card-interactive",
                       ].join(" ")}
                     >
-                      <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500 group-hover:bg-emerald-50 group-hover:text-emerald-700">
+                      <button
+                        type="button"
+                        aria-label={`Select template ${template.name}`}
+                        onClick={() => {
+                          onSelectTemplate(template.id);
+                          setStartPanel("choose");
+                        }}
+                        className="absolute inset-0 z-0 rounded-[inherit]"
+                      />
+                      <span className="pointer-events-none relative z-10 flex h-11 w-11 shrink-0 items-center justify-center rounded-lg bg-slate-100 text-slate-500 group-hover:bg-emerald-50 group-hover:text-emerald-700">
                         <Icon name="file" className="h-5 w-5" />
                       </span>
-                      <span className="min-w-0 flex-1">
+                      <span className="pointer-events-none relative z-10 min-w-0 flex-1">
                         <span className="flex flex-wrap items-center gap-2">
                           <span className="truncate text-sm font-semibold text-slate-900">{template.name}</span>
                           {template.isActive ? (
                             <span className="rounded-full bg-emerald-100 px-2 py-0.5 text-[11px] font-semibold text-emerald-700">Active</span>
                           ) : null}
-	                        </span>
-	                        <span className="mt-1 block truncate text-xs text-slate-500">
-	                          {template.fileName} · {template.clauseCount} clauses · {formatDate(template.createdAt)}
-	                        </span>
-	                      </span>
-	                      <Icon name="arrow-right" className="mt-2 h-4 w-4 text-slate-300 group-hover:text-emerald-600" />
-                    </button>
+                        </span>
+                        <span className="mt-1 block truncate text-xs text-slate-500">
+                          {template.fileName} · {template.clauseCount} clauses · {formatDate(template.createdAt)}
+                        </span>
+                      </span>
+                      {template.isActive ? (
+                        <a
+                          href={`/api/properties/${property.id}/lease-templates/${template.id}/file?download=1`}
+                          download={template.fileName}
+                          className="relative z-10 mt-0.5 inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-semibold text-slate-700 transition-colors hover:bg-slate-50"
+                        >
+                          <Icon name="download" className="h-4 w-4" />
+                          Download
+                        </a>
+                      ) : (
+                        <Icon name="arrow-right" className="pointer-events-none relative z-10 mt-2 h-4 w-4 text-slate-300 group-hover:text-emerald-600" />
+                      )}
+                    </div>
                   );
 	                })
 	              )}
@@ -2055,8 +2076,9 @@ function LeaseCreationWorkflow({
             <DocxPreview
               base64={pendingUpload.previewFileBase64}
               scale={previewZoom}
+              page
               fallbackHint="Use “Download preview” to inspect the file."
-              className="lease-preview h-[520px] overflow-auto bg-white px-10 py-8 text-sm leading-relaxed text-slate-800"
+              className="lease-preview h-[520px] overflow-auto"
             />
           ) : (
             <div className="bg-white px-4 py-8 text-center text-sm text-slate-500">

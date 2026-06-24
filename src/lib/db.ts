@@ -67,7 +67,8 @@ function hasCurrentAccessDelegates(client: ReturnType<typeof createPrismaClient>
     typeof client.lease_signature_requests?.findMany === "function" &&
     prismaModelHasField(client, "lease_templates", "lease_schema") &&
     prismaModelHasField(client, "properties", "landlord_name") &&
-    prismaModelHasField(client, "properties", "landlord_signatory")
+    prismaModelHasField(client, "properties", "landlord_signatory") &&
+    prismaModelHasField(client, "users", "phone")
   );
 }
 

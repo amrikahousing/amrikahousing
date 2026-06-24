@@ -246,3 +246,21 @@ body {
   background-color: var(--card);
   box-shadow: 0 24px 64px rgb(15 23 42 / 0.22);
 }
+
+/* ── Lease DOCX preview (docx-preview output) ───────────────────────────
+   docx-preview renders the document with its own class-scoped styles under
+   `.docxpv`. In paginated (`page`) mode it also emits a `.docxpv-wrapper` with
+   a flat gray background and bare pages — restyle that to look like real paper
+   on a soft canvas. Scoped to `.lease-preview` so it never leaks elsewhere. */
+.lease-preview .docxpv-wrapper {
+  background: #eef2f6;
+  padding: 24px;
+  gap: 24px;
+}
+
+.lease-preview .docxpv-wrapper > section.docxpv {
+  margin-bottom: 0;
+  border: 1px solid var(--stroke);
+  border-radius: 2px;
+  box-shadow: 0 4px 18px rgb(15 23 42 / 0.12);
+}

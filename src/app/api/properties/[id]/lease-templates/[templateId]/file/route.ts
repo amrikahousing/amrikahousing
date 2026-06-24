@@ -6,7 +6,7 @@ import { getOrgPermissionContext, requirePropertyPermission } from "@/lib/org-au
 
 type RouteContext = { params: Promise<{ id: string; templateId: string }> };
 
-export async function GET(_request: NextRequest, context: RouteContext) {
+export async function GET(request: NextRequest, context: RouteContext) {
   const ctx = await getOrgPermissionContext();
   if ("error" in ctx) {
     return Response.json({ error: ctx.error }, { status: ctx.status });
@@ -35,10 +35,13 @@ export async function GET(_request: NextRequest, context: RouteContext) {
     return Response.json({ error: "Template file unavailable." }, { status: 502 });
   }
 
+  const download = request.nextUrl.searchParams.get("download") === "1";
+  const disposition = download ? "attachment" : "inline";
+
   return new Response(blob.stream as unknown as ReadableStream, {
     headers: {
       "Content-Type": template.content_type || "application/pdf",
-      "Content-Disposition": `inline; filename="${template.file_name}"`,
+      "Content-Disposition": `${disposition}; filename="${template.file_name}"`,
       "Cache-Control": "private, no-store",
     },
   });

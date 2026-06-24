@@ -1415,8 +1415,9 @@ export function OnboardRenterWizard({
             </div>
             <DocxPreview
               base64={filledLeaseBase64}
+              page
               fallbackHint="Use “Download .docx” to inspect the file."
-              className="lease-preview h-[480px] overflow-y-auto bg-white px-10 py-8 text-sm leading-relaxed text-slate-800"
+              className="lease-preview h-[480px] overflow-auto"
             />
           </div>
         ) : null}

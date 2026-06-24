@@ -9,6 +9,7 @@ export function DocxPreview({
   base64,
   className,
   scale = 1,
+  page = false,
   fallbackHint = "Download the file to inspect it.",
 }: {
   base64: string | null;
@@ -17,6 +18,11 @@ export function DocxPreview({
   // so the element's layout box (and the scroll container) grows with the
   // content instead of overflowing invisibly like a `transform: scale` would.
   scale?: number;
+  // `page` = true renders faithful, paginated paper pages (wrapper, real page
+  // size, page breaks) — use for a read-only review. `page` = false renders one
+  // continuous page at the document's real width — use under the tag canvas where
+  // fields are dropped onto a single scrollable surface.
+  page?: boolean;
   fallbackHint?: string;
 }) {
   const containerRef = useRef<HTMLDivElement>(null);
@@ -35,10 +41,18 @@ export function DocxPreview({
         if (cancelled || !containerRef.current) return;
         await renderAsync(bytes, containerRef.current, undefined, {
           className: "docxpv",
-          inWrapper: false,
-          ignoreWidth: true,
-          ignoreHeight: true,
-          breakPages: false,
+          inWrapper: page,
+          // Honor the document's real page width and margins so the column,
+          // line breaks, and alignment match Word instead of stretching to fill
+          // the container. In flow mode we still let height grow continuously.
+          ignoreWidth: false,
+          ignoreHeight: !page,
+          breakPages: page,
+          // Measure and place real tab stops — keeps signature lines and aligned
+          // fields from collapsing into a single space.
+          experimental: true,
+          trimXmlDeclaration: true,
+          useBase64URL: true,
           renderHeaders: true,
           renderFooters: true,
           renderFootnotes: true,
@@ -50,7 +64,7 @@ export function DocxPreview({
     return () => {
       cancelled = true;
     };
-  }, [base64]);
+  }, [base64, page]);
 
   if (failed) {
     return (
