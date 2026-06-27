@@ -1,7 +1,20 @@
-import { anthropic } from "@ai-sdk/anthropic";
+import { createAnthropic } from "@ai-sdk/anthropic";
 import { generateObject } from "ai";
 import { z } from "zod";
 import { isTenantAccessError, requireTenantAccess } from "@/lib/renter-auth";
+
+// The @ai-sdk/anthropic provider honors ANTHROPIC_BASE_URL and appends "/messages"
+// to it. A bare host (e.g. "https://api.anthropic.com" with no "/v1") would 404.
+// Normalize by ensuring the base URL ends in "/v1" before handing it to the provider.
+function normalizeAnthropicBaseURL(raw: string | undefined): string | undefined {
+  if (!raw) return undefined;
+  const trimmed = raw.replace(/\/+$/, "");
+  return /\/v\d+$/.test(trimmed) ? trimmed : `${trimmed}/v1`;
+}
+
+const anthropic = createAnthropic({
+  baseURL: normalizeAnthropicBaseURL(process.env.ANTHROPIC_BASE_URL),
+});
 
 // Always return partial fields so the client can pre-fill a form even when ready=false
 const parseSchema = z.object({

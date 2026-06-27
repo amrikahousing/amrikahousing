@@ -16,10 +16,14 @@ type RecipientType = "maintenance_staff" | "property_manager" | "owner" | "admin
  * Escalation chain for "who to text" when a new maintenance request comes in.
  * Resolves the FIRST reachable contact in priority order:
  *   1. maintenance staff assigned to the property
- *   2. the property manager (free-text contact on the property)
+ *   2. a property_manager-role user assigned to the property
  *   3. an owner / landlord of the property
  *   4. an org admin (final catch-all)
  * Each candidate phone is normalized to E.164; returns null if none usable.
+ *
+ * Tiers 1 & 2 resolve from real `users` rows assigned via `property_assignments`
+ * (consistent with Access Management), NOT the free-text contact columns on the
+ * property — those are display-only and can be stale.
  */
 async function resolveCreationRecipient(
   requestId: string,
@@ -28,20 +32,12 @@ async function resolveCreationRecipient(
   const req = await prisma.maintenance_requests.findFirst({
     where: { id: requestId, organization_id: organizationId },
     select: {
-      units: {
-        select: {
-          property_id: true,
-          properties: {
-            select: { property_manager_phone: true, property_manager_name: true },
-          },
-        },
-      },
+      units: { select: { property_id: true } },
     },
   });
   if (!req) return null;
 
   const propertyId = req.units.property_id;
-  const property = req.units.properties;
 
   // Tier 1 — maintenance staff assigned to this property
   const staffAssignment = await prisma.property_assignments.findFirst({
@@ -58,10 +54,19 @@ async function resolveCreationRecipient(
     return { phone: staffPhone, recipientType: "maintenance_staff", name: fullName(staffAssignment?.users) };
   }
 
-  // Tier 2 — property manager contact
-  const pmPhone = toE164(property?.property_manager_phone);
+  // Tier 2 — property_manager-role user assigned to this property
+  const pmAssignment = await prisma.property_assignments.findFirst({
+    where: {
+      property_id: propertyId,
+      users: { role: "property_manager", is_active: true, phone: { not: null } },
+    },
+    select: {
+      users: { select: { phone: true, first_name: true, last_name: true } },
+    },
+  });
+  const pmPhone = toE164(pmAssignment?.users.phone);
   if (pmPhone) {
-    return { phone: pmPhone, recipientType: "property_manager", name: property?.property_manager_name ?? null };
+    return { phone: pmPhone, recipientType: "property_manager", name: fullName(pmAssignment?.users) };
   }
 
   // Tier 3 — owner / landlord
@@ -100,6 +105,10 @@ async function logNotification(input: {
 }) {
   const status = input.result ? input.result.status : input.status ?? "skipped";
   const providerSid = input.result?.status === "sent" ? input.result.sid : null;
+  // Persist the failure/skip reason so problems are diagnosable from the DB
+  // rather than only from server logs ("sent" results carry no reason).
+  const errorReason =
+    input.result && input.result.status !== "sent" ? input.result.reason : null;
   try {
     await prisma.notifications_sent.create({
       data: {
@@ -111,6 +120,7 @@ async function logNotification(input: {
         body: input.body,
         provider_sid: providerSid,
         status,
+        error_reason: errorReason,
         related_type: input.relatedType ?? null,
         related_id: input.relatedId ?? null,
       },

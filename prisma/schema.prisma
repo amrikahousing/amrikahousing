@@ -509,6 +509,7 @@ model notifications_sent {
   body            String
   provider_sid    String?
   status          String   @default("queued")
+  error_reason    String?
   related_type    String?
   related_id      String?  @db.Uuid
   created_at      DateTime @default(now()) @db.Timestamptz(6)
