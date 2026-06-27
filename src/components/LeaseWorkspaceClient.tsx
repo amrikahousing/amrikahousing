@@ -1077,7 +1077,11 @@ function LeaseCreationWorkflow({
   workflowStarted: boolean;
   onWorkflowStarted: (started: boolean) => void;
 }) {
-  const review = pendingUpload?.review;
+  // A fresh upload carries its analysis on `pendingUpload.review`. When updating an
+  // existing template there is no upload, so fall back to the template's stored AI
+  // review so clauses, missing provisions, state-law notes, and readability still show.
+  const selectedTemplateReview = selectedTemplate?.reviewData as LeaseReview | null | undefined;
+  const review = pendingUpload?.review ?? selectedTemplateReview;
   const reviewClauses = Array.isArray(review?.clauseSummaries) ? review.clauseSummaries : [];
   const stateNotes = Array.isArray(review?.stateLawNotes) ? review.stateLawNotes : [];
   const [activeSection, setActiveSection] = useState<CreationSectionId>("start");
@@ -1089,7 +1093,6 @@ function LeaseCreationWorkflow({
   const [clauseTab, setClauseTab] = useState<"clauses" | "missing" | "statelaw" | "readability">("clauses");
   const [previewZoom, setPreviewZoom] = useState(1);
   const lastAdvanceToken = useRef(advanceToken);
-  const selectedTemplateReview = selectedTemplate?.reviewData as LeaseReview | null | undefined;
   const selectedTemplateLeaseName = selectedTemplateReview?.extractedTerms?.landlordName?.trim() || selectedTemplate?.name || "";
   const selectedTemplateNeedsValidation = startChoice === "existing" && Boolean(selectedTemplate);
   const validationLeaseName = pendingUpload ? profile.landlordName : selectedTemplateNeedsValidation ? selectedTemplateLeaseName : "";
