@@ -20,6 +20,8 @@ type LeaseTemplate = {
   name: string;
   fileName: string;
   contentType: string;
+  blobUrl: string;
+  leaseSchema: unknown;
   isActive: boolean;
   createdAt: string;
   reviewData: unknown;
@@ -1038,6 +1040,8 @@ function LeaseCreationWorkflow({
   profile,
   terms,
   pendingUpload,
+  existingPreviewBase64,
+  existingPreviewError,
   acceptedSuggestions,
   onSelectProperty,
   onSelectTemplate,
@@ -1062,6 +1066,8 @@ function LeaseCreationWorkflow({
   profile: LeaseProfile;
   terms: WorkflowTerms;
   pendingUpload: PendingWorkflowUpload | null;
+  existingPreviewBase64: string | null;
+  existingPreviewError: string | null;
   acceptedSuggestions: boolean;
   onSelectProperty: (propertyId: string) => void;
   onSelectTemplate: (templateId: string) => void;
@@ -1084,6 +1090,14 @@ function LeaseCreationWorkflow({
   const review = pendingUpload?.review ?? selectedTemplateReview;
   const reviewClauses = Array.isArray(review?.clauseSummaries) ? review.clauseSummaries : [];
   const stateNotes = Array.isArray(review?.stateLawNotes) ? review.stateLawNotes : [];
+
+  // The document preview can come from a fresh upload (pendingUpload) OR, when updating an
+  // existing template, from regenerating that template's stored file. Treat both uniformly
+  // so the Tags/Review steps render a preview in either flow.
+  const previewBase64 = pendingUpload?.previewFileBase64 ?? existingPreviewBase64 ?? null;
+  const previewError = pendingUpload?.previewError ?? existingPreviewError ?? null;
+  const canPreview = Boolean(pendingUpload || selectedTemplate?.blobUrl);
+  const previewName = pendingUpload?.name ?? selectedTemplate?.name ?? "lease-template";
   const [activeSection, setActiveSection] = useState<CreationSectionId>("start");
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [startPanel, setStartPanel] = useState<"choose" | "existing">("choose");
@@ -1203,9 +1217,10 @@ function LeaseCreationWorkflow({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [advanceToken]);
 
-  // Auto-generate preview when user reaches the Tags step so the document is visible
+  // Auto-generate preview when user reaches the Tags step so the document is visible.
+  // Works for both a fresh upload and an existing template being updated.
   useEffect(() => {
-    if (activeSection === "tags" && pendingUpload && !pendingUpload.previewFileBase64 && busy !== "workflow-preview") {
+    if (activeSection === "tags" && canPreview && !previewBase64 && busy !== "workflow-preview") {
       onGeneratePreview();
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -1998,7 +2013,7 @@ function LeaseCreationWorkflow({
     if (activeSection === "tags") {
       return (
         <div className="space-y-4">
-          <DragDropTagPreview base64={pendingUpload?.previewFileBase64 ?? null} loading={busy === "workflow-preview"} />
+          <DragDropTagPreview base64={previewBase64} loading={busy === "workflow-preview"} />
           <div className="flex items-center gap-3">
             <BackButton />
             <button
@@ -2013,8 +2028,8 @@ function LeaseCreationWorkflow({
       );
     }
 
-    const previewDownloadUrl = pendingUpload?.previewFileBase64
-      ? `data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,${pendingUpload.previewFileBase64}`
+    const previewDownloadUrl = previewBase64
+      ? `data:application/vnd.openxmlformats-officedocument.wordprocessingml.document;base64,${previewBase64}`
       : null;
 
     return (
@@ -2049,13 +2064,13 @@ function LeaseCreationWorkflow({
               <p className="text-xs text-slate-500">Review the tokenized template before saving.</p>
             </div>
             <div className="flex items-center gap-2">
-              {pendingUpload?.previewFileBase64 && busy !== "workflow-preview" ? (
+              {previewBase64 && busy !== "workflow-preview" ? (
                 <ZoomControls zoom={previewZoom} onZoomChange={setPreviewZoom} />
               ) : null}
               {previewDownloadUrl ? (
                 <a
                   href={previewDownloadUrl}
-                  download={`${pendingUpload?.name ?? "lease-template"}-preview.docx`}
+                  download={`${previewName}-preview.docx`}
                   className="ui-btn ui-btn-secondary h-9 px-3 text-xs"
                 >
                   Download preview
@@ -2064,20 +2079,20 @@ function LeaseCreationWorkflow({
               <button
                 type="button"
                 onClick={onGeneratePreview}
-                disabled={!pendingUpload || busy === "workflow-preview"}
+                disabled={!canPreview || busy === "workflow-preview"}
                 className="inline-flex h-9 items-center justify-center rounded-lg bg-white px-3 text-xs font-semibold text-slate-700 ring-1 ring-slate-200 hover:bg-slate-50 disabled:opacity-60"
               >
-                {busy === "workflow-preview" ? "Generating..." : pendingUpload?.previewFileBase64 ? "Refresh preview" : "Generate preview"}
+                {busy === "workflow-preview" ? "Generating..." : previewBase64 ? "Refresh preview" : "Generate preview"}
               </button>
             </div>
           </div>
           {busy === "workflow-preview" ? (
             <div className="flex h-80 items-center justify-center bg-white text-sm text-slate-500">Generating template preview...</div>
-          ) : pendingUpload?.previewError ? (
-            <div className="bg-red-50 px-4 py-5 text-sm text-red-700">{pendingUpload.previewError}</div>
-          ) : pendingUpload?.previewFileBase64 ? (
+          ) : previewError ? (
+            <div className="bg-red-50 px-4 py-5 text-sm text-red-700">{previewError}</div>
+          ) : previewBase64 ? (
             <DocxPreview
-              base64={pendingUpload.previewFileBase64}
+              base64={previewBase64}
               scale={previewZoom}
               page
               fallbackHint="Use “Download preview” to inspect the file."
@@ -2281,6 +2296,10 @@ export function LeaseWorkspaceClient({
   const [workflowProfile, setWorkflowProfile] = useState<LeaseProfile>(defaultLeaseProfile);
   const [workflowTerms, setWorkflowTerms] = useState<WorkflowTerms>(defaultWorkflowTerms);
   const [pendingWorkflowUpload, setPendingWorkflowUpload] = useState<PendingWorkflowUpload | null>(null);
+  const [existingPreview, setExistingPreview] = useState<{ base64: string | null; error: string | null }>({
+    base64: null,
+    error: null,
+  });
   const [acceptedSuggestions, setAcceptedSuggestions] = useState(false);
   const [workflowStarted, setWorkflowStarted] = useState(false);
   const [workflowAdvanceToken, setWorkflowAdvanceToken] = useState(0);
@@ -2342,6 +2361,7 @@ export function LeaseWorkspaceClient({
     setWorkflowProfile(defaultLeaseProfile);
     setWorkflowTerms(defaultWorkflowTerms);
     setPendingWorkflowUpload(null);
+    setExistingPreview({ base64: null, error: null });
     setAcceptedSuggestions(false);
     setWorkflowStarted(false);
   }
@@ -2435,6 +2455,7 @@ export function LeaseWorkspaceClient({
     if (!selectedProperty) return;
     setBusy("workflow-upload");
     setPendingWorkflowUpload(null);
+    setExistingPreview({ base64: null, error: null });
     setAcceptedSuggestions(false);
     try {
       const body = new FormData();
@@ -2632,6 +2653,65 @@ export function LeaseWorkspaceClient({
     }
   }
 
+  // Regenerate the tokenized preview for an EXISTING template (no fresh upload). Reuses the
+  // template's stored blob + extracted schema so the preview endpoint skips the slow LLM
+  // extraction. Keeps the document visible in the Tags/Review steps when updating a template.
+  async function generateExistingTemplatePreview(silent: boolean) {
+    if (!selectedProperty || !selectedTemplate?.blobUrl) return;
+    if (busy === "workflow-preview") return;
+    if (!silent) {
+      setBusy("workflow-preview");
+      setExistingPreview((prev) => ({ ...prev, error: null }));
+    }
+    try {
+      const res = await fetch(`/api/properties/${selectedProperty.id}/lease-templates/preview`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          blobUrl: selectedTemplate.blobUrl,
+          schema: selectedTemplate.leaseSchema ?? undefined,
+          organizationName: workflowProfile.landlordName || undefined,
+          landlordSignatory: workflowProfile.landlordSignatory || undefined,
+          propertyManagerName: workflowProfile.propertyManagerName || undefined,
+          propertyManagerEmail: workflowProfile.propertyManagerEmail || undefined,
+          propertyManagerPhone: workflowProfile.propertyManagerPhone || undefined,
+          tenantPaidUtilities: computeTenantPaidUtilities() || undefined,
+        }),
+      });
+      const data = (await res.json().catch(() => ({}))) as { error?: string; fileBase64?: string };
+      if (!res.ok || !data.fileBase64) {
+        if (silent) return;
+        throw new Error(data.error ?? "Could not generate template preview.");
+      }
+      setExistingPreview({ base64: data.fileBase64, error: null });
+    } catch (err) {
+      if (silent) return;
+      const message = err instanceof Error ? err.message : "Could not generate template preview.";
+      setExistingPreview((prev) => ({ ...prev, error: message }));
+      toast.error(message, { title: "Leases" });
+    } finally {
+      if (!silent) setBusy(null);
+    }
+  }
+
+  // Route preview requests to the right source: a fresh upload regenerates from the pending
+  // upload; otherwise fall back to the selected existing template.
+  function handleGeneratePreview() {
+    if (pendingWorkflowUpload) {
+      void generateWorkflowPreview();
+    } else {
+      void generateExistingTemplatePreview(false);
+    }
+  }
+
+  function handleGeneratePreviewSilent() {
+    if (pendingWorkflowUpload) {
+      void generateWorkflowPreviewSilent();
+    } else {
+      void generateExistingTemplatePreview(true);
+    }
+  }
+
   async function saveWorkflowTemplate() {
     if (!selectedProperty || !pendingWorkflowUpload) return;
     setBusy("workflow-save");
@@ -2758,10 +2838,13 @@ export function LeaseWorkspaceClient({
               profile={workflowProfile}
               terms={workflowTerms}
               pendingUpload={pendingWorkflowUpload}
+              existingPreviewBase64={existingPreview.base64}
+              existingPreviewError={existingPreview.error}
               acceptedSuggestions={acceptedSuggestions}
               onSelectProperty={selectProperty}
               onSelectTemplate={(templateId) => {
                 setSelectedTemplateId(templateId);
+                setExistingPreview({ base64: null, error: null });
                 const template = selectedProperty?.templates.find((t) => t.id === templateId);
                 if (template && selectedProperty) populateFromTemplate(template, selectedProperty);
               }}
@@ -2770,8 +2853,8 @@ export function LeaseWorkspaceClient({
               onSaveProfile={() => void saveLeaseProfile()}
               onTermsChange={setWorkflowTerms}
 	              onAcceptSuggestions={setAcceptedSuggestions}
-	              onGeneratePreview={() => void generateWorkflowPreview()}
-	              onGeneratePreviewSilent={() => void generateWorkflowPreviewSilent()}
+	              onGeneratePreview={handleGeneratePreview}
+	              onGeneratePreviewSilent={handleGeneratePreviewSilent}
 	              onSaveTemplate={() => void saveWorkflowTemplate()}
               advanceToken={workflowAdvanceToken}
               workflowStarted={workflowStarted}
