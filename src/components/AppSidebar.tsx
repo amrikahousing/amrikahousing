@@ -4,6 +4,7 @@ import { useClerk } from "@clerk/nextjs";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { APP_VERSION } from "@/lib/version";
 
 type AppSidebarProps = {
   user: {
@@ -272,6 +273,10 @@ export function AppSidebar({ user }: AppSidebarProps) {
           <span aria-hidden="true">-&gt;</span>
           Log Out
         </button>
+
+        <p className="mt-3 text-center text-[11px] font-medium text-slate-600">
+          Version {APP_VERSION}
+        </p>
       </div>
     </div>
   );
