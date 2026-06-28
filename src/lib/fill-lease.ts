@@ -305,11 +305,14 @@ function buildReplacementMap(data: LeaseData): Record<string, string> {
       month: "long", day: "numeric", year: "numeric",
     });
   };
-  const fmt$ = (n: string) => `$${Number(n).toLocaleString()}`;
+  const fmt$ = (n: string) =>
+    `$${Number(n).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
   const fmtWords = (n: string) => Number.isFinite(Number(n)) ? intToWords(Math.round(Number(n))) : "—";
   const primaryName = `${data.primaryTenant.firstName} ${data.primaryTenant.lastName}`.trim();
-  const coNames = data.additionalTenants.map((t) => `${t.firstName} ${t.lastName}`.trim()).join(", ");
-  const allNames = [primaryName, ...data.additionalTenants.map((t) => `${t.firstName} ${t.lastName}`.trim())].join(", ");
+  // Stack multiple tenant names on separate lines (the "\n" is rendered as a <w:br/>
+  // by replaceParagraphBody) rather than comma-joined on one line.
+  const coNames = data.additionalTenants.map((t) => `${t.firstName} ${t.lastName}`.trim()).join("\n");
+  const allNames = [primaryName, ...data.additionalTenants.map((t) => `${t.firstName} ${t.lastName}`.trim())].join("\n");
 
   return {
     tenant_name: primaryName,
@@ -494,7 +497,10 @@ function collectRuns(body: string): RunInfo[] {
   const pat = /<w:r\b[\s\S]*?<\/w:r>/g;
   let m: RegExpExecArray | null;
   while ((m = pat.exec(body)) !== null) {
-    const text = [...(m[0].matchAll(/<w:t[^>]*>([\s\S]*?)<\/w:t>/g))].map((t) => t[1]).join("");
+    // NOTE the \b: without it, "<w:t[^>]*>" also matches "<w:tab/>" ("<w:t" + "ab/" +
+    // ">"), so a run with a leading <w:tab/> (e.g. "<w:tab/><w:t>$1,700.00</w:t>") would
+    // capture the literal "<w:t ...>" opener as text and corrupt the combined run text.
+    const text = [...(m[0].matchAll(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g))].map((t) => t[1]).join("");
     runs.push({ fullMatch: m[0], text, start: m.index });
   }
   return runs;
@@ -504,54 +510,70 @@ function xmlEscape(s: string): string {
   return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
 }
 
-function extractRpr(runXml: string): string {
-  const m = runXml.match(/<w:rPr>[\s\S]*?<\/w:rPr>/);
-  return m ? m[0] : "";
-}
-
-function withNewText(runXml: string, newText: string): string {
-  return runXml.replace(
-    /<w:t[^>]*>[\s\S]*?<\/w:t>/,
-    `<w:t xml:space="preserve">${xmlEscape(newText)}</w:t>`,
-  );
-}
-
+// Replaces the first occurrence of `search` (matched against the paragraph's combined
+// visible text) with `value`, editing ONLY the contents of the <w:t> text nodes the
+// match spans. Run structure, run properties, and inline elements like <w:tab/> are
+// left untouched — so a run that packs a label, a tab, and the matched text into a
+// single <w:r> (e.g. "Monthly Rent:\t$1,700.00") is rewritten cleanly instead of being
+// mangled into leftover/escaped fragments. Multi-line values ("\n") render as <w:br/>.
 function replaceParagraphBody(body: string, search: string, value: string): string {
-  const runs = collectRuns(body);
-  const combined = runs.map((r) => r.text).join("");
+  const nodes: Array<{ start: number; end: number; open: string; text: string }> = [];
+  const re = /(<w:t\b[^>]*>)([\s\S]*?)<\/w:t>/g;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(body)) !== null) {
+    nodes.push({ start: m.index, end: m.index + m[0].length, open: m[1], text: m[2] });
+  }
+  if (nodes.length === 0) return body;
+
+  const combined = nodes.map((n) => n.text).join("");
   const pos = combined.indexOf(search);
   if (pos === -1) return body;
-
   const endPos = pos + search.length;
-  let charCount = 0;
+
+  // Map the match span onto the text nodes.
+  let acc = 0;
   let firstIdx = -1;
   let lastIdx = -1;
-  for (let i = 0; i < runs.length; i++) {
-    const rStart = charCount;
-    const rEnd = charCount + runs[i].text.length;
-    if (firstIdx === -1 && rEnd > pos) firstIdx = i;
-    if (rStart < endPos) lastIdx = i;
-    charCount += runs[i].text.length;
+  let firstOffset = 0;
+  let lastOffset = 0;
+  for (let i = 0; i < nodes.length; i++) {
+    const nStart = acc;
+    const nEnd = acc + nodes[i].text.length;
+    if (firstIdx === -1 && nEnd > pos) {
+      firstIdx = i;
+      firstOffset = pos - nStart;
+    }
+    if (nStart < endPos) {
+      lastIdx = i;
+      lastOffset = endPos - nStart;
+    }
+    acc = nEnd;
   }
   if (firstIdx === -1) return body;
 
-  let charBeforeFirst = 0;
-  for (let i = 0; i < firstIdx; i++) charBeforeFirst += runs[i].text.length;
-  const keepBefore = runs[firstIdx].text.slice(0, pos - charBeforeFirst);
+  // The value goes into the first matched node; if it spans lines, the continuation
+  // lines become <w:br/>-separated text nodes within the same run.
+  const valueXml = value
+    .split("\n")
+    .map(xmlEscape)
+    .join(`</w:t><w:br/><w:t xml:space="preserve">`);
 
-  let charThroughLast = 0;
-  for (let i = 0; i <= lastIdx; i++) charThroughLast += runs[i].text.length;
-  const keepAfter = runs[lastIdx].text.slice(endPos - (charThroughLast - runs[lastIdx].text.length));
-
-  const rPr = extractRpr(runs[firstIdx].fullMatch);
-  const parts: string[] = [];
-  if (keepBefore) parts.push(withNewText(runs[firstIdx].fullMatch, keepBefore));
-  parts.push(`<w:r>${rPr}<w:t xml:space="preserve">${xmlEscape(value)}</w:t></w:r>`);
-  if (keepAfter) parts.push(withNewText(runs[lastIdx].fullMatch, keepAfter));
-
-  const firstStart = runs[firstIdx].start;
-  const lastEnd = runs[lastIdx].start + runs[lastIdx].fullMatch.length;
-  return body.slice(0, firstStart) + parts.join("") + body.slice(lastEnd);
+  // Rewrite affected nodes back-to-front so earlier node offsets stay valid.
+  let out = body;
+  for (let i = lastIdx; i >= firstIdx; i--) {
+    let inner: string;
+    if (firstIdx === lastIdx) {
+      inner = xmlEscape(nodes[i].text.slice(0, firstOffset)) + valueXml + xmlEscape(nodes[i].text.slice(lastOffset));
+    } else if (i === firstIdx) {
+      inner = xmlEscape(nodes[i].text.slice(0, firstOffset)) + valueXml;
+    } else if (i === lastIdx) {
+      inner = xmlEscape(nodes[i].text.slice(lastOffset));
+    } else {
+      inner = "";
+    }
+    out = out.slice(0, nodes[i].start) + nodes[i].open + inner + "</w:t>" + out.slice(nodes[i].end);
+  }
+  return out;
 }
 
 function applyReplacementsToXml(xml: string, replacements: Array<{ search: string; value: string }>): string {
@@ -590,6 +612,194 @@ async function fillDocxDirect(
   }
 
   return Buffer.from(zip.generate({ type: "nodebuffer" }));
+}
+
+// ─── Literal {{token}} replacement (text-node level, format-safe) ─────────────
+// Replaces "{{key}}" placeholders embedded directly in a tokenized template by
+// rewriting ONLY the characters inside <w:t> nodes. Unlike the run-splicing
+// replaceParagraphBody path, this never inserts run/text tags between elements, so it
+// cannot corrupt runs where a label, a <w:tab/>, and a token share one <w:r>
+// (e.g. "Monthly Rent:\t{{rent_amount}}"). Multi-line values (containing "\n") are
+// emitted as proper <w:br/> breaks within the same run.
+function replaceTokensInTextNodes(xml: string, map: Record<string, string>): string {
+  const entries = Object.entries(map);
+  if (entries.length === 0) return xml;
+  return xml.replace(/(<w:t\b[^>]*>)([\s\S]*?)(<\/w:t>)/g, (full, open: string, text: string, close: string) => {
+    let next = text;
+    for (const [key, value] of entries) {
+      const token = `{{${key}}}`;
+      if (next.includes(token)) {
+        const rep = value.split("\n").map(xmlEscape).join(`</w:t><w:br/><w:t xml:space="preserve">`);
+        next = next.split(token).join(rep);
+      }
+    }
+    return next === text ? full : open + next + close;
+  });
+}
+
+async function applyDataTokens(docxBuffer: Buffer, map: Record<string, string>): Promise<Buffer> {
+  const PizZip = (await import("pizzip")).default;
+  const zip = new PizZip(docxBuffer);
+
+  const files = [
+    "word/document.xml",
+    "word/header1.xml",
+    "word/header2.xml",
+    "word/footer1.xml",
+    "word/footer2.xml",
+  ];
+
+  let changed = false;
+  for (const filePath of files) {
+    const file = zip.file(filePath);
+    if (!file) continue;
+    const xml = file.asText();
+    const out = replaceTokensInTextNodes(xml, map);
+    if (out !== xml) {
+      zip.file(filePath, out);
+      changed = true;
+    }
+  }
+
+  return changed ? Buffer.from(zip.generate({ type: "nodebuffer" })) : docxBuffer;
+}
+
+// ─── Deterministic "Monthly Rent:" / "Security Deposit:" value ownership ──────
+// The AI extraction keys substitutions off the sample VALUE ("$1,700.00"), so when a
+// lease lists the same amount for rent and deposit it cannot tell the two apart — the
+// seenSearch dedup in parseSubstitutionPairs drops one pair and BOTH lines collapse to
+// a single token (typically {{rent_amount}}). This pass owns those two labeled fields
+// by LABEL instead of value — exactly mirroring applyLesseePrintNames / applyInitials-
+// SignTags — so each line always carries the right output: the {{…}} token at tokenize
+// time, or the formatted amount at fill time.
+const RENT_LABEL_RE = /Monthly\s+(?:Rent|Payment)\s*:/i;
+const DEPOSIT_LABEL_RE = /Security\s+Deposit\s*:/i;
+// The value slot that follows the label: a {{token}}, a "$1,700.00" amount, or a
+// "$____" / "____" fill-in blank. A clause heading like "SECURITY DEPOSIT: YOU AGREE…"
+// has none of these right after the label, so it is left untouched.
+const MONEY_SLOT_RE = /\{\{[A-Za-z_]+\}\}|\$\s*[\d,]+(?:\.\d{1,2})?|\$?\s*_{2,}/;
+
+function replaceMoneyFieldSlots(xml: string, rent: string, deposit: string): { xml: string; count: number } {
+  // Collect paragraphs with their positions + combined visible text. Working at the
+  // document level (not a single <w:p> at a time) lets us bridge the common aligned
+  // layout where the label and its value sit in SEPARATE table cells / paragraphs.
+  const paras: Array<{ start: number; end: number; body: string; text: string }> = [];
+  const pre = /<w:p\b(?:[^>]*)>[\s\S]*?<\/w:p>/g;
+  let pm: RegExpExecArray | null;
+  while ((pm = pre.exec(xml)) !== null) {
+    paras.push({ start: pm.index, end: pm.index + pm[0].length, body: pm[0], text: collectRuns(pm[0]).map((r) => r.text).join("") });
+  }
+
+  const hasLabel = (t: string) => RENT_LABEL_RE.test(t) || DEPOSIT_LABEL_RE.test(t);
+  let count = 0;
+  for (const [labelRe, outValue] of [[RENT_LABEL_RE, rent], [DEPOSIT_LABEL_RE, deposit]] as const) {
+    if (!outValue) continue;
+    for (let i = 0; i < paras.length; i++) {
+      const lm = labelRe.exec(paras[i].text);
+      if (!lm) continue;
+      // (a) Value slot in the SAME paragraph, right after the label (tab-aligned line).
+      const after = paras[i].text.slice(lm.index + lm[0].length);
+      const sm = MONEY_SLOT_RE.exec(after);
+      if (sm && sm.index <= 25) {
+        paras[i].body = replaceParagraphBody(paras[i].body, sm[0], outValue);
+        count++;
+        break;
+      }
+      // (b) Otherwise the value lives in a following cell/paragraph (table layout).
+      // Scan the next few paragraphs for a money slot, stopping at the next labeled
+      // field or any non-empty prose so we never wander into an unrelated clause.
+      let done = false;
+      for (let j = i + 1; j < paras.length && j <= i + 3 && !done; j++) {
+        if (hasLabel(paras[j].text)) break;
+        const sj = MONEY_SLOT_RE.exec(paras[j].text);
+        if (sj) {
+          paras[j].body = replaceParagraphBody(paras[j].body, sj[0], outValue);
+          count++;
+          done = true;
+        } else if (paras[j].text.trim()) {
+          break;
+        }
+      }
+      if (done) break;
+    }
+  }
+  if (count === 0) return { xml, count };
+
+  // Rebuild the document, splicing in the (possibly) modified paragraph bodies.
+  let out = "";
+  let cursor = 0;
+  for (const p of paras) {
+    out += xml.slice(cursor, p.start) + p.body;
+    cursor = p.end;
+  }
+  out += xml.slice(cursor);
+  return { xml: out, count };
+}
+
+async function applyMoneyFieldSlots(docxBuffer: Buffer, rent: string, deposit: string): Promise<Buffer> {
+  const PizZip = (await import("pizzip")).default;
+  const zip = new PizZip(docxBuffer);
+
+  const files = [
+    "word/document.xml",
+    "word/header1.xml",
+    "word/header2.xml",
+    "word/footer1.xml",
+    "word/footer2.xml",
+  ];
+
+  let total = 0;
+  for (const filePath of files) {
+    const file = zip.file(filePath);
+    if (!file) continue;
+    const { xml, count } = replaceMoneyFieldSlots(file.asText(), rent, deposit);
+    if (count > 0) zip.file(filePath, xml);
+    total += count;
+  }
+  console.log(`[money-fields] set ${total} Monthly Rent / Security Deposit slot(s)`);
+  return total > 0 ? Buffer.from(zip.generate({ type: "nodebuffer" })) : docxBuffer;
+}
+
+// Plain-text counterpart of replaceMoneyFieldSlots, for the clause/tokenized-text
+// pipeline (extractLeaseSchema Phase 3). The value-keyed pair tokenization can't tell
+// rent from deposit when they share an amount (the dedup drops one and both collapse to
+// {{rent_amount}}), so set each by its label. Replaces only the value slot right after
+// the label, leaving clause prose like "SECURITY DEPOSIT: YOU AGREE…" untouched.
+function tokenizeMoneyFieldsByLabel(text: string): string {
+  const slot = String.raw`\{\{[A-Za-z_]+\}\}|\$[ \t]*[\d,]+(?:\.\d{1,2})?|\$?[ \t]*_{2,}`;
+  return text
+    .replace(new RegExp(String.raw`(Monthly[ \t]+(?:Rent|Payment)[ \t]*:[ \t]*)(?:${slot})`, "i"), "$1{{rent_amount}}")
+    .replace(new RegExp(String.raw`(Security[ \t]+Deposit[ \t]*:[ \t]*)(?:${slot})`, "i"), "$1{{security_deposit}}");
+}
+
+// ─── Restore the "Lease Date:" agreement-date header ─────────────────────────
+// The AI extraction emits a generic { search:"Date:", token:"{{Date;type=date;role=…}}" }
+// pair to anchor signer dates at the signature blocks. That same broad search also
+// matches the agreement-date header at the top of the lease ("Lease Date:"), turning it
+// into a stray "Lease {{Date;type=date;role=…}}" signing anchor — even though the lease
+// date is already filled right beside it. Restore that one occurrence to the literal
+// "Date:" label. Only the header is touched: signature-block date anchors are never
+// preceded by the word "Lease", so they are left intact.
+async function applyLeaseDateHeader(docxBuffer: Buffer): Promise<Buffer> {
+  const PizZip = (await import("pizzip")).default;
+  const zip = new PizZip(docxBuffer);
+  const re = /(Lease\s+)\{\{Date;type=date;role=[^}]*\}\}/g;
+  let total = 0;
+  for (const filePath of [
+    "word/document.xml",
+    "word/header1.xml",
+    "word/header2.xml",
+    "word/footer1.xml",
+    "word/footer2.xml",
+  ]) {
+    const file = zip.file(filePath);
+    if (!file) continue;
+    const xml = file.asText();
+    const out = xml.replace(re, (_m, lead: string) => { total++; return `${lead}Date:`; });
+    if (out !== xml) zip.file(filePath, out);
+  }
+  console.log(`[lease-date-header] restored ${total} "Lease Date:" header label(s)`);
+  return total > 0 ? Buffer.from(zip.generate({ type: "nodebuffer" })) : docxBuffer;
 }
 
 // ─── Scratch DOCX builder (PDF fallback) ─────────────────────────────────────
@@ -851,6 +1061,9 @@ export async function extractLeaseSchema(blobUrl: string): Promise<ExtractedLeas
   for (const { search, token } of pairs) {
     if (search) tokenizedText = tokenizedText.replaceAll(search, token);
   }
+  // Override rent/deposit by label so the deposit keeps its own token even when it
+  // shares an amount with rent (the value-keyed pairs above can't distinguish them).
+  tokenizedText = tokenizeMoneyFieldsByLabel(tokenizedText);
   const clauses = splitTextIntoClauses(tokenizedText);
 
   // Lift clause-specific default values directly from the extracted pairs
@@ -998,6 +1211,223 @@ export async function applyInitialsSignTags(
   return Buffer.from(zip.generate({ type: "nodebuffer" }));
 }
 
+// ─── "N Lessee Print:" name fill (deterministic, label-driven) ───────────────
+// The numbered Lessee-print signature table ("1 Lessee Print:", "2 Lessee Print:",
+// "Lessor Print:") is otherwise filled from AI-extracted substitution pairs, which
+// is unreliable here: the model frequently collapses BOTH tenant names onto row 1
+// (e.g. by mapping the row-1 blank to {{all_tenant_names}}), and the data-token
+// dedup in parseSubstitutionPairs can drop the row-2 pair when both cells share the
+// same blank text. Worse, those pairs are baked in at upload time, so old templates
+// stay broken. This pass owns the table deterministically — exactly mirroring how
+// applyInitialsSignTags owns INITIALS — keying off the literal label so each row
+// gets exactly one name: row 1 → primary tenant, row 2 → second tenant, etc.
+
+// Matches a "1 Lessee Print:" style label; group 1 is the row number (1, 2, or 3).
+// Tolerates a missing colon and variable spacing. "Lessor Print" never matches.
+const NUMBERED_LESSEE_PRINT_RE = /\b([123])\s*Lessee\s+Print\s*:?/i;
+// Fallback for an unnumbered "Lessee Print:" label → treated as row 1. Used only
+// when the document has no numbered label at all.
+const SINGULAR_LESSEE_PRINT_RE = /\bLessee\s+Print\s*:?/i;
+
+function replaceLesseePrintSlots(
+  xml: string,
+  tenantNames: string[],
+): { xml: string; count: number } {
+  // Only fall back to the singular "Lessee Print:" label when there is no numbered
+  // label anywhere — otherwise the singular pattern would also match the numbered ones.
+  const hasNumbered = NUMBERED_LESSEE_PRINT_RE.test(xml);
+
+  let count = 0;
+  const out = xml.replace(/(<w:p\b(?:[^>]*)>)([\s\S]*?)(<\/w:p>)/g, (full, open, body, close) => {
+    const combined = collectRuns(body).map((r) => r.text).join("");
+
+    const numbered = NUMBERED_LESSEE_PRINT_RE.exec(combined);
+    const m = numbered ?? (!hasNumbered ? SINGULAR_LESSEE_PRINT_RE.exec(combined) : null);
+    if (!m) return full;
+
+    const rowNum = numbered ? Number(numbered[1]) : 1;
+    const name = tenantNames[rowNum - 1];
+    // No tenant for this row (e.g. row 2 on a single-tenant lease): leave the
+    // original blank untouched so the line stays fillable.
+    if (name === undefined) return full;
+
+    // Replace the whole label segment plus whatever currently follows it (an old
+    // name, underscores, or nothing) up to the end of the cell's combined text.
+    const labelText = m[0];
+    const search = combined.slice(m.index);
+    const value = `${labelText} ${name}`;
+
+    count++;
+    return open + replaceParagraphBody(body, search, value) + close;
+  });
+  return { xml: out, count };
+}
+
+// Rewrites the role of EVERY Sign/Date anchor it matches (group 1 = up to "role=",
+// group 2 = closing "}}"). Initials are intentionally excluded — applyInitialsSignTags
+// owns and rewrites those separately.
+const ANCHOR_ROLE_RE = /(\{\{(?:Sign|Date);type=[^}]*?role=)(?:Tenant\s*\d+|Manager)(\}\})/gi;
+// Reads a row's signature-anchor role to tell a lessee row from the lessor/landlord row.
+const SIGN_ROLE_RE = /\{\{Sign;type=signature;role=(Tenant\s*\d+|Manager)\}\}/i;
+const MGR_SIGN_RE = /\{\{Sign;type=signature;role=Manager\}\}/i;
+const TENANT_SIGN_RE = /\{\{Sign;type=signature;role=Tenant\s*\d+\}\}/i;
+
+// Force each row of the Lessee/Lessor signature table to sign as the correct party.
+// The AI extraction and the manager's template token picker (which only offers Tenant 1
+// & 2) routinely leave the SECOND lessee row as "Tenant 1" and scramble the date-anchor
+// roles (e.g. the co-tenant's date anchor lands as Manager, the landlord's as Tenant 1),
+// so multiple parties collapse onto one signer. Only the FIRST row carries an explicit
+// "N Lessee Print:" label, so the old label-only pass could not reach the others.
+// Instead we walk each signature table top-to-bottom: lessee rows get Tenant 1, 2, … in
+// order; the landlord row (its signature anchor is role=Manager) gets Manager. Both the
+// Sign and Date anchors in a row are set to that single role. Rows beyond the actual
+// tenant count are left untouched so we never mint a phantom signer field.
+function fixLesseeSignatureRoles(xml: string, tenantCount: number): { xml: string; count: number } {
+  let count = 0;
+  const out = xml.replace(/<w:tbl\b[\s\S]*?<\/w:tbl>/g, (tbl) => {
+    // Only touch a table that is actually a lessee/lessor signature block: it either
+    // labels a "Lessee Print" row, or pairs a tenant signature anchor with a manager one.
+    const tblText = collectRuns(tbl).map((r) => r.text).join("");
+    const isSigTable =
+      /Lessee\s+Print/i.test(tblText) || (MGR_SIGN_RE.test(tbl) && TENANT_SIGN_RE.test(tbl));
+    if (!isSigTable) return tbl;
+
+    let tenantSeq = 0; // last assigned lessee number within this table
+    return tbl.replace(/<w:tr\b[\s\S]*?<\/w:tr>/g, (row) => {
+      if (!/\{\{(?:Sign|Date);type=/.test(row)) return row; // not a signer row
+      const combined = collectRuns(row).map((r) => r.text).join("");
+      const labelNum = NUMBERED_LESSEE_PRINT_RE.exec(combined)?.[1];
+      const signRole = SIGN_ROLE_RE.exec(row)?.[1];
+
+      let target: string | null;
+      if (labelNum) {
+        // Explicit "N Lessee Print:" label wins, and reanchors the running sequence
+        // (each signature block restarts at "1 Lessee Print:").
+        tenantSeq = Number(labelNum);
+        target = tenantSeq <= tenantCount ? `Tenant ${tenantSeq}` : null;
+      } else if (signRole && /Manager/i.test(signRole)) {
+        target = "Manager"; // lessor / landlord / agent row
+      } else {
+        tenantSeq += 1;
+        target = tenantSeq <= tenantCount ? `Tenant ${tenantSeq}` : null;
+      }
+      if (!target) return row; // no real signer for this row — leave it as-is
+
+      return row.replace(ANCHOR_ROLE_RE, (_full, pre, post) => {
+        count++;
+        return `${pre}${target}${post}`;
+      });
+    });
+  });
+  return { xml: out, count };
+}
+
+// Owns the Lessee signature table at fill time: (1) fills each "N Lessee Print:"
+// label with the matching tenant name, and (2) renumbers each row's tenant signer
+// anchor to role=Tenant N. Overrides whatever the AI substitution pairs placed there.
+export async function applyLesseePrintNames(
+  docxBuffer: Buffer,
+  tenantNames: string[],
+): Promise<Buffer> {
+  const PizZip = (await import("pizzip")).default;
+  const zip = new PizZip(docxBuffer);
+
+  const files = [
+    "word/document.xml",
+    "word/header1.xml",
+    "word/header2.xml",
+    "word/footer1.xml",
+    "word/footer2.xml",
+  ];
+
+  let totalNames = 0;
+  let totalRoles = 0;
+  for (const filePath of files) {
+    const file = zip.file(filePath);
+    if (!file) continue;
+    const named = replaceLesseePrintSlots(file.asText(), tenantNames);
+    const roled = fixLesseeSignatureRoles(named.xml, tenantNames.length);
+    if (named.count > 0 || roled.count > 0) zip.file(filePath, roled.xml);
+    totalNames += named.count;
+    totalRoles += roled.count;
+  }
+
+  console.log(
+    `[lessee-print] filled ${totalNames} "Lessee Print" row(s) and renumbered ${totalRoles} signer anchor(s) across ${tenantNames.length} tenant(s)`,
+  );
+  return Buffer.from(zip.generate({ type: "nodebuffer" }));
+}
+
+
+function expandTenantNameRows(xml: string, searches: string[], names: string[]): { xml: string; count: number } {
+  const targets = [...new Set(searches.filter(Boolean))];
+  if (names.length === 0 || targets.length === 0) return { xml, count: 0 };
+  let count = 0;
+  const out = xml.replace(/<w:tr\b[\s\S]*?<\/w:tr>/g, (row) => {
+    if (/;type=(?:signature|date|initials)/i.test(row)) return row;
+    const cells = row.match(/<w:tc>[\s\S]*?<\/w:tc>/g) ?? [];
+    const cellTexts = cells.map((c) => collectRuns(c).map((r) => r.text).join(""));
+    let matchIdx = -1;
+    let matched = "";
+    for (let i = 0; i < cellTexts.length && matchIdx === -1; i++) {
+      const hit = targets.find((s) => cellTexts[i].includes(s) && cellTexts[i].replace(s, "").trim() === "");
+      if (hit) { matchIdx = i; matched = hit; }
+    }
+    if (matchIdx === -1) return row;
+    // Every other cell must be empty — otherwise a sibling holds a label we'd duplicate.
+    if (!cellTexts.every((t, i) => i === matchIdx || t.trim() === "")) return row;
+    count++;
+    // Clone the original row once per name, replacing the placeholder with that name.
+    return names.map((nm) => replaceParagraphBody(row, matched, nm)).join("");
+  });
+  return { xml: out, count };
+}
+
+export async function applyTenantNameRowExpansion(
+  docxBuffer: Buffer,
+  data: LeaseData,
+  pairs: Array<{ search: string; token: string }> = [],
+): Promise<Buffer> {
+  const PizZip = (await import("pizzip")).default;
+  const zip = new PizZip(docxBuffer);
+
+  const name = (t: { firstName: string; lastName: string }) => `${t.firstName} ${t.lastName}`.trim();
+  const allNames = [name(data.primaryTenant), ...data.additionalTenants.map(name)];
+  const coNames = data.additionalTenants.map(name);
+
+  // Search strings that resolve to each multi-tenant token come from the schema pairs
+  // (the real blanks in the template); the literal tokens are fallbacks.
+  const searchesFor = (token: string, fallback: string) =>
+    [...pairs.filter((p) => p.token === token).map((p) => p.search), fallback];
+  const allSearches = searchesFor("{{all_tenant_names}}", "{{all_tenant_names}}");
+  const coSearches = searchesFor("{{co_tenant_names}}", "{{co_tenant_names}}");
+
+  const files = [
+    "word/document.xml",
+    "word/header1.xml",
+    "word/header2.xml",
+    "word/footer1.xml",
+    "word/footer2.xml",
+  ];
+
+  let total = 0;
+  for (const filePath of files) {
+    const file = zip.file(filePath);
+    if (!file) continue;
+    let xml = file.asText();
+    const all = expandTenantNameRows(xml, allSearches, allNames);
+    xml = all.xml;
+    const co = expandTenantNameRows(xml, coSearches, coNames);
+    xml = co.xml;
+    const count = all.count + co.count;
+    if (count > 0) zip.file(filePath, xml);
+    total += count;
+  }
+
+  console.log(`[tenant-rows] expanded ${total} standalone tenant-name row(s) into one row per tenant`);
+  return Buffer.from(zip.generate({ type: "nodebuffer" }));
+}
+
 // ─── Public: generate filled lease (returns DOCX buffer) ─────────────────────
 
 export async function generateLease(
@@ -1006,9 +1436,13 @@ export async function generateLease(
   blobUrl: string,
 ): Promise<Buffer> {
   if (schema.originalFormat === "docx") {
-    const buffer = await fetchBuffer(blobUrl);
+    const original = await fetchBuffer(blobUrl);
     // Guard: verify magic bytes are DOCX/ZIP (PK header)
-    if (buffer[0] === 0x50 && buffer[1] === 0x4b) {
+    if (original[0] === 0x50 && original[1] === 0x4b) {
+      // First, expand any standalone "tenant list" row (a cell holding only the
+      // all/co-tenant placeholder) into one row per tenant. Runs on the raw template
+      // before substitution; driven by the pair search strings (the real blanks).
+      const buffer = await applyTenantNameRowExpansion(original, data, schema.pairs);
       const map = buildReplacementMap(data);
       const replacements = schema.pairs
         .filter((p) => p.search && p.token)
@@ -1028,12 +1462,34 @@ export async function generateLease(
           const key = p.token.replace(/^\{\{|\}\}$/g, "");
           return { search: p.search, value: map[key] ?? "" };
         });
-      const filled = await fillDocxDirect(buffer, replacements);
+      const pairFilled = await fillDocxDirect(buffer, replacements);
+      // Then fill any literal {{token}} placeholders that live in the template itself.
+      // Tokenized templates embed "{{rent_amount}}" / "{{security_deposit}}" directly
+      // (rather than a sample value the AI pairs key off of), so the pair path never
+      // touches them. This pass rewrites ONLY the text inside <w:t> nodes, so it fills
+      // tokens that share a run with their label + a <w:tab/> (e.g.
+      // "Monthly Rent:\t{{rent_amount}}") without the run-splicing replacer's corruption.
+      const tokenFilled = await applyDataTokens(pairFilled, map);
+      // Deterministically own the "Monthly Rent:" / "Security Deposit:" lines by label,
+      // so the deposit field gets its own amount even when the AI pairs collapsed both
+      // to one token because rent and deposit share the same sample value.
+      const filled = await applyMoneyFieldSlots(tokenFilled, map.rent_amount, map.security_deposit);
+      // Restore the "Lease Date:" agreement-date header that the generic "Date:" anchor
+      // pair clobbered with a stray signer-date tag (the date itself is already filled).
+      const datedHeader = await applyLeaseDateHeader(filled);
+      const tenantCount = 1 + (data.additionalTenants?.length ?? 0);
+      // Deterministically own the "N Lessee Print:" signature table — overrides any
+      // AI pairs that landed both names on row 1 (the AI prompt for this table is
+      // unreliable), giving each row exactly one tenant name.
+      const tenantNames = [
+        `${data.primaryTenant.firstName} ${data.primaryTenant.lastName}`.trim(),
+        ...data.additionalTenants.map((t) => `${t.firstName} ${t.lastName}`.trim()),
+      ];
+      const withLesseeNames = await applyLesseePrintNames(datedHeader, tenantNames);
       // Expand every INITIALS construct into one anchor per tenant (Tenant 1…N), driven
       // by how many tenants are on this lease. This is the sole owner of initials handling
       // and also normalizes templates uploaded before the upload-time transform existed.
-      const tenantCount = 1 + (data.additionalTenants?.length ?? 0);
-      return applyInitialsSignTags(filled, tenantCount);
+      return applyInitialsSignTags(withLesseeNames, tenantCount);
     }
   }
   // PDF templates or stale schema: rebuild from clauses
@@ -1095,7 +1551,10 @@ export async function generateTokenizedTemplate(schema: ExtractedLeaseSchema, bl
       // regex-based INITIALS → single Tenant-1 anchor pass (idempotent).
       const tokenized = await fillDocxDirect(buffer, replacements);
       const baked = await applyBakedTokens(tokenized, schema);
-      return applyInitialsSignTags(baked);
+      // Own the Monthly Rent / Security Deposit lines by label so each carries its own
+      // token, even when both showed the same sample amount in the source template.
+      const moneyOwned = await applyMoneyFieldSlots(baked, "{{rent_amount}}", "{{security_deposit}}");
+      return applyInitialsSignTags(moneyOwned);
     }
   }
   const fromClauses = await buildTemplateDocxFromClauses(schema);
