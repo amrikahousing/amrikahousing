@@ -1,19 +1,21 @@
 import { requireOrgAccess, isAccessError } from "@/lib/auth";
 import type { AiImportContext, AiParsedProperty } from "@/lib/ai-import-types";
 import { PROPERTY_TYPE_OPTIONS, normalizePropertyType } from "@/lib/property-types";
+import {
+  assertRateLimit,
+  auditLlmCall,
+  firewallMode,
+  guardedAnthropicMessages,
+  isFirewallError,
+  scanForInjection,
+  untrustedDataNotice,
+  wrapUntrusted,
+} from "@/lib/llm-firewall";
 
 type AnthropicTool = {
   name: string;
   description: string;
   input_schema: Record<string, unknown>;
-};
-
-type AnthropicContentBlock =
-  | { type: "text"; text: string }
-  | { type: "tool_use"; id: string; name: string; input: unknown };
-
-type AnthropicMessageResponse = {
-  content: AnthropicContentBlock[];
 };
 
 const supportedPropertyTypeValues = PROPERTY_TYPE_OPTIONS.map((option) => option.value);
@@ -86,6 +88,20 @@ export async function POST(request: Request) {
       return Response.json({ error: "Prompt too long (max 10,000 characters)" }, { status: 400 });
     }
 
+    assertRateLimit(`ai-import:${ctx.userId}`, { limit: 15, windowMs: 60_000 });
+
+    const injection = scanForInjection(prompt);
+    if (injection.severity !== "none") {
+      const blocked = injection.severity === "high" && firewallMode() === "enforce";
+      auditLlmCall({ route: "ai-import", userId: ctx.userId, kind: "input", field: "prompt", injection, blocked });
+      if (blocked) {
+        return Response.json(
+          { error: "This request was blocked by content safety checks." },
+          { status: 422 },
+        );
+      }
+    }
+
     const contextLines: string[] = [];
     if (context?.name) contextLines.push(`Property name: ${context.name}`);
     if (context?.type) contextLines.push(`Property type: ${context.type}`);
@@ -94,23 +110,18 @@ export async function POST(request: Request) {
     if (context?.state) contextLines.push(`State: ${context.state}`);
     if (context?.zip) contextLines.push(`Zip: ${context.zip}`);
 
+    const safePrompt = wrapUntrusted(prompt);
     const userMessage = contextLines.length
-      ? `Property context:\n${contextLines.join("\n")}\n\nUnit/property data:\n${prompt}`
-      : prompt;
+      ? `Property context:\n${contextLines.join("\n")}\n\nUnit/property data:\n${safePrompt}`
+      : safePrompt;
 
     const apiKey = process.env.ANTHROPIC_API_KEY;
     if (!apiKey) {
       return Response.json({ error: "AI import is not configured." }, { status: 500 });
     }
 
-    const response = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-        "x-api-key": apiKey,
-      },
-      body: JSON.stringify({
+    const result = await guardedAnthropicMessages(
+      {
         model: "claude-haiku-4-5",
         max_tokens: 4096,
         tools: [propertiesTool],
@@ -126,26 +137,19 @@ export async function POST(request: Request) {
           "- State must be a 2-letter US code, uppercase. Zip must be 5 digits.\n" +
           `- Property type must be one of: ${supportedPropertyTypeValues.join(", ")}.\n` +
           "- If no unit info is given for a property, omit the units array - a single unit will be auto-created.\n" +
-          "- Use empty string for required fields you cannot determine (address, city, state, zip). Do NOT guess or invent addresses.",
+          "- Use empty string for required fields you cannot determine (address, city, state, zip). Do NOT guess or invent addresses." +
+          untrustedDataNotice(),
         messages: [{ role: "user", content: userMessage }],
-      }),
-    });
+      },
+      { route: "ai-import", userId: ctx.userId },
+    );
 
-    if (!response.ok) {
-      const errText = await response.text().catch(() => "");
-      console.error("Anthropic API error:", response.status, errText);
+    if (!result.ok) {
+      console.error("Anthropic API error:", result.status, result.errorText);
       return Response.json({ error: "AI import failed. Please try again." }, { status: 502 });
     }
 
-    let message: AnthropicMessageResponse;
-    try {
-      message = (await response.json()) as AnthropicMessageResponse;
-    } catch (err) {
-      console.error("Failed to parse Anthropic response:", err);
-      return Response.json({ error: "AI import failed. Please try again." }, { status: 502 });
-    }
-
-    const toolUse = message.content.find((b) => b.type === "tool_use");
+    const toolUse = result.message.content.find((b) => b.type === "tool_use");
     if (!toolUse) {
       return Response.json({ error: "Could not parse properties from your description. Please try again with more detail." }, { status: 422 });
     }
@@ -156,6 +160,8 @@ export async function POST(request: Request) {
       return Response.json({ error: "No properties found in your description." }, { status: 422 });
     }
 
+    auditLlmCall({ route: "ai-import", userId: ctx.userId, kind: "output", note: `properties:${properties.length}` });
+
     return Response.json({
       properties: properties.map((property) => ({
         ...property,
@@ -163,6 +169,9 @@ export async function POST(request: Request) {
       })),
     });
   } catch (err) {
+    if (isFirewallError(err)) {
+      return Response.json({ error: err.clientMessage }, { status: err.status });
+    }
     console.error("Unhandled error in ai-import route:", err);
     return Response.json({ error: "AI import failed. Please try again." }, { status: 500 });
   }

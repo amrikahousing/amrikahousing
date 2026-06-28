@@ -1,5 +1,6 @@
 import { get } from "@vercel/blob";
 import { getBlobToken } from "./blob-token";
+import { auditLlmCall, guardedAnthropicMessages, untrustedDataNotice, wrapUntrusted } from "./llm-firewall";
 
 // ─── Public interfaces ────────────────────────────────────────────────────────
 
@@ -757,25 +758,15 @@ export async function extractLeaseSchema(blobUrl: string): Promise<ExtractedLeas
     throw new Error("Unsupported template format. Upload a PDF or Word (.docx) document.");
   }
 
-  const anthropicFetch = async (body: object): Promise<string> => {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "x-api-key": process.env.ANTHROPIC_API_KEY!,
-        "anthropic-version": "2023-06-01",
-        "content-type": "application/json",
-      },
-      body: JSON.stringify(body),
-    });
-    if (!res.ok) {
-      const err = await res.text();
-      throw new Error(`Anthropic API error ${res.status}: ${err}`);
+  const anthropicFetch = async (body: Record<string, unknown>): Promise<string> => {
+    const result = await guardedAnthropicMessages(body, { route: "fill-lease" });
+    if (!result.ok) {
+      throw new Error(`Anthropic API error ${result.status}: ${result.errorText}`);
     }
-    const json = await res.json() as { content: Array<{ type: string; text: string }>; stop_reason: string };
-    if (json.stop_reason === "max_tokens") {
+    if (result.message.stop_reason === "max_tokens") {
       console.warn("[fill-lease] Claude hit max_tokens limit — output may be truncated");
     }
-    return json.content.find((b) => b.type === "text")?.text ?? "";
+    return result.message.content.find((b) => b.type === "text")?.text ?? "";
   };
 
   // Phase 1: get raw text
@@ -837,11 +828,12 @@ export async function extractLeaseSchema(blobUrl: string): Promise<ExtractedLeas
   }
 
   // Phase 2: Claude finds substitution pairs only (compact output, no verbatim reproduction)
+  auditLlmCall({ route: "fill-lease/substitution", kind: "input", note: `chars:${fullText.length}` });
   const pairsRaw = await anthropicFetch({
     model: "claude-sonnet-4-6",
     max_tokens: 4000,
-    system: SUBSTITUTION_SYSTEM,
-    messages: [{ role: "user", content: `Find all blanks and placeholders in this lease template:\n\n${fullText}` }],
+    system: SUBSTITUTION_SYSTEM + untrustedDataNotice(),
+    messages: [{ role: "user", content: `Find all blanks and placeholders in this lease template:\n\n${wrapUntrusted(fullText)}` }],
   });
   console.log("[fill-lease] raw pairs response:", pairsRaw.slice(0, 300));
   const pairs = parseSubstitutionPairs(pairsRaw);
@@ -875,42 +867,6 @@ export async function extractLeaseSchema(blobUrl: string): Promise<ExtractedLeas
     pairs,
     clauses,
   };
-}
-
-// ─── Plain-text PDF builder ───────────────────────────────────────────────────
-
-async function buildPlainTextPdf(rawText: string): Promise<Buffer> {
-  const { PDFDocument, StandardFonts, rgb } = await import("pdf-lib");
-  const text = rawText.replace(/\t/g, "    ").replace(/[^\x0A\x20-\x7E\xA0-\xFF]/g, "");
-  const pdfDoc = await PDFDocument.create();
-  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
-  const boldFont = await pdfDoc.embedFont(StandardFonts.HelveticaBold);
-  const pageW = 612, pageH = 792, mx = 72, mt = 72, mb = 72;
-  const cw = pageW - 2 * mx, fs = 10, lh = 15;
-
-  const lines: string[] = [];
-  for (const src of text.split("\n")) {
-    if (!src.trim()) { lines.push(""); continue; }
-    let cur = "";
-    for (const word of src.split(" ")) {
-      const candidate = cur ? `${cur} ${word}` : word;
-      if (font.widthOfTextAtSize(candidate, fs) > cw && cur) { lines.push(cur); cur = word; }
-      else cur = candidate;
-    }
-    if (cur) lines.push(cur);
-  }
-
-  let page = pdfDoc.addPage([pageW, pageH]);
-  let y = pageH - mt;
-  for (const line of lines) {
-    if (y < mb + lh) { page = pdfDoc.addPage([pageW, pageH]); y = pageH - mt; }
-    if (line) {
-      const isBold = /^[A-Z][A-Z\s]{4,}$/.test(line.trim());
-      page.drawText(line, { x: mx, y, size: fs, font: isBold ? boldFont : font, color: rgb(0, 0, 0) });
-    }
-    y -= lh;
-  }
-  return Buffer.from(await pdfDoc.save());
 }
 
 // ─── INITIALS line removal + tag insertion ───────────────────────────────────

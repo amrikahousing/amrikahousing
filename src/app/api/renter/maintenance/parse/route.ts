@@ -2,6 +2,14 @@ import { createAnthropic } from "@ai-sdk/anthropic";
 import { generateObject } from "ai";
 import { z } from "zod";
 import { isTenantAccessError, requireTenantAccess } from "@/lib/renter-auth";
+import {
+  assertRateLimit,
+  guardUserText,
+  guardedModel,
+  isFirewallError,
+  untrustedDataNotice,
+  wrapUntrusted,
+} from "@/lib/llm-firewall";
 
 // The @ai-sdk/anthropic provider honors ANTHROPIC_BASE_URL and appends "/messages"
 // to it. A bare host (e.g. "https://api.anthropic.com" with no "/v1") would 404.
@@ -42,14 +50,21 @@ export async function POST(request: Request) {
     return Response.json({ error: "Invalid request body." }, { status: 400 });
   }
 
-  const input = (body as Record<string, unknown>).input;
-  if (!input || typeof input !== "string" || !input.trim()) {
-    return Response.json({ error: "Input is required." }, { status: 400 });
-  }
-
   try {
+    assertRateLimit(`maintenance-parse:${ctx.userId}`, { limit: 20, windowMs: 60_000 });
+
+    const input = guardUserText((body as Record<string, unknown>).input, {
+      maxChars: 1000,
+      route: "maintenance/parse",
+      userId: ctx.userId,
+      field: "input",
+    });
+
     const { object } = await generateObject({
-      model: anthropic(process.env.ANTHROPIC_MODEL ?? "claude-haiku-4-5-20251001"),
+      model: guardedModel(
+        anthropic(process.env.ANTHROPIC_MODEL ?? "claude-haiku-4-5-20251001"),
+        { route: "maintenance/parse", userId: ctx.userId },
+      ),
       schema: parseSchema,
       system:
         "You are a property management assistant. Parse tenant maintenance issue descriptions into structured data. " +
@@ -61,12 +76,16 @@ export async function POST(request: Request) {
         "Example: if they said 'something is broken', ask 'You mentioned something is broken — what exactly is the issue and where in your unit?' " +
         "Priority rules: 'emergency' = safety hazard or no heat/water; 'high' = urgent repair affecting habitability; " +
         "'normal' = standard maintenance; 'low' = cosmetic or minor. " +
-        "Write the description in first person from the tenant's perspective (e.g. 'The heating system in my bedroom is not working'). Keep titles concise.",
-      prompt: `Tenant reported: "${input.trim().slice(0, 1000)}"`,
+        "Write the description in first person from the tenant's perspective (e.g. 'The heating system in my bedroom is not working'). Keep titles concise." +
+        untrustedDataNotice(),
+      prompt: `Tenant reported:\n${wrapUntrusted(input)}`,
     });
 
     return Response.json(object);
   } catch (err) {
+    if (isFirewallError(err)) {
+      return Response.json({ error: err.clientMessage }, { status: err.status });
+    }
     console.error("[maintenance/parse]", err);
     return Response.json({ error: "Could not parse the description." }, { status: 502 });
   }
