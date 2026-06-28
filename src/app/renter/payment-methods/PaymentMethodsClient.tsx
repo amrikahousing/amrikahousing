@@ -165,7 +165,7 @@ function StripeSetupForm({
 
   return (
     <form onSubmit={handleSubmit} className="mt-5 space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
-      <PaymentElement options={{ wallets: { link: "never" } }} />
+      <PaymentElement options={{ layout: "tabs", wallets: { link: "never" } }} />
       <div className="flex flex-wrap justify-end gap-3">
         <button
           type="button"

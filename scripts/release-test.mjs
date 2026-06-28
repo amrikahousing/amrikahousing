@@ -71,6 +71,14 @@ const deploymentUrl = `https://${deployment.url}`;
 
 console.log(`Test alias https://${TEST_DEPLOYMENT_ALIAS} is managed automatically by Vercel's git-branch integration.`);
 
+console.log("\nVerifying the deployment serves every Inngest function and can sync.");
+run(process.execPath, ["scripts/verify-inngest.mjs", deploymentUrl], {
+  cwd: root,
+  env: process.env.VERCEL_AUTOMATION_BYPASS_SECRET
+    ? { VERCEL_AUTOMATION_BYPASS_SECRET: process.env.VERCEL_AUTOMATION_BYPASS_SECRET }
+    : undefined,
+});
+
 if (skipE2e) {
   console.log("\nSkipping E2E smoke tests (--skip-e2e).");
 } else {
