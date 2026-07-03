@@ -77,11 +77,22 @@ so every run (manual / deploy gate / CI) is reproducible.
    08:00 UTC (and on-demand via the Actions tab) to catch model-provider drift —
    Claude's behavior changing under us without a code change.
 
-### Required secret
+### Required secrets
 
-The weekly workflow needs `ANTHROPIC_API_KEY` as a GitHub Actions secret
-(**Settings → Secrets and variables → Actions**). The prod gate reuses the
-production Anthropic key already pulled from Vercel by the deploy script.
+The weekly workflow does **not** store the Anthropic key in GitHub — it pulls
+the production env from Vercel at run time (single source of truth), the same
+way the deploy scripts do. Set these repo secrets under **Settings → Secrets and
+variables → Actions**:
+
+| Secret | Value |
+|--------|-------|
+| `VERCEL_TOKEN` | a Vercel access token — create at Vercel → Account Settings → Tokens (scope it to the `amrikahousing` team) |
+| `VERCEL_ORG_ID` | `team_SHpXCTj6qfT42aPxDUthT1yY` (from `.vercel/project.json` → `orgId`) |
+| `VERCEL_PROJECT_ID` | `prj_hdUfbG36MTUtcftGcn3bSazVX8Ei` (from `.vercel/project.json` → `projectId`) |
+
+`VERCEL_ORG_ID` / `VERCEL_PROJECT_ID` are identifiers, not credentials — only
+`VERCEL_TOKEN` is sensitive. The prod-deploy gate needs none of these; it reuses
+the Vercel env the deploy script already pulls locally.
 
 ## Adding coverage
 

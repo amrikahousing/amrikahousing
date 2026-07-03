@@ -1,15 +1,22 @@
 name: LLM injection evals
 
-# Runs the promptfoo injection suite (promptfoo/promptfooconfig.yaml) against
-# the real Anthropic model to catch regressions in the LLM firewall
+# Runs the promptfoo injection suite (promptfoo/configs/*.yaml) against the real
+# Anthropic model to catch regressions in the LLM firewall
 # (src/lib/llm-firewall.ts) or the AI-route prompts.
 #
 # Also gated on production promotion via scripts/promote-prod.mjs (npm run
 # eval:injection). This workflow adds a weekly run to catch model-provider
 # drift — i.e. Claude's behavior changing under us without any code change.
 #
-# Requires the repo secret ANTHROPIC_API_KEY (Settings → Secrets and variables
-# → Actions). Cost is a few cents per run.
+# The Anthropic key is NOT stored as a GitHub secret here — it is pulled from
+# Vercel's production env at run time (single source of truth), mirroring what
+# the deploy scripts do locally. That requires these repo secrets (Settings →
+# Secrets and variables → Actions):
+#   - VERCEL_TOKEN        a Vercel access token (Vercel → Account → Tokens)
+#   - VERCEL_ORG_ID       from .vercel/project.json ("orgId")
+#   - VERCEL_PROJECT_ID   from .vercel/project.json ("projectId")
+#
+# Cost is a few cents per run.
 
 on:
   schedule:
@@ -26,7 +33,21 @@ jobs:
         with:
           node-version: "22"
 
-      - name: Run injection evals
+      # Pull the production Anthropic key from Vercel and run the evals in the
+      # same step, so the secret stays in this step's shell and is never written
+      # to $GITHUB_ENV or persisted to later steps.
+      - name: Pull production env from Vercel and run injection evals
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: npm run eval:injection
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          set -euo pipefail
+          npx --yes vercel@latest pull --yes --environment=production --token="$VERCEL_TOKEN"
+          ENV_FILE=".vercel/.env.production.local"
+          test -f "$ENV_FILE" || { echo "Vercel env file $ENV_FILE not found"; exit 1; }
+          ANTHROPIC_API_KEY="$(grep -E '^ANTHROPIC_API_KEY=' "$ENV_FILE" | head -1 | cut -d= -f2- | sed 's/^"//; s/"$//')"
+          test -n "$ANTHROPIC_API_KEY" || { echo "ANTHROPIC_API_KEY not found in pulled Vercel env"; exit 1; }
+          echo "::add-mask::$ANTHROPIC_API_KEY"
+          export ANTHROPIC_API_KEY
+          npm run eval:injection
