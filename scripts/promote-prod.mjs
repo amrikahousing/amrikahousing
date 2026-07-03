@@ -102,6 +102,8 @@ const mainProductionEnv = pullVercelEnv({ cwd: mainWorktree, environment: "produ
 try {
   assertDatabaseUrlHost(mainProductionEnv.values, NEON_PRODUCTION_HOST_PREFIX, "Production");
   run("npm", ["run", "build"], { cwd: mainWorktree, env: mainProductionEnv.values, hideLocalEnvFiles: true });
+  console.log("Running LLM injection evals against production Anthropic config.");
+  run("npm", ["run", "eval:injection"], { cwd: mainWorktree, env: mainProductionEnv.values, hideLocalEnvFiles: true });
   assertCleanTree(mainWorktree);
   syncPrismaSchema({ cwd: mainWorktree, env: mainProductionEnv.values, label: "Neon production" });
 } finally {

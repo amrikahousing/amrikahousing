@@ -16,7 +16,8 @@
     "hotfix": "node scripts/hotfix-prod.mjs",
     "start": "next start",
     "lint": "eslint",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "eval:injection": "node promptfoo/run-all.mjs"
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.71",

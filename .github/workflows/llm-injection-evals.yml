@@ -1,0 +1,32 @@
+name: LLM injection evals
+
+# Runs the promptfoo injection suite (promptfoo/promptfooconfig.yaml) against
+# the real Anthropic model to catch regressions in the LLM firewall
+# (src/lib/llm-firewall.ts) or the AI-route prompts.
+#
+# Also gated on production promotion via scripts/promote-prod.mjs (npm run
+# eval:injection). This workflow adds a weekly run to catch model-provider
+# drift — i.e. Claude's behavior changing under us without any code change.
+#
+# Requires the repo secret ANTHROPIC_API_KEY (Settings → Secrets and variables
+# → Actions). Cost is a few cents per run.
+
+on:
+  schedule:
+    - cron: "0 8 * * 1" # Mondays 08:00 UTC
+  workflow_dispatch: {} # allow manual runs from the Actions tab
+
+jobs:
+  injection-evals:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run injection evals
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: npm run eval:injection
