@@ -26,6 +26,12 @@ on:
 jobs:
   injection-evals:
     runs-on: ubuntu-latest
+    # VERCEL_TOKEN is stored as an Environment secret in the "Production"
+    # environment, so the job must declare that environment to read it.
+    # VERCEL_ORG_ID / VERCEL_PROJECT_ID are repository secrets (available to all
+    # jobs). If the Production environment ever gets protection rules (required
+    # reviewers / wait timer), they will gate this job too.
+    environment: Production
     steps:
       - uses: actions/checkout@v4
 

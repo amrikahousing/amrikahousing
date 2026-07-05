@@ -84,15 +84,17 @@ the production env from Vercel at run time (single source of truth), the same
 way the deploy scripts do. Set these repo secrets under **Settings → Secrets and
 variables → Actions**:
 
-| Secret | Value |
-|--------|-------|
-| `VERCEL_TOKEN` | a Vercel access token — create at Vercel → Account Settings → Tokens (scope it to the `amrikahousing` team) |
-| `VERCEL_ORG_ID` | `team_SHpXCTj6qfT42aPxDUthT1yY` (from `.vercel/project.json` → `orgId`) |
-| `VERCEL_PROJECT_ID` | `prj_hdUfbG36MTUtcftGcn3bSazVX8Ei` (from `.vercel/project.json` → `projectId`) |
+| Secret | Scope | Value |
+|--------|-------|-------|
+| `VERCEL_TOKEN` | **Environment secret** in the `Production` environment | a Vercel access token — Vercel → Account Settings → Tokens (scope it to the `amrikahousing` team) |
+| `VERCEL_ORG_ID` | Repository secret | `team_SHpXCTj6qfT42aPxDUthT1yY` (from `.vercel/project.json` → `orgId`) |
+| `VERCEL_PROJECT_ID` | Repository secret | `prj_hdUfbG36MTUtcftGcn3bSazVX8Ei` (from `.vercel/project.json` → `projectId`) |
 
-`VERCEL_ORG_ID` / `VERCEL_PROJECT_ID` are identifiers, not credentials — only
-`VERCEL_TOKEN` is sensitive. The prod-deploy gate needs none of these; it reuses
-the Vercel env the deploy script already pulls locally.
+Because `VERCEL_TOKEN` lives in the `Production` environment, the workflow job
+declares `environment: Production` to read it (repo secrets are visible to that
+job too). `VERCEL_ORG_ID` / `VERCEL_PROJECT_ID` are identifiers, not credentials
+— only `VERCEL_TOKEN` is sensitive. The prod-deploy gate needs none of these; it
+reuses the Vercel env the deploy script already pulls locally.
 
 ## Adding coverage
 
