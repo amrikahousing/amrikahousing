@@ -931,6 +931,169 @@ async function buildTemplateDocxFromClauses(schema: ExtractedLeaseSchema): Promi
   return Buffer.from(zip.generate({ type: "nodebuffer" }));
 }
 
+// ─── Corrected template rebuild (AI clause auto-fix) ────────────────────────────
+// Builds a clean tokenized TEMPLATE .docx from a corrected clause set. Clause
+// bodies are emitted verbatim so their {{tokens}} survive; a signature block with
+// DocuSeal text-tag anchors is appended so the template stays sign-ready. Used by
+// the workflow clause-fix route (lease-templates/fix) to replace the in-progress
+// template file with the fixed version (preview + download + save reflect the fixes).
+export async function buildCorrectedTemplateDocx(clauses: ExtractedLeaseClause[]): Promise<Buffer> {
+  const paras: Para[] = [];
+  paras.push({ text: "RESIDENTIAL LEASE AGREEMENT", bold: true, center: true, sizePt: 16, spacePt: 14 });
+  paras.push({ text: "", spacePt: 4 });
+
+  const sorted = [...clauses].sort((a, b) => a.order - b.order);
+  for (let i = 0; i < sorted.length; i++) {
+    const clause = sorted[i];
+    paras.push({ text: `${i + 1}. ${clause.title.toUpperCase()}`, bold: true, sizePt: 10, spacePt: 4 });
+    for (const line of (clause.body ?? "").split("\n")) paras.push({ text: line, spacePt: 3 });
+    paras.push({ text: "", spacePt: 8 });
+  }
+
+  paras.push({ text: "SIGNATURES", bold: true, sizePt: 11, spacePt: 6 });
+  paras.push({ text: "By signing below, the parties agree to the terms of this Lease Agreement.", spacePt: 14 });
+  // Roles must match the DocuSeal submitter roles used during onboarding:
+  // "Tenant 1", "Tenant 2", "Manager".
+  for (const role of ["Tenant 1", "Tenant 2"]) {
+    paras.push({ text: "TENANT", bold: true, spacePt: 4 });
+    paras.push({ text: `Signature: {{Sign;type=signature;role=${role}}}    Date: {{Date;type=date;role=${role}}}`, spacePt: 20 });
+  }
+  paras.push({ text: "LANDLORD / PROPERTY MANAGER", bold: true, spacePt: 4 });
+  paras.push({ text: "Signature: {{Sign;type=signature;role=Manager}}    Date: {{Date;type=date;role=Manager}}", spacePt: 20 });
+
+  const PizZip = (await import("pizzip")).default;
+  const zip = new PizZip();
+  zip.file("[Content_Types].xml", CONTENT_TYPES_XML);
+  zip.file("_rels/.rels", ROOT_RELS_XML);
+  zip.file("word/document.xml", buildDocumentXml(paras));
+  zip.file("word/_rels/document.xml.rels", DOCUMENT_RELS_XML);
+  return Buffer.from(zip.generate({ type: "nodebuffer" }));
+}
+
+// ─── In-place DOCX clause rewrite (format-preserving) ───────────────────────────
+// Edits the ORIGINAL uploaded .docx: for each rewritten clause, replaces only the
+// body paragraphs that sit between its heading and the next heading, cloning the
+// first body paragraph's pPr/rPr so fonts/indentation carry over. Everything else
+// (headings, tables, headers/footers, untouched clauses, section formatting) is
+// left byte-for-byte identical. New clauses are appended before the final section.
+//
+// Headings are detected with the SAME HEADING_RE used during extraction, so the
+// clause titles here match the ones the user reviewed. A contiguity guard skips any
+// clause whose body paragraphs are interrupted by a table (so we never delete one).
+export async function rewriteClausesInDocx(
+  originalDocxBuffer: Buffer,
+  rewrites: Array<{ title: string; body: string }>,
+  additions: Array<{ title: string; body: string }>,
+): Promise<{ buffer: Buffer; replacedTitles: string[]; unmatchedTitles: string[] }> {
+  const PizZip = (await import("pizzip")).default;
+  const zip = new PizZip(originalDocxBuffer);
+  const docFile = zip.file("word/document.xml");
+  if (!docFile) {
+    return { buffer: originalDocxBuffer, replacedTitles: [], unmatchedTitles: rewrites.map((r) => r.title) };
+  }
+  let xml = docFile.asText();
+
+  const normTitle = (t: string) => t.trim().toUpperCase().replace(/\s+/g, " ").replace(/[.:]+$/, "");
+  const paraVisibleText = (para: string) =>
+    [...para.matchAll(/<w:t\b[^>]*>([\s\S]*?)<\/w:t>/g)].map((m) => m[1]).join("");
+
+  // Index every <w:p> with its character span. Self-closing empty paragraphs
+  // (<w:p/> / <w:p w:rsidR="..."/>) must match as their own tokens — otherwise the
+  // non-greedy [\s\S]*? runs from the <w:p/> to the NEXT paragraph's </w:p>, and the
+  // span can swallow intervening XML (e.g. a <w:tbl> opener), corrupting it on replace.
+  const paras: { xml: string; start: number; end: number; text: string }[] = [];
+  const pRe = /<w:p(?:\s[^>]*)?\/>|<w:p\b[\s\S]*?<\/w:p>/g;
+  let pm: RegExpExecArray | null;
+  while ((pm = pRe.exec(xml)) !== null) {
+    paras.push({ xml: pm[0], start: pm.index, end: pm.index + pm[0].length, text: paraVisibleText(pm[0]) });
+  }
+
+  // Heading paragraphs → clause ranges.
+  const headings: Array<{ idx: number; title: string }> = [];
+  paras.forEach((p, i) => {
+    const m = HEADING_RE.exec(p.text);
+    if (m) headings.push({ idx: i, title: normTitle(m[1]) });
+  });
+  const clauseRange = new Map<string, { bodyStartIdx: number; bodyEndIdx: number }>();
+  for (let h = 0; h < headings.length; h++) {
+    const nextIdx = h + 1 < headings.length ? headings[h + 1].idx : paras.length;
+    clauseRange.set(headings[h].title, { bodyStartIdx: headings[h].idx + 1, bodyEndIdx: nextIdx - 1 });
+  }
+
+  const cloneBodyParagraphs = (body: string, templatePara: string) => {
+    const pPr = templatePara.match(/<w:pPr>[\s\S]*?<\/w:pPr>/)?.[0] ?? "";
+    const rPr = templatePara.match(/<w:r\b[^>]*>\s*(<w:rPr>[\s\S]*?<\/w:rPr>)/)?.[1] ?? "";
+    return body
+      .split("\n")
+      .map((line) => {
+        const run = line.trim() ? `<w:r>${rPr}<w:t xml:space="preserve">${xmlEscape(line)}</w:t></w:r>` : "";
+        return `<w:p>${pPr}${run}</w:p>`;
+      })
+      .join("");
+  };
+
+  type Edit = { start: number; end: number; replacement: string };
+  const edits: Edit[] = [];
+  const replacedTitles: string[] = [];
+  const unmatchedTitles: string[] = [];
+
+  for (const rw of rewrites) {
+    const range = clauseRange.get(normTitle(rw.title));
+    if (!range || range.bodyStartIdx > range.bodyEndIdx || range.bodyStartIdx >= paras.length) {
+      unmatchedTitles.push(rw.title);
+      continue;
+    }
+    // Only replace when the body paragraphs form one uninterrupted run of <w:p> —
+    // otherwise a table (or other block) sits between them and we'd delete it.
+    let contiguous = true;
+    for (let i = range.bodyStartIdx; i < range.bodyEndIdx; i++) {
+      if (paras[i].end !== paras[i + 1].start) {
+        contiguous = false;
+        break;
+      }
+    }
+    if (!contiguous) {
+      unmatchedTitles.push(rw.title);
+      continue;
+    }
+    const first = paras[range.bodyStartIdx];
+    const last = paras[range.bodyEndIdx];
+    edits.push({ start: first.start, end: last.end, replacement: cloneBodyParagraphs(rw.body, first.xml) });
+    replacedTitles.push(rw.title);
+  }
+
+  // Append new clauses right before the final (body-level) section properties.
+  if (additions.length > 0) {
+    const addXml = additions
+      .map((a) => {
+        const heading = `<w:p><w:r><w:rPr><w:b/></w:rPr><w:t xml:space="preserve">${xmlEscape(a.title)}</w:t></w:r></w:p>`;
+        const body = a.body
+          .split("\n")
+          .map((line) =>
+            line.trim() ? `<w:p><w:r><w:t xml:space="preserve">${xmlEscape(line)}</w:t></w:r></w:p>` : "<w:p/>",
+          )
+          .join("");
+        return heading + body;
+      })
+      .join("");
+    const sectAll = [...xml.matchAll(/<w:sectPr\b[\s\S]*?<\/w:sectPr>/g)];
+    const lastSect = sectAll[sectAll.length - 1];
+    if (lastSect) {
+      edits.push({ start: lastSect.index!, end: lastSect.index!, replacement: addXml });
+    } else {
+      const bodyClose = xml.lastIndexOf("</w:body>");
+      if (bodyClose >= 0) edits.push({ start: bodyClose, end: bodyClose, replacement: addXml });
+    }
+  }
+
+  // Apply high-index edits first so earlier spans keep their offsets.
+  edits.sort((a, b) => b.start - a.start);
+  for (const e of edits) xml = xml.slice(0, e.start) + e.replacement + xml.slice(e.end);
+
+  zip.file("word/document.xml", xml);
+  return { buffer: Buffer.from(zip.generate({ type: "nodebuffer" })), replacedTitles, unmatchedTitles };
+}
+
 // ─── Error helper ─────────────────────────────────────────────────────────────
 
 export function extractErrorMessage(err: unknown): string {

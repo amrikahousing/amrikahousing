@@ -1030,6 +1030,15 @@ function DragDropTagPreview({ base64, loading }: { base64: string | null; loadin
   );
 }
 
+// Which review findings the user chose to auto-fix, resolved from the checkbox
+// selection into stable identifiers the rewrite API filters on.
+type FixSelection = {
+  clauseTitles: string[];
+  missingConcepts: string[];
+  stateLawAreas: string[];
+  readabilitySections: string[];
+};
+
 function LeaseCreationWorkflow({
   property,
   properties,
@@ -1050,6 +1059,7 @@ function LeaseCreationWorkflow({
   onSaveProfile,
   onTermsChange,
   onAcceptSuggestions,
+  onApplyFixes,
   onGeneratePreview,
   onGeneratePreviewSilent,
   onSaveTemplate,
@@ -1076,6 +1086,7 @@ function LeaseCreationWorkflow({
   onSaveProfile: () => void;
   onTermsChange: (terms: WorkflowTerms) => void;
   onAcceptSuggestions: (accepted: boolean) => void;
+  onApplyFixes: (selection: FixSelection) => Promise<boolean>;
   onGeneratePreview: () => void;
   onGeneratePreviewSilent: () => void;
   onSaveTemplate: () => void;
@@ -1711,7 +1722,7 @@ function LeaseCreationWorkflow({
                     className={`flex items-center gap-1.5 rounded-full px-2.5 py-0.5 text-xs font-medium transition-colors ${allLandlord ? "bg-emerald-100 text-emerald-700 hover:bg-emerald-200" : someLandlord ? "bg-slate-100 text-slate-500 hover:bg-slate-200" : "bg-slate-100 text-slate-500 hover:bg-slate-200"}`}
                   >
                     <span className={`h-1.5 w-1.5 rounded-full ${allLandlord ? "bg-emerald-500" : someLandlord ? "bg-amber-400" : "bg-slate-300"}`} />
-                    {allLandlord ? "All landlord" : someLandlord ? "Select all" : "Select all"}
+                    {allLandlord ? "Select all" : someLandlord ? "Select all" : "Select all"}
                   </button>
                 </div>
                 <div className="grid gap-2 sm:grid-cols-2">
@@ -1773,6 +1784,33 @@ function LeaseCreationWorkflow({
         return "border-l-slate-300";
       };
 
+      // Tab-wise "Select all / Deselect all" bar. Toggles every checkbox key
+      // (`${prefix}${i}`) for the active tab in one click.
+      const selectAllBar = (prefix: string, count: number) => {
+        if (count === 0) return null;
+        const keys = Array.from({ length: count }, (_, i) => `${prefix}${i}`);
+        const selected = keys.filter((k) => selectedFixes.has(k)).length;
+        const allOn = selected === count;
+        return (
+          <div className="mb-1.5 flex items-center justify-between px-1">
+            <span className="text-xs text-slate-400">{selected} of {count} selected</span>
+            <button
+              type="button"
+              onClick={() =>
+                setSelectedFixes((prev) => {
+                  const next = new Set(prev);
+                  keys.forEach((k) => (allOn ? next.delete(k) : next.add(k)));
+                  return next;
+                })
+              }
+              className="text-xs font-semibold text-emerald-700 hover:text-emerald-800"
+            >
+              {allOn ? "Deselect all" : "Select all"}
+            </button>
+          </div>
+        );
+      };
+
       const tabs = [
         { id: "clauses" as const, label: "Clauses", count: reviewClauses.length, color: "text-slate-700 border-slate-700" },
         { id: "missing" as const, label: "Missing", count: missingConcepts.length, color: "text-amber-700 border-amber-500" },
@@ -1829,7 +1867,9 @@ function LeaseCreationWorkflow({
               sortedClauses.length === 0 ? (
                 <p className="ui-empty-state p-4 text-sm">Clauses will appear after upload and extraction.</p>
               ) : (
-                sortedClauses.map((clause, i) => {
+                <>
+                {selectAllBar("c:", sortedClauses.length)}
+                {sortedClauses.map((clause, i) => {
                   const key = `c:${i}`;
                   const isChecked = selectedFixes.has(key);
                   const isExpanded = expandedClauses.has(clause.title);
@@ -1880,7 +1920,8 @@ function LeaseCreationWorkflow({
                       )}
                     </div>
                   );
-                })
+                })}
+                </>
               )
             )}
 
@@ -1888,7 +1929,9 @@ function LeaseCreationWorkflow({
               missingConcepts.length === 0 ? (
                 <p className="ui-empty-state p-4 text-sm">No missing provisions identified.</p>
               ) : (
-                missingConcepts.map((item, i) => {
+                <>
+                {selectAllBar("m:", missingConcepts.length)}
+                {missingConcepts.map((item, i) => {
                   const key = `m:${i}`;
                   const isChecked = selectedFixes.has(key);
                   return (
@@ -1916,7 +1959,8 @@ function LeaseCreationWorkflow({
                       </div>
                     </label>
                   );
-                })
+                })}
+                </>
               )
             )}
 
@@ -1924,7 +1968,9 @@ function LeaseCreationWorkflow({
               allNotes.length === 0 ? (
                 <p className="ui-empty-state p-4 text-sm">Upload a lease to get state-law suggestions for {property.state}.</p>
               ) : (
-                allNotes.map((note, index) => {
+                <>
+                {selectAllBar("s:", allNotes.length)}
+                {allNotes.map((note, index) => {
                   const key = `s:${index}`;
                   const isChecked = selectedFixes.has(key);
                   return (
@@ -1955,7 +2001,8 @@ function LeaseCreationWorkflow({
                       </div>
                     </label>
                   );
-                })
+                })}
+                </>
               )
             )}
 
@@ -1963,7 +2010,9 @@ function LeaseCreationWorkflow({
               readabilitySuggestions.length === 0 ? (
                 <p className="ui-empty-state p-4 text-sm">No readability suggestions.</p>
               ) : (
-                readabilitySuggestions.map((item, i) => {
+                <>
+                {selectAllBar("r:", readabilitySuggestions.length)}
+                {readabilitySuggestions.map((item, i) => {
                   const key = `r:${i}`;
                   const isChecked = selectedFixes.has(key);
                   return (
@@ -1989,7 +2038,8 @@ function LeaseCreationWorkflow({
                       </div>
                     </label>
                   );
-                })
+                })}
+                </>
               )
             )}
           </div>
@@ -1998,12 +2048,37 @@ function LeaseCreationWorkflow({
             <BackButton />
             <button
               type="button"
-              onClick={() => { onAcceptSuggestions(selectedFixes.size > 0); goToNextSection(); }}
-              className="ui-btn ui-btn-primary h-10 px-4 text-sm"
+              disabled={busy === "workflow-fix"}
+              onClick={async () => {
+                if (selectedFixes.size === 0) {
+                  onAcceptSuggestions(false);
+                  goToNextSection();
+                  return;
+                }
+                const keys = [...selectedFixes];
+                const collect = (prefix: string, pick: (i: number) => string | undefined) =>
+                  keys
+                    .filter((k) => k.startsWith(prefix))
+                    .map((k) => pick(Number(k.slice(prefix.length))))
+                    .filter((v): v is string => Boolean(v && v.trim()));
+                const selection: FixSelection = {
+                  clauseTitles: collect("c:", (i) => sortedClauses[i]?.title),
+                  missingConcepts: collect("m:", (i) => missingConcepts[i]?.concept),
+                  stateLawAreas: collect("s:", (i) => allNotes[i]?.area),
+                  readabilitySections: collect("r:", (i) => readabilitySuggestions[i]?.section),
+                };
+                // Rewrites the selected clauses and rebuilds the template file before
+                // advancing; only continue once the fixed template is ready.
+                const ok = await onApplyFixes(selection);
+                if (ok) goToNextSection();
+              }}
+              className="ui-btn ui-btn-primary h-10 px-4 text-sm disabled:opacity-60"
             >
-              {selectedFixes.size > 0
-                ? `Apply ${selectedFixes.size} fix${selectedFixes.size !== 1 ? "es" : ""} & continue`
-                : "Skip & continue"}
+              {busy === "workflow-fix"
+                ? "Updating template…"
+                : selectedFixes.size > 0
+                  ? `Apply ${selectedFixes.size} fix${selectedFixes.size !== 1 ? "es" : ""} & continue`
+                  : "Skip & continue"}
             </button>
           </div>
         </div>
@@ -2483,6 +2558,9 @@ export function LeaseWorkspaceClient({
         name: data.name,
         review: data.review,
       });
+      // A fresh upload must re-earn clause-review acceptance — otherwise a stale
+      // `true` from a previous run unlocks Save without Apply-fixes ever running.
+      setAcceptedSuggestions(false);
       const extractedLandlord = data.review?.extractedTerms?.landlordName?.trim();
       const extractedSignatory = data.review?.extractedTerms?.landlordSignatory?.trim();
       const extractedManager = data.review?.leaseProfileSuggestions?.propertyManagerName?.trim();
@@ -2712,6 +2790,89 @@ export function LeaseWorkspaceClient({
     }
   }
 
+  // Clause-review step: rewrite the selected clauses and rebuild the template file
+  // (mid-workflow, before save). The corrected .docx replaces the in-progress
+  // upload so the preview, download, and final save all use the fixed template.
+  async function applyWorkflowFixes(selection: FixSelection): Promise<boolean> {
+    if (!selectedProperty || !pendingWorkflowUpload) {
+      toast.error("Upload a template first — fixes can only be applied to a fresh upload.", { title: "Leases" });
+      return false;
+    }
+    const count =
+      selection.clauseTitles.length +
+      selection.missingConcepts.length +
+      selection.stateLawAreas.length +
+      selection.readabilitySections.length;
+    console.log("[lease-fix] applying selection:", JSON.stringify(selection));
+    if (count === 0) {
+      // The button only calls this when checkboxes are ticked — resolving to zero
+      // findings means the selection didn't map to the review data. Fail loudly
+      // instead of silently passing the step with nothing fixed.
+      toast.error("Couldn't match the selected items to the review findings. Try re-selecting them.", { title: "Leases" });
+      return false;
+    }
+    setBusy("workflow-fix");
+    try {
+      const res = await fetch(`/api/properties/${selectedProperty.id}/lease-templates/fix`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          blobUrl: pendingWorkflowUpload.blobUrl,
+          fileName: pendingWorkflowUpload.fileName,
+          review: pendingWorkflowUpload.review,
+          selections: selection,
+        }),
+      });
+      const data = (await res.json().catch(() => ({}))) as {
+        error?: string;
+        blobUrl?: string;
+        fileBase64?: string;
+        contentType?: string;
+        fileName?: string;
+        review?: LeaseReview;
+        droppedTokenTitles?: string[];
+        unmatchedTitles?: string[];
+        changedCount?: number;
+      };
+      if (!res.ok || !data.blobUrl) throw new Error(data.error ?? "Could not fix clauses.");
+      setPendingWorkflowUpload((prev) =>
+        prev
+          ? {
+              ...prev,
+              blobUrl: data.blobUrl!,
+              contentType: data.contentType ?? prev.contentType,
+              fileName: data.fileName ?? prev.fileName,
+              previewFileBase64: data.fileBase64 ?? prev.previewFileBase64,
+              previewError: null,
+              review: data.review ?? prev.review,
+            }
+          : prev,
+      );
+      setAcceptedSuggestions(true);
+      const dropped = data.droppedTokenTitles?.length ?? 0;
+      const unmatched = data.unmatchedTitles?.length ?? 0;
+      if (unmatched > 0) {
+        toast.error(
+          `Template updated, but ${unmatched} clause${unmatched !== 1 ? "s" : ""} couldn't be replaced in place (unusual layout). Edit ${unmatched !== 1 ? "them" : "it"} manually: ${data.unmatchedTitles!.join(", ")}.`,
+          { title: "Leases" },
+        );
+      } else {
+        toast.success(
+          dropped > 0
+            ? `Template updated. ${dropped} clause${dropped !== 1 ? "s" : ""} kept the original wording to protect data fields.`
+            : "Template updated with the fixed clauses — formatting preserved.",
+          { title: "Leases" },
+        );
+      }
+      return true;
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not fix clauses.", { title: "Leases" });
+      return false;
+    } finally {
+      setBusy(null);
+    }
+  }
+
   async function saveWorkflowTemplate() {
     if (!selectedProperty || !pendingWorkflowUpload) return;
     setBusy("workflow-save");
@@ -2853,6 +3014,7 @@ export function LeaseWorkspaceClient({
               onSaveProfile={() => void saveLeaseProfile()}
               onTermsChange={setWorkflowTerms}
 	              onAcceptSuggestions={setAcceptedSuggestions}
+	              onApplyFixes={applyWorkflowFixes}
 	              onGeneratePreview={handleGeneratePreview}
 	              onGeneratePreviewSilent={handleGeneratePreviewSilent}
 	              onSaveTemplate={() => void saveWorkflowTemplate()}

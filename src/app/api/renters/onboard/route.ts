@@ -142,6 +142,9 @@ export async function POST(request: NextRequest) {
           state: true,
           zip: true,
           property_manager_email: true,
+          landlord_name: true,
+          landlord_signatory: true,
+          property_manager_name: true,
           organizations: {
             select: { name: true, email: true, phone: true },
           },
@@ -443,6 +446,7 @@ export async function POST(request: NextRequest) {
           data: { lease_schema: schema as object, updated_at: new Date() },
         });
       }
+      const managerName = fullName(manager?.first_name ?? "", manager?.last_name ?? "") || undefined;
       const leaseData = {
         primaryTenant: { firstName, lastName, email: normalizedEmail },
         additionalTenants: parsedAdditional.map((t) => ({
@@ -457,6 +461,25 @@ export async function POST(request: NextRequest) {
         endDate: endDate ?? "",
         rentAmount: String(parsedRent),
         securityDeposit: parsedDeposit ? String(parsedDeposit) : undefined,
+        // Landlord / manager / clause values must mirror the /leases/fill-template
+        // preview path — otherwise buildReplacementMap fills these tokens with "" and
+        // the document sent to DocuSeal drops the landlord name, signatory, manager,
+        // late fees, pet fee, etc. even though the preview looks correct.
+        organizationName: prop.landlord_name || unit.properties.organizations.name || undefined,
+        landlordSignatory: prop.landlord_signatory || schema.landlordSignatory,
+        propertyManagerName: prop.property_manager_name || managerName,
+        propertyManagerEmail: managerEmail ?? undefined,
+        propertyManagerPhone: unit.properties.organizations.phone ?? undefined,
+        earlyTerminationFee: schema.earlyTerminationFee,
+        earlyTerminationMonths: schema.earlyTerminationMonths,
+        guestStayLimit: schema.guestStayLimit,
+        condemnationNoticeDays: schema.condemnationNoticeDays,
+        includedAppliances: schema.includedAppliances,
+        lateFeeAmount: schema.lateFeeAmount,
+        lateFeeGraceDays: schema.lateFeeGraceDays,
+        lateFeePct: schema.lateFeePct,
+        petFeeAmount: schema.petFeeAmount,
+        tenantPaidUtilities: schema.tenantPaidUtilities,
       };
       const docxBuffer = await generateLease(schema, leaseData, activeTemplate!.blob_url);
 
