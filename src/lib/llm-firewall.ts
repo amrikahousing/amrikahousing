@@ -22,7 +22,11 @@
  * when you need cross-instance accuracy.
  */
 
-import { wrapLanguageModel, type LanguageModel, type LanguageModelMiddleware } from "ai";
+import { wrapLanguageModel, type LanguageModelMiddleware } from "ai";
+
+// Derived from wrapLanguageModel so these stay in lockstep with the ai SDK
+// (it wants a LanguageModelV3, which `ai` does not re-export by name).
+type GuardableModel = Parameters<typeof wrapLanguageModel>[0]["model"];
 
 export type FirewallMode = "enforce" | "monitor";
 
@@ -258,10 +262,11 @@ export function auditLlmCall(entry: AuditEntry): void {
  *   model: guardedModel(anthropic(modelId), { route: "...", userId })
  */
 export function guardedModel(
-  model: LanguageModel,
+  model: GuardableModel,
   meta: { route: string; userId?: string },
-): LanguageModel {
+): GuardableModel {
   const middleware: LanguageModelMiddleware = {
+    specificationVersion: "v3",
     wrapGenerate: async ({ doGenerate }) => {
       const result = await doGenerate();
       auditLlmCall({
