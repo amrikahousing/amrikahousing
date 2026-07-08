@@ -63,5 +63,10 @@
     "tailwindcss": "^4",
     "typescript": "^5",
     "vercel": "^54.9.1"
+  },
+  "overrides": {
+    "@vercel/blob": {
+      "undici": "6.27.0"
+    }
   }
 }
