@@ -77,24 +77,18 @@ so every run (manual / deploy gate / CI) is reproducible.
    08:00 UTC (and on-demand via the Actions tab) to catch model-provider drift —
    Claude's behavior changing under us without a code change.
 
-### Required secrets
+### Required secret
 
-The weekly workflow does **not** store the Anthropic key in GitHub — it pulls
-the production env from Vercel at run time (single source of truth), the same
-way the deploy scripts do. Set these repo secrets under **Settings → Secrets and
-variables → Actions**:
+The weekly workflow needs **`ANTHROPIC_API_KEY`** stored as a GitHub secret —
+add it as an **Environment secret** in the `Production` environment (the job
+declares `environment: Production`), or as a repository secret.
 
-| Secret | Scope | Value |
-|--------|-------|-------|
-| `VERCEL_TOKEN` | **Environment secret** in the `Production` environment | a Vercel access token — Vercel → Account Settings → Tokens (scope it to the `amrikahousing` team) |
-| `VERCEL_ORG_ID` | Repository secret | `team_SHpXCTj6qfT42aPxDUthT1yY` (from `.vercel/project.json` → `orgId`) |
-| `VERCEL_PROJECT_ID` | Repository secret | `prj_hdUfbG36MTUtcftGcn3bSazVX8Ei` (from `.vercel/project.json` → `projectId`) |
-
-Because `VERCEL_TOKEN` lives in the `Production` environment, the workflow job
-declares `environment: Production` to read it (repo secrets are visible to that
-job too). `VERCEL_ORG_ID` / `VERCEL_PROJECT_ID` are identifiers, not credentials
-— only `VERCEL_TOKEN` is sensitive. The prod-deploy gate needs none of these; it
-reuses the Vercel env the deploy script already pulls locally.
+**Why not pull it from Vercel?** `ANTHROPIC_API_KEY` is a *sensitive* variable
+in Vercel, and Vercel never exposes sensitive values outside its own
+deployments — `vercel env pull` and `vercel env run` both return it empty. For
+the same reason, the prod-deploy gate (`scripts/promote-prod.mjs`) falls back to
+the `ANTHROPIC_API_KEY` in the developer's local `.env.local` when the pulled
+production env has it blank.
 
 ## Adding coverage
 

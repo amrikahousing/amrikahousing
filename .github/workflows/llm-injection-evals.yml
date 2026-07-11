@@ -8,13 +8,11 @@ name: LLM injection evals
 # eval:injection). This workflow adds a weekly run to catch model-provider
 # drift — i.e. Claude's behavior changing under us without any code change.
 #
-# The Anthropic key is NOT stored as a GitHub secret here — it is pulled from
-# Vercel's production env at run time (single source of truth), mirroring what
-# the deploy scripts do locally. That requires these repo secrets (Settings →
-# Secrets and variables → Actions):
-#   - VERCEL_TOKEN        a Vercel access token (Vercel → Account → Tokens)
-#   - VERCEL_ORG_ID       from .vercel/project.json ("orgId")
-#   - VERCEL_PROJECT_ID   from .vercel/project.json ("projectId")
+# NOTE: ANTHROPIC_API_KEY must be stored directly as a secret for this workflow
+# (Environment secret in "Production", or a repo secret). Pulling it from Vercel
+# does NOT work: it is a SENSITIVE var there, and Vercel never exposes sensitive
+# values outside its own deployments — `vercel env pull` and `vercel env run`
+# both return it empty.
 #
 # Cost is a few cents per run.
 
@@ -26,11 +24,8 @@ on:
 jobs:
   injection-evals:
     runs-on: ubuntu-latest
-    # VERCEL_TOKEN is stored as an Environment secret in the "Production"
-    # environment, so the job must declare that environment to read it.
-    # VERCEL_ORG_ID / VERCEL_PROJECT_ID are repository secrets (available to all
-    # jobs). If the Production environment ever gets protection rules (required
-    # reviewers / wait timer), they will gate this job too.
+    # The job reads secrets from the "Production" environment (where
+    # ANTHROPIC_API_KEY should live alongside the other deploy secrets).
     environment: Production
     steps:
       - uses: actions/checkout@v4
@@ -39,21 +34,10 @@ jobs:
         with:
           node-version: "22"
 
-      # Pull the production Anthropic key from Vercel and run the evals in the
-      # same step, so the secret stays in this step's shell and is never written
-      # to $GITHUB_ENV or persisted to later steps.
-      - name: Pull production env from Vercel and run injection evals
+      - name: Run injection evals
         env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: |
           set -euo pipefail
-          npx --yes vercel@latest pull --yes --environment=production --token="$VERCEL_TOKEN"
-          ENV_FILE=".vercel/.env.production.local"
-          test -f "$ENV_FILE" || { echo "Vercel env file $ENV_FILE not found"; exit 1; }
-          ANTHROPIC_API_KEY="$(grep -E '^ANTHROPIC_API_KEY=' "$ENV_FILE" | head -1 | cut -d= -f2- | sed 's/^"//; s/"$//')"
-          test -n "$ANTHROPIC_API_KEY" || { echo "ANTHROPIC_API_KEY not found in pulled Vercel env"; exit 1; }
-          echo "::add-mask::$ANTHROPIC_API_KEY"
-          export ANTHROPIC_API_KEY
+          test -n "$ANTHROPIC_API_KEY" || { echo "ANTHROPIC_API_KEY secret is not set (add it as an Environment secret in 'Production')"; exit 1; }
           npm run eval:injection
