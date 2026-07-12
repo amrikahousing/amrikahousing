@@ -1,0 +1,43 @@
+name: LLM injection evals
+
+# Runs the promptfoo injection suite (promptfoo/configs/*.yaml) against the real
+# Anthropic model to catch regressions in the LLM firewall
+# (src/lib/llm-firewall.ts) or the AI-route prompts.
+#
+# Also gated on production promotion via scripts/promote-prod.mjs (npm run
+# eval:injection). This workflow adds a weekly run to catch model-provider
+# drift — i.e. Claude's behavior changing under us without any code change.
+#
+# NOTE: ANTHROPIC_API_KEY must be stored directly as a secret for this workflow
+# (Environment secret in "Production", or a repo secret). Pulling it from Vercel
+# does NOT work: it is a SENSITIVE var there, and Vercel never exposes sensitive
+# values outside its own deployments — `vercel env pull` and `vercel env run`
+# both return it empty.
+#
+# Cost is a few cents per run.
+
+on:
+  schedule:
+    - cron: "0 8 * * 1" # Mondays 08:00 UTC
+  workflow_dispatch: {} # allow manual runs from the Actions tab
+
+jobs:
+  injection-evals:
+    runs-on: ubuntu-latest
+    # The job reads secrets from the "Production" environment (where
+    # ANTHROPIC_API_KEY should live alongside the other deploy secrets).
+    environment: Production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Run injection evals
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          set -euo pipefail
+          test -n "$ANTHROPIC_API_KEY" || { echo "ANTHROPIC_API_KEY secret is not set (add it as an Environment secret in 'Production')"; exit 1; }
+          npm run eval:injection

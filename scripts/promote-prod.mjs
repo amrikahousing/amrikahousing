@@ -1,5 +1,7 @@
 #!/usr/bin/env node
 
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { stdin as input, stdout as output } from "node:process";
 import {
@@ -102,6 +104,23 @@ const mainProductionEnv = pullVercelEnv({ cwd: mainWorktree, environment: "produ
 try {
   assertDatabaseUrlHost(mainProductionEnv.values, NEON_PRODUCTION_HOST_PREFIX, "Production");
   run("npm", ["run", "build"], { cwd: mainWorktree, env: mainProductionEnv.values, hideLocalEnvFiles: true });
+  console.log("Running LLM injection evals before promotion.");
+  // ANTHROPIC_API_KEY is a SENSITIVE var in Vercel: `vercel env pull` and
+  // `vercel env run` both return it empty (sensitive values are only decrypted
+  // inside Vercel deployments). Fall back to the developer's .env.local key.
+  const evalEnv = { ...mainProductionEnv.values };
+  if (!evalEnv.ANTHROPIC_API_KEY) {
+    const localEnv = readFileSync(join(root, ".env.local"), "utf8").match(
+      /^ANTHROPIC_API_KEY=["']?([^"'\r\n]+)["']?$/m,
+    );
+    if (!localEnv?.[1]) {
+      fail(
+        "ANTHROPIC_API_KEY is unavailable: it is a sensitive Vercel var (unreadable via CLI) and no value was found in .env.local. The injection-eval gate cannot run.",
+      );
+    }
+    evalEnv.ANTHROPIC_API_KEY = localEnv[1];
+  }
+  run("npm", ["run", "eval:injection"], { cwd: mainWorktree, env: evalEnv, hideLocalEnvFiles: true });
   assertCleanTree(mainWorktree);
   syncPrismaSchema({ cwd: mainWorktree, env: mainProductionEnv.values, label: "Neon production" });
 } finally {

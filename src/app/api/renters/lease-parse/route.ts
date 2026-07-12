@@ -9,19 +9,17 @@ import {
   getOrgPermissionContext,
   requirePropertyPermission,
 } from "@/lib/org-authorization";
+import {
+  assertRateLimit,
+  guardedAnthropicMessages,
+  isFirewallError,
+  untrustedDataNotice,
+} from "@/lib/llm-firewall";
 
 const ALLOWED_MIME = new Set(["application/pdf", "image/jpeg", "image/png", "image/jpg"]);
 const ALLOWED_RENDERED_IMAGE_MIME = new Set(["image/jpeg", "image/png"]);
 const MAX_BYTES = 20 * 1024 * 1024;
 const MAX_RENDERED_PAGES = 5;
-
-type AnthropicContentBlock =
-  | { type: "text"; text: string }
-  | { type: "tool_use"; id: string; name: string; input: unknown };
-
-type AnthropicMessageResponse = {
-  content: AnthropicContentBlock[];
-};
 
 type AnthropicErrorResponse = {
   error?: {
@@ -97,6 +95,15 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: "Unit not found." }, { status: 404 });
   }
 
+  try {
+    assertRateLimit(`lease-parse:${ctx.userId}`, { limit: 10, windowMs: 60_000 });
+  } catch (err) {
+    if (isFirewallError(err)) {
+      return Response.json({ error: err.clientMessage }, { status: err.status });
+    }
+    throw err;
+  }
+
   if (!(leaseFile instanceof File) && leasePageImages.length === 0) {
     return Response.json({ error: "Lease document is required." }, { status: 422 });
   }
@@ -145,19 +152,13 @@ export async function POST(request: NextRequest) {
         ],
   );
 
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "anthropic-version": "2023-06-01",
-      "content-type": "application/json",
-      "x-api-key": process.env.ANTHROPIC_API_KEY,
-    },
-    body: JSON.stringify({
+  const result = await guardedAnthropicMessages(
+    {
       model: process.env.ANTHROPIC_MODEL ?? "claude-haiku-4-5-20251001",
       max_tokens: 2048,
       tools: [leaseOnboardingTool],
       tool_choice: { type: "tool", name: leaseOnboardingTool.name },
-      system: buildLeaseOnboardingSystemPrompt(),
+      system: buildLeaseOnboardingSystemPrompt() + untrustedDataNotice(),
       messages: [
         {
           role: "user",
@@ -170,17 +171,17 @@ export async function POST(request: NextRequest) {
           ],
         },
       ],
-    }),
-  });
+    },
+    { route: "renters/lease-parse", userId: ctx.userId },
+  );
 
-  if (!response.ok) {
-    const errText = await response.text().catch(() => "");
-    console.error("[lease-parse] Anthropic API error:", response.status, errText);
+  if (!result.ok) {
+    console.error("[lease-parse] Anthropic API error:", result.status, result.errorText);
     let upstreamMessage = "";
     try {
-      upstreamMessage = ((JSON.parse(errText) as AnthropicErrorResponse).error?.message ?? "").toLowerCase();
+      upstreamMessage = ((JSON.parse(result.errorText) as AnthropicErrorResponse).error?.message ?? "").toLowerCase();
     } catch {
-      upstreamMessage = errText.toLowerCase();
+      upstreamMessage = result.errorText.toLowerCase();
     }
 
     if (upstreamMessage.includes("password protected")) {
@@ -200,8 +201,7 @@ export async function POST(request: NextRequest) {
     return Response.json({ error: "Could not parse this lease document." }, { status: 502 });
   }
 
-  const message = (await response.json()) as AnthropicMessageResponse;
-  const toolUse = message.content.find((block) => block.type === "tool_use");
+  const toolUse = result.message.content.find((block) => block.type === "tool_use");
   if (!toolUse) {
     return Response.json({ error: "Could not extract lease details from this document." }, { status: 422 });
   }

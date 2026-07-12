@@ -13,6 +13,12 @@ import {
   getOrgPermissionContext,
   requirePropertyPermission,
 } from "@/lib/org-authorization";
+import {
+  assertRateLimit,
+  guardedAnthropicMessages,
+  isFirewallError,
+  untrustedDataNotice,
+} from "@/lib/llm-firewall";
 
 const ALLOWED_MIME = new Set([
   "application/pdf",
@@ -22,19 +28,13 @@ const MAX_BYTES = 50 * 1024 * 1024;
 
 type RouteContext = { params: Promise<{ id: string }> };
 
-type AnthropicContentBlock =
-  | { type: "text"; text: string }
-  | { type: "tool_use"; id: string; name: string; input: unknown };
-
-type AnthropicMessageResponse = {
-  content: AnthropicContentBlock[];
-  stop_reason: string;
-};
-
 export async function POST(request: NextRequest, context: RouteContext) {
   try {
     return await handlePost(request, context);
   } catch (err) {
+    if (isFirewallError(err)) {
+      return Response.json({ error: err.clientMessage }, { status: err.status });
+    }
     console.error("[lease-pre-review] Unhandled error:", err);
     return Response.json({ error: "An unexpected error occurred." }, { status: 500 });
   }
@@ -55,6 +55,8 @@ async function handlePost(request: NextRequest, context: RouteContext) {
   if (!process.env.ANTHROPIC_API_KEY) {
     return Response.json({ error: "AI review is not configured." }, { status: 503 });
   }
+
+  assertRateLimit(`lease-pre-review:${ctx.userId}`, { limit: 10, windowMs: 60_000 });
 
   let form: FormData;
   try {
@@ -127,30 +129,24 @@ async function handlePost(request: NextRequest, context: RouteContext) {
     ];
   }
 
-  const response = await fetch("https://api.anthropic.com/v1/messages", {
-    method: "POST",
-    headers: {
-      "anthropic-version": "2023-06-01",
-      "content-type": "application/json",
-      "x-api-key": process.env.ANTHROPIC_API_KEY,
-    },
-    body: JSON.stringify({
+  const result = await guardedAnthropicMessages(
+    {
       model: process.env.ANTHROPIC_MODEL ?? "claude-haiku-4-5-20251001",
       max_tokens: 8000,
       tools: [leaseTemplateReviewTool],
       tool_choice: { type: "tool", name: leaseTemplateReviewTool.name },
-      system: buildLeaseTemplateReviewSystemPrompt(),
+      system: buildLeaseTemplateReviewSystemPrompt() + untrustedDataNotice(),
       messages: [{ role: "user", content: userContent }],
-    }),
-  });
+    },
+    { route: "lease-templates/pre-review", userId: ctx.userId },
+  );
 
-  if (!response.ok) {
-    const errText = await response.text().catch(() => "");
-    console.error("[lease-pre-review] Anthropic API error:", response.status, errText);
+  if (!result.ok) {
+    console.error("[lease-pre-review] Anthropic API error:", result.status, result.errorText);
     return Response.json({ error: "Could not analyze this lease template." }, { status: 502 });
   }
 
-  const message = (await response.json()) as AnthropicMessageResponse;
+  const message = result.message;
   if (message.stop_reason === "max_tokens") {
     console.error("[lease-pre-review] Response truncated — increase max_tokens or reduce input");
     return Response.json({ error: "The lease document is too large to review in one pass. Try uploading a shorter document." }, { status: 422 });
