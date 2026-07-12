@@ -335,7 +335,7 @@ export function RenewLeaseModal({
             <input
               type="number"
               min="1"
-              step="50"
+              step="0.01"
               required
               className={inputClass}
               value={rentAmount}
@@ -347,7 +347,7 @@ export function RenewLeaseModal({
             <input
               type="number"
               min="0"
-              step="50"
+              step="0.01"
               className={inputClass}
               value={securityDeposit}
               onChange={(e) => setSecurityDeposit(e.target.value)}
@@ -358,7 +358,7 @@ export function RenewLeaseModal({
             <input
               type="number"
               min="0"
-              step="10"
+              step="0.01"
               className={inputClass}
               value={monthlyRentCredit}
               onChange={(e) => setMonthlyRentCredit(e.target.value)}
