@@ -1,0 +1,33 @@
+name: CI
+
+# Safety net for pushes made outside the deploy scripts (release-test.mjs /
+# promote-prod.mjs run the same gates locally before deploying). Unit tests are
+# pure — no database, no secrets needed.
+
+on:
+  push:
+    branches: [neon-preview-test, main]
+  workflow_dispatch: {}
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+
+      - run: npm ci
+
+      # The Prisma client is generated (gitignored) — tsc and vitest need it.
+      - run: npx prisma generate
+
+      - run: npm run lint
+
+      - run: npm run typecheck
+
+      # Unit tests + coverage thresholds + ratchet against coverage-baseline.json
+      - run: npm run test:ci

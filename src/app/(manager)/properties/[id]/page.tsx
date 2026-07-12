@@ -105,6 +105,7 @@ export default async function PropertyDetailsPage({
     isActive: property.is_active,
     units: property.units.map((unit) => {
       const primaryTenant = unit.leases?.lease_tenants?.tenants ?? null;
+      const activeLease = unit.leases?.status === "active" ? unit.leases : null;
       return {
         id: unit.id,
         unitNumber: unit.unit_number,
@@ -118,6 +119,17 @@ export default async function PropertyDetailsPage({
         hasLeaseDocument: unit.leases?.status === "active" && Boolean(unit.leases.document_url),
         pendingSignatureLeaseId: unit.leases?.status === "pending_signature" ? unit.leases.id : null,
         futurePaymentCount: unit.leases?.payments.length ?? 0,
+        leaseStartDate: activeLease ? activeLease.start_date.toISOString().slice(0, 10) : null,
+        leaseEndDate: activeLease?.end_date ? activeLease.end_date.toISOString().slice(0, 10) : null,
+        leaseRentAmount: activeLease ? Number(activeLease.rent_amount) : null,
+        leaseSecurityDeposit:
+          activeLease?.security_deposit !== null && activeLease?.security_deposit !== undefined
+            ? Number(activeLease.security_deposit)
+            : null,
+        leaseMonthlyRentCredit:
+          activeLease?.monthly_rent_credit !== null && activeLease?.monthly_rent_credit !== undefined
+            ? Number(activeLease.monthly_rent_credit)
+            : null,
         tenant: primaryTenant
           ? {
               id: primaryTenant.id,

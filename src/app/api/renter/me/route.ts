@@ -16,6 +16,7 @@ export async function GET() {
       email: true,
       phone: true,
       lease_tenants: {
+        where: { leases: { status: { in: ["active", "pending_signature"] } } },
         select: {
           is_primary: true,
           leases: {

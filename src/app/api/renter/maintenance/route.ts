@@ -75,7 +75,7 @@ export async function POST(request: Request) {
 
   // Find the tenant's active lease to get the unit
   const leaseTenant = await prisma.lease_tenants.findFirst({
-    where: { tenant_id: ctx.tenantId },
+    where: { tenant_id: ctx.tenantId, leases: { status: "active" } },
     include: { leases: { select: { unit_id: true, status: true } } },
   });
 

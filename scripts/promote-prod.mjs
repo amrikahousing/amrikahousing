@@ -52,6 +52,8 @@ const previewEnv = pullVercelEnv({ cwd: root, environment: "preview", gitBranch:
 try {
   assertDatabaseUrlHost(previewEnv.values, NEON_PREVIEW_HOST_PREFIX, "Preview");
   run("npm", ["run", "lint"], { cwd: root });
+  run("npm", ["run", "typecheck"], { cwd: root });
+  run("npm", ["run", "test:ci"], { cwd: root });
   run("npm", ["run", "build"], { cwd: root, env: previewEnv.values, hideLocalEnvFiles: true });
   assertCleanTree(root);
 } finally {
@@ -98,6 +100,7 @@ runGit(["merge", "--no-ff", "origin/neon-preview-test", "-m", "Merge tested prev
 console.log("Checking main after merge.");
 installDependencies(mainWorktree);
 run("npm", ["run", "lint"], { cwd: mainWorktree });
+run("npm", ["run", "test"], { cwd: mainWorktree });
 
 console.log("Checking Vercel production env points to Neon production.");
 const mainProductionEnv = pullVercelEnv({ cwd: mainWorktree, environment: "production" });

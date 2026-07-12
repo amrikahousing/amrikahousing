@@ -21,6 +21,7 @@ import {
 
 const dryRun = process.argv.includes("--dry-run");
 const skipE2e = process.argv.includes("--skip-e2e");
+const skipIntegration = process.argv.includes("--skip-integration");
 const root = assertCanonicalRoot();
 
 ensureVercelProject(root);
@@ -40,6 +41,8 @@ const previewEnv = pullVercelEnv({ cwd: root, environment: "preview", gitBranch:
 try {
   assertDatabaseUrlHost(previewEnv.values, NEON_PREVIEW_HOST_PREFIX, "Preview");
   run("npm", ["run", "lint"], { cwd: root });
+  run("npm", ["run", "typecheck"], { cwd: root });
+  run("npm", ["run", "test:ci"], { cwd: root });
   run("npm", ["run", "build"], { cwd: root, env: previewEnv.values, hideLocalEnvFiles: true });
   assertCleanTree(root);
 
@@ -51,6 +54,13 @@ try {
   syncPrismaSchema({ cwd: root, env: previewEnv.values, label: "Neon preview/neon-preview-test" });
 } finally {
   previewEnv.cleanup();
+}
+
+if (skipIntegration) {
+  console.log("\nSkipping integration tests (--skip-integration).");
+} else {
+  console.log("\nRunning integration tests against an ephemeral Neon branch.");
+  run("npm", ["run", "test:integration"], { cwd: root });
 }
 
 const pushed = ensureBranchPushed("neon-preview-test", root);
