@@ -16,6 +16,12 @@
     "hotfix": "node scripts/hotfix-prod.mjs",
     "start": "next start",
     "lint": "eslint",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "test:ci": "vitest run --coverage && node scripts/ratchet-coverage.mjs",
+    "test:integration": "node scripts/test-integration.mjs",
     "test:e2e": "playwright test",
     "eval:injection": "node promptfoo/run-all.mjs"
   },
@@ -50,19 +56,24 @@
     "zod": "^4.3.6"
   },
   "devDependencies": {
+    "@clerk/testing": "^2.2.7",
+    "@inngest/test": "^1.0.0",
     "@playwright/test": "^1.59.1",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@types/sanitize-html": "^2.16.1",
+    "@vitest/coverage-v8": "^4.1.10",
     "dotenv": "^17.4.2",
     "eslint": "^9",
     "eslint-config-next": "16.2.3",
     "prisma": "^7.8.0",
     "tailwindcss": "^4",
     "typescript": "^5",
-    "vercel": "^55.0.0"
+    "vercel": "^55.0.0",
+    "vite-tsconfig-paths": "^6.1.1",
+    "vitest": "^4.1.10"
   },
   "overrides": {
     "@vercel/blob": {

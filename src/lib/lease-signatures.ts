@@ -1,8 +1,8 @@
 import { get, put } from "@vercel/blob";
 import { prisma } from "./db";
 import { getBlobToken } from "./blob-token";
-import { buildRentPaymentDueDates } from "./lease-payments";
-import { computeNetRent } from "./rent-credit";
+import { seedRentPayments } from "./lease-payments";
+import { recordLeaseDocument } from "./lease-documents";
 import {
   createDocuSealSubmission,
   downloadDocuSealDocument,
@@ -92,10 +92,17 @@ async function storeCompletedDocument(leaseId: string, submissionId: string) {
   const file = await downloadDocuSealDocument(submissionId);
   const path = `leases/signed/${leaseId}/docuseal-completed-${new Date().toISOString().slice(0, 10)}.pdf`;
   const blob = await put(path, file, { access: "private", token: getBlobToken() });
-  await prisma.leases.update({
-    where: { id: leaseId },
-    data: { document_url: blob.url, updated_at: new Date() },
-  });
+  // If a manager manually replaced the document while this completion was in
+  // flight, the pointer is last-writer-wins but both files stay in history.
+  await prisma.$transaction((tx) =>
+    recordLeaseDocument(tx, {
+      leaseId,
+      blobUrl: blob.url,
+      fileName: path.split("/").pop()!,
+      contentType: "application/pdf",
+      kind: "docuseal",
+    }),
+  );
 }
 
 export async function activateLeaseAfterSignature(leaseId: string) {
@@ -132,26 +139,14 @@ export async function activateLeaseAfterSignature(leaseId: string) {
     if (lease.status === "active") return;
 
     const primaryTenantId = lease.lease_tenants?.tenant_id;
-    const existingPaymentCount = await tx.payments.count({ where: { lease_id: leaseId } });
-    const dueDates = buildRentPaymentDueDates(lease.start_date, lease.end_date);
-    if (existingPaymentCount === 0 && primaryTenantId && dueDates.length > 0) {
-      const rent = Number(lease.rent_amount);
-      const credit = Number(lease.monthly_rent_credit ?? 0);
-      await tx.payments.createMany({
-        // Month 1 is billed at full rent; the credit applies from month 2 onward.
-        data: dueDates.map((dueDate, index) => {
-          const applyCredit = index > 0 && credit > 0;
-          const amount = applyCredit ? computeNetRent(rent, credit) : rent;
-          return {
-            lease_id: leaseId,
-            tenant_id: primaryTenantId,
-            amount,
-            type: "rent",
-            status: "pending",
-            due_date: dueDate,
-            notes: applyCredit ? `Monthly rent (credit $${credit.toFixed(2)} applied)` : "Monthly rent",
-          };
-        }),
+    if (primaryTenantId) {
+      await seedRentPayments(tx, {
+        leaseId,
+        tenantId: primaryTenantId,
+        rentAmount: Number(lease.rent_amount),
+        monthlyRentCredit: Number(lease.monthly_rent_credit ?? 0),
+        startDate: lease.start_date,
+        endDate: lease.end_date,
       });
     }
 

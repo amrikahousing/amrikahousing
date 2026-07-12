@@ -74,7 +74,7 @@ export default async function LeasesPage() {
             status: true,
             rent_amount: true,
             leases: {
-              where: { deleted_at: null },
+              where: { deleted_at: null, status: { in: ["active", "pending_signature"] } },
               select: {
                 status: true,
                 start_date: true,

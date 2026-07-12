@@ -1,9 +1,14 @@
-import { put } from "@vercel/blob";
 import { clerkClient } from "@clerk/nextjs/server";
 import { NextRequest } from "next/server";
-import { getBlobToken } from "@/lib/blob-token";
 import { prisma } from "@/lib/db";
-import { buildRentPaymentDueDates } from "@/lib/lease-payments";
+import {
+  ALLOWED_LEASE_MIME,
+  MAX_LEASE_FILE_BYTES,
+  leaseFileExtension,
+  recordLeaseDocument,
+  uploadLeaseDocumentBlob,
+} from "@/lib/lease-documents";
+import { seedRentPayments } from "@/lib/lease-payments";
 import {
   sendLeaseForSignature,
   type LeaseSignatureRecipient,
@@ -15,8 +20,6 @@ import {
 } from "@/lib/org-authorization";
 
 const EMAIL_PATTERN = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-const ALLOWED_MIME = new Set(["application/pdf", "image/jpeg", "image/png", "image/jpg"]);
-const MAX_BYTES = 20 * 1024 * 1024;
 
 type AdditionalTenantInput = {
   firstName: string;
@@ -339,20 +342,13 @@ export async function POST(request: NextRequest) {
     }
 
     if (leaseMode === "uploaded") {
-      const rentPaymentDueDates = buildRentPaymentDueDates(leaseStart, leaseEnd);
-      if (rentPaymentDueDates.length > 0) {
-        await tx.payments.createMany({
-          data: rentPaymentDueDates.map((dueDate) => ({
-            lease_id: lease.id,
-            tenant_id: tenant.id,
-            amount: parsedRent,
-            type: "rent",
-            status: "pending",
-            due_date: dueDate,
-            notes: "Monthly rent",
-          })),
-        });
-      }
+      await seedRentPayments(tx, {
+        leaseId: lease.id,
+        tenantId: tenant.id,
+        rentAmount: parsedRent,
+        startDate: leaseStart,
+        endDate: leaseEnd,
+      });
 
       await tx.units.update({
         where: { id: unit.id },
@@ -378,16 +374,22 @@ export async function POST(request: NextRequest) {
   });
 
   if (leaseMode === "uploaded" && leaseFile instanceof File && leaseFile.size > 0) {
-    if (ALLOWED_MIME.has(leaseFile.type) && leaseFile.size <= MAX_BYTES) {
+    if (ALLOWED_LEASE_MIME.has(leaseFile.type) && leaseFile.size <= MAX_LEASE_FILE_BYTES) {
       try {
-        const ext = leaseFile.name.split(".").pop() ?? "pdf";
+        const ext = leaseFileExtension(leaseFile.name);
         const dateStamp = new Date().toISOString().slice(0, 10);
         const path = `leases/${ctx.orgDbId}/${propertyId}/${unitId}/${result.tenantId}/lease-${dateStamp}.${ext}`;
-        const blob = await put(path, leaseFile, { access: "private", token: getBlobToken() });
-        await prisma.leases.update({
-          where: { id: result.leaseId },
-          data: { document_url: blob.url },
-        });
+        const blob = await uploadLeaseDocumentBlob(path, leaseFile);
+        await prisma.$transaction((tx) =>
+          recordLeaseDocument(tx, {
+            leaseId: result.leaseId,
+            blobUrl: blob.url,
+            fileName: leaseFile.name,
+            contentType: leaseFile.type,
+            kind: "uploaded",
+            uploadedBy: ctx.userDbId,
+          }),
+        );
       } catch {
         // Non-fatal: the lease is created; managers can re-upload later.
       }

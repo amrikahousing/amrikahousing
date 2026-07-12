@@ -7,6 +7,7 @@ import { createPortal } from "react-dom";
 import { getPropertyTypeLabel, PROPERTY_TYPE_OPTIONS } from "@/lib/property-types";
 import { useToast } from "./ToastProvider";
 import { OnboardRenterWizard, type WizardUnit } from "./OnboardRenterWizard";
+import { ReplaceLeaseDocumentModal, RenewLeaseModal } from "./LeaseDocumentModals";
 
 type PropertyDetails = {
   id: string;
@@ -43,6 +44,11 @@ type UnitDetails = {
   pendingSignatureLeaseId: string | null;
   futurePaymentCount: number;
   tenant: UnitTenant | null;
+  leaseStartDate: string | null;
+  leaseEndDate: string | null;
+  leaseRentAmount: number | null;
+  leaseSecurityDeposit: number | null;
+  leaseMonthlyRentCredit: number | null;
 };
 
 type PropertyFormState = {
@@ -1025,6 +1031,8 @@ function UnitCardMenu({
   onActivate,
   onDeactivate,
   onRentCredit,
+  onReplaceDocument,
+  onRenewLease,
   canManageUnits,
   canInviteRenters,
 }: {
@@ -1033,6 +1041,8 @@ function UnitCardMenu({
   onActivate: (unit: UnitDetails) => void;
   onDeactivate: (unit: UnitDetails) => void;
   onRentCredit: (unit: UnitDetails) => void;
+  onReplaceDocument: (unit: UnitDetails) => void;
+  onRenewLease: (unit: UnitDetails) => void;
   canManageUnits: boolean;
   canInviteRenters: boolean;
 }) {
@@ -1085,13 +1095,29 @@ function UnitCardMenu({
             </a>
           )}
           {unit.activeLeaseId && canInviteRenters && (
-            <button
-              onClick={(e) => { e.stopPropagation(); setOpen(false); onRentCredit(unit); }}
-              className="flex w-full items-center gap-2 border-t border-gray-100 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50"
-            >
-              <RentCreditIcon className="h-4 w-4" />
-              Payment plan
-            </button>
+            <>
+              <button
+                onClick={(e) => { e.stopPropagation(); setOpen(false); onReplaceDocument(unit); }}
+                className="flex w-full items-center gap-2 border-t border-gray-100 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50"
+              >
+                <UploadIcon className="h-4 w-4" />
+                Replace lease document
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); setOpen(false); onRenewLease(unit); }}
+                className="flex w-full items-center gap-2 border-t border-gray-100 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50"
+              >
+                <LeaseDocumentIcon className="h-4 w-4" />
+                Renew lease
+              </button>
+              <button
+                onClick={(e) => { e.stopPropagation(); setOpen(false); onRentCredit(unit); }}
+                className="flex w-full items-center gap-2 border-t border-gray-100 px-4 py-2.5 text-sm text-gray-700 hover:bg-gray-50"
+              >
+                <RentCreditIcon className="h-4 w-4" />
+                Payment plan
+              </button>
+            </>
           )}
           {unit.status === "inactive" ? (
             <button
@@ -1124,6 +1150,8 @@ function UnitCard({
   onActivate,
   onDeactivate,
   onRentCredit,
+  onReplaceDocument,
+  onRenewLease,
   onOnboardRenter,
   onSyncSignature,
   syncingLeaseId,
@@ -1137,6 +1165,8 @@ function UnitCard({
   onActivate: (unit: UnitDetails) => void;
   onDeactivate: (unit: UnitDetails) => void;
   onRentCredit: (unit: UnitDetails) => void;
+  onReplaceDocument: (unit: UnitDetails) => void;
+  onRenewLease: (unit: UnitDetails) => void;
   onOnboardRenter: (unit: UnitDetails) => void;
   onSyncSignature: (leaseId: string) => void;
   syncingLeaseId: string | null;
@@ -1201,6 +1231,8 @@ function UnitCard({
             onActivate={onActivate}
             onDeactivate={onDeactivate}
             onRentCredit={onRentCredit}
+            onReplaceDocument={onReplaceDocument}
+            onRenewLease={onRenewLease}
             canManageUnits={canManageUnits}
             canInviteRenters={canInviteRenters}
           />
@@ -1366,6 +1398,10 @@ export function PropertyDetailsClient({
 
   // Rent credit
   const [rentCreditUnit, setRentCreditUnit] = useState<UnitDetails | null>(null);
+
+  // Replace lease document / renew lease
+  const [replaceDocUnit, setReplaceDocUnit] = useState<UnitDetails | null>(null);
+  const [renewUnit, setRenewUnit] = useState<UnitDetails | null>(null);
 
   // Onboard tenant state
   const [onboardingUnitId, setOnboardingUnitId] = useState<string | null>(null);
@@ -1725,6 +1761,11 @@ export function PropertyDetailsClient({
         pendingSignatureLeaseId: null,
         futurePaymentCount: 0,
         tenant: null,
+        leaseStartDate: null,
+        leaseEndDate: null,
+        leaseRentAmount: null,
+        leaseSecurityDeposit: null,
+        leaseMonthlyRentCredit: null,
       };
       setProperty((p) => ({
         ...p,
@@ -1784,6 +1825,11 @@ export function PropertyDetailsClient({
         pendingSignatureLeaseId: editingUnit.pendingSignatureLeaseId,
         futurePaymentCount: editingUnit.futurePaymentCount,
         tenant: editingUnit?.tenant ?? null,
+        leaseStartDate: editingUnit.leaseStartDate,
+        leaseEndDate: editingUnit.leaseEndDate,
+        leaseRentAmount: editingUnit.leaseRentAmount,
+        leaseSecurityDeposit: editingUnit.leaseSecurityDeposit,
+        leaseMonthlyRentCredit: editingUnit.leaseMonthlyRentCredit,
       };
       setProperty((p) => ({
         ...p,
@@ -2078,6 +2124,8 @@ export function PropertyDetailsClient({
                   onActivate={activateUnit}
                   onDeactivate={(u) => setDeactivatingUnit(u)}
                   onRentCredit={(u) => setRentCreditUnit(u)}
+                  onReplaceDocument={(u) => setReplaceDocUnit(u)}
+                  onRenewLease={(u) => setRenewUnit(u)}
                   onOnboardRenter={(u) => setOnboardingUnitId(u.id)}
                   onSyncSignature={syncSignature}
                   syncingLeaseId={syncingLeaseId}
@@ -2233,6 +2281,33 @@ export function PropertyDetailsClient({
           unitNumber={rentCreditUnit.unitNumber}
           onClose={() => setRentCreditUnit(null)}
           onApplied={() => router.refresh()}
+        />
+      )}
+
+      {/* Replace lease document */}
+      {canInviteRenters && replaceDocUnit?.activeLeaseId && (
+        <ReplaceLeaseDocumentModal
+          leaseId={replaceDocUnit.activeLeaseId}
+          unitNumber={replaceDocUnit.unitNumber}
+          onClose={() => setReplaceDocUnit(null)}
+          onReplaced={() => router.refresh()}
+        />
+      )}
+
+      {/* Renew lease */}
+      {canInviteRenters && renewUnit?.activeLeaseId && (
+        <RenewLeaseModal
+          leaseId={renewUnit.activeLeaseId}
+          unitNumber={renewUnit.unitNumber}
+          defaults={{
+            startDate: renewUnit.leaseStartDate,
+            endDate: renewUnit.leaseEndDate,
+            rentAmount: renewUnit.leaseRentAmount,
+            securityDeposit: renewUnit.leaseSecurityDeposit,
+            monthlyRentCredit: renewUnit.leaseMonthlyRentCredit,
+          }}
+          onClose={() => setRenewUnit(null)}
+          onRenewed={() => router.refresh()}
         />
       )}
 
