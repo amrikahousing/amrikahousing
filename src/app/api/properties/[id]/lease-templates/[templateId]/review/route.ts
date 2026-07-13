@@ -9,6 +9,7 @@ import {
   buildLeaseTemplateReviewUserPrompt,
   leaseTemplateReviewTool,
 } from "@/lib/lease-extract-prompt";
+import { reconcileReviewWithCanonical } from "@/lib/lease-canonical-clauses";
 import { syncLeaseTemplateClauses } from "@/lib/lease-template-clauses";
 import { syncStateSpecificLeaseClauses } from "@/lib/lease-state-clauses";
 import {
@@ -96,13 +97,36 @@ async function handlePost(context: RouteContext) {
 
   const isDocx = template.content_type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
 
+  const persistAndRespond = async (reviewData: object) => {
+    await prisma.lease_templates.update({
+      where: { id: templateId },
+      data: { review_data: reviewData, updated_at: new Date() },
+    }).catch((err) => console.error("[lease-review] Failed to cache review:", err));
+    await syncLeaseTemplateClauses({
+      templateId,
+      organizationId: ctx.orgDbId,
+      propertyId,
+      schema: template.lease_schema as never,
+      reviewData,
+    }).catch((err) => console.error("[lease-review] Failed to sync clauses:", err));
+    await syncStateSpecificLeaseClauses({
+      organizationId: ctx.orgDbId,
+      propertyState: template.properties.state,
+      reviewData,
+    }).catch((err) => console.error("[lease-review] Failed to sync state clauses:", err));
+    return Response.json(reviewData);
+  };
+
   let userContent: unknown[];
+  let docText = "";
 
   if (isDocx) {
     let extractedText: string;
     try {
       const result = await mammoth.extractRawText({ buffer });
-      extractedText = result.value.trim().slice(0, 16_000);
+      // Generous cap (~30k tokens) — a 16k cap truncated normal-length leases, so the
+      // reviewer never saw clauses in the later part of the document.
+      extractedText = result.value.trim().slice(0, 120_000);
     } catch (err) {
       console.error("[lease-review] DOCX text extraction failed:", err);
       return Response.json({ error: "Could not read this DOCX file. Try re-uploading or converting to PDF." }, { status: 422 });
@@ -110,6 +134,7 @@ async function handlePost(context: RouteContext) {
     if (!extractedText) {
       return Response.json({ error: "No readable text found in this DOCX file." }, { status: 422 });
     }
+    docText = extractedText;
     userContent = [
       {
         type: "text",
@@ -171,22 +196,10 @@ async function handlePost(context: RouteContext) {
     return Response.json({ error: "Could not extract review data from this document." }, { status: 422 });
   }
 
-  await prisma.lease_templates.update({
-    where: { id: templateId },
-    data: { review_data: toolUse.input as object, updated_at: new Date() },
-  }).catch((err) => console.error("[lease-review] Failed to cache review:", err));
-  await syncLeaseTemplateClauses({
-    templateId,
-    organizationId: ctx.orgDbId,
-    propertyId,
-    schema: template.lease_schema as never,
-    reviewData: toolUse.input as object,
-  }).catch((err) => console.error("[lease-review] Failed to sync clauses:", err));
-  await syncStateSpecificLeaseClauses({
-    organizationId: ctx.orgDbId,
-    propertyState: template.properties.state,
-    reviewData: toolUse.input as object,
-  }).catch((err) => console.error("[lease-review] Failed to sync state clauses:", err));
-
-  return Response.json(toolUse.input);
+  // Deterministic canonical-clause checklist replaces the AI's unreliable state-law /
+  // missing-standard-clause guesses (see pre-review route for the rationale).
+  const reviewData = docText
+    ? (reconcileReviewWithCanonical(toolUse.input as Record<string, unknown>, docText, template.properties.state) as object)
+    : (toolUse.input as object);
+  return persistAndRespond(reviewData);
 }

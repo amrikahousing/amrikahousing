@@ -445,7 +445,40 @@ function parseSubstitutionPairs(raw: string): Array<{ search: string; token: str
   });
 }
 
-const HEADING_RE = /^\s*(?:\d+[\.\)]\s+)?([A-Z][A-Z0-9 ,\/&'\-]{3,}[A-Z0-9])\s*\.?\s*$/;
+const HEADING_RE = /^\s*(?:\d+[\.\)]\s+)?([A-Z][A-Za-z0-9 ,\/&'\-]{3,}[A-Za-z0-9])\s*\.?\s*$/;
+
+// A clause heading is a short standalone line in (mostly) capitals, optionally
+// numbered ("3." / "3)"). Lowercase connector words are allowed — real leases use
+// headings like "RENT and ADDED RENT" — so the char class accepts lowercase but a
+// ≥70% uppercase-letter ratio keeps ordinary sentences out. Returns the title, or
+// null when the line is not a heading.
+function matchHeading(line: string): string | null {
+  if (line.length > 80) return null;
+  const m = HEADING_RE.exec(line);
+  if (!m) return null;
+  const letters = m[1].replace(/[^A-Za-z]/g, "");
+  const upper = m[1].replace(/[^A-Z]/g, "");
+  if (!letters || upper.length / letters.length < 0.7) return null;
+  return m[1].trim();
+}
+
+const INLINE_HEADING_RE = /^\s*(?:\d+[\.\)]\s+)?([A-Z][A-Za-z0-9 ,\/&'\-]{3,}?):\s*(\S.*)$/;
+
+// Many leases run the clause body straight after the heading in one paragraph —
+// "RENT and ADDED RENT: You agree to pay…". Without splitting on these the whole
+// lease collapses into a few giant clauses that the AI fix can't rewrite in place.
+// The ≥40-char remainder floor keeps short label lines ("TENANT(S): ____") from
+// splitting a clause; "INITIALS: {{Initial…}}" anchor lines are excluded by name
+// so they stay inside the clause they belong to.
+function matchInlineHeading(line: string): { title: string; rest: string } | null {
+  const m = INLINE_HEADING_RE.exec(line);
+  if (!m || m[1].length > 60 || m[2].length < 40) return null;
+  const letters = m[1].replace(/[^A-Za-z]/g, "");
+  const upper = m[1].replace(/[^A-Z]/g, "");
+  if (!letters || upper.length / letters.length < 0.7) return null;
+  if (/^INITIALS?$/i.test(m[1].trim())) return null;
+  return { title: m[1].trim(), rest: m[2] };
+}
 
 function splitTextIntoClauses(text: string): ExtractedLeaseClause[] {
   const lines = text.split("\n");
@@ -453,10 +486,15 @@ function splitTextIntoClauses(text: string): ExtractedLeaseClause[] {
   let current: { title: string; order: number; body: string[] } | null = null;
 
   for (const raw of lines) {
-    const m = HEADING_RE.exec(raw);
-    if (m) {
+    const standalone = matchHeading(raw);
+    const inline = standalone === null ? matchInlineHeading(raw) : null;
+    if (standalone !== null || inline) {
       if (current && current.body.join("").trim()) sections.push(current);
-      current = { title: m[1].trim(), order: sections.length + 1, body: [] };
+      current = {
+        title: standalone ?? inline!.title,
+        order: sections.length + 1,
+        body: inline ? [inline.rest] : [],
+      };
     } else if (current) {
       current.body.push(raw);
     }
@@ -977,7 +1015,7 @@ export async function buildCorrectedTemplateDocx(clauses: ExtractedLeaseClause[]
 // (headings, tables, headers/footers, untouched clauses, section formatting) is
 // left byte-for-byte identical. New clauses are appended before the final section.
 //
-// Headings are detected with the SAME HEADING_RE used during extraction, so the
+// Headings are detected with the SAME matchHeading used during extraction, so the
 // clause titles here match the ones the user reviewed. A contiguity guard skips any
 // clause whose body paragraphs are interrupted by a table (so we never delete one).
 export async function rewriteClausesInDocx(
@@ -1008,16 +1046,24 @@ export async function rewriteClausesInDocx(
     paras.push({ xml: pm[0], start: pm.index, end: pm.index + pm[0].length, text: paraVisibleText(pm[0]) });
   }
 
-  // Heading paragraphs → clause ranges.
-  const headings: Array<{ idx: number; title: string }> = [];
+  // Heading paragraphs → clause ranges. An inline heading ("RENT and ADDED RENT:
+  // You agree to pay…") carries clause body text in the heading paragraph itself,
+  // so that paragraph is part of the replaced span and the title is re-emitted.
+  const headings: Array<{ idx: number; title: string; inline: boolean }> = [];
   paras.forEach((p, i) => {
-    const m = HEADING_RE.exec(p.text);
-    if (m) headings.push({ idx: i, title: normTitle(m[1]) });
+    const standalone = matchHeading(p.text);
+    const inline = standalone === null ? matchInlineHeading(p.text) : null;
+    if (standalone !== null) headings.push({ idx: i, title: normTitle(standalone), inline: false });
+    else if (inline) headings.push({ idx: i, title: normTitle(inline.title), inline: true });
   });
-  const clauseRange = new Map<string, { bodyStartIdx: number; bodyEndIdx: number }>();
+  const clauseRange = new Map<string, { bodyStartIdx: number; bodyEndIdx: number; inline: boolean }>();
   for (let h = 0; h < headings.length; h++) {
     const nextIdx = h + 1 < headings.length ? headings[h + 1].idx : paras.length;
-    clauseRange.set(headings[h].title, { bodyStartIdx: headings[h].idx + 1, bodyEndIdx: nextIdx - 1 });
+    clauseRange.set(headings[h].title, {
+      bodyStartIdx: headings[h].inline ? headings[h].idx : headings[h].idx + 1,
+      bodyEndIdx: nextIdx - 1,
+      inline: headings[h].inline,
+    });
   }
 
   const cloneBodyParagraphs = (body: string, templatePara: string) => {
@@ -1036,10 +1082,18 @@ export async function rewriteClausesInDocx(
   const edits: Edit[] = [];
   const replacedTitles: string[] = [];
   const unmatchedTitles: string[] = [];
+  const editedSpans = new Set<number>();
 
   for (const rw of rewrites) {
     const range = clauseRange.get(normTitle(rw.title));
     if (!range || range.bodyStartIdx > range.bodyEndIdx || range.bodyStartIdx >= paras.length) {
+      unmatchedTitles.push(rw.title);
+      continue;
+    }
+    // Duplicate-titled clauses share one map entry, so two rewrites can resolve to
+    // the same span. Applying both would splice the XML twice at stale offsets and
+    // corrupt the document — only the first may edit it.
+    if (editedSpans.has(range.bodyStartIdx)) {
       unmatchedTitles.push(rw.title);
       continue;
     }
@@ -1058,7 +1112,11 @@ export async function rewriteClausesInDocx(
     }
     const first = paras[range.bodyStartIdx];
     const last = paras[range.bodyEndIdx];
-    edits.push({ start: first.start, end: last.end, replacement: cloneBodyParagraphs(rw.body, first.xml) });
+    // For an inline clause the heading paragraph is replaced too, so the title is
+    // re-emitted as the first line to keep it in the document.
+    const newBody = range.inline ? `${rw.title.toUpperCase()}: ${rw.body}` : rw.body;
+    edits.push({ start: first.start, end: last.end, replacement: cloneBodyParagraphs(newBody, first.xml) });
+    editedSpans.add(range.bodyStartIdx);
     replacedTitles.push(rw.title);
   }
 
@@ -1091,7 +1149,13 @@ export async function rewriteClausesInDocx(
   for (const e of edits) xml = xml.slice(0, e.start) + e.replacement + xml.slice(e.end);
 
   zip.file("word/document.xml", xml);
-  return { buffer: Buffer.from(zip.generate({ type: "nodebuffer" })), replacedTitles, unmatchedTitles };
+  // DEFLATE (not PizZip's default STORE) keeps the output near the original size —
+  // STORE re-stores the embedded images uncompressed and more than doubles the file.
+  return {
+    buffer: Buffer.from(zip.generate({ type: "nodebuffer", compression: "DEFLATE" })),
+    replacedTitles,
+    unmatchedTitles,
+  };
 }
 
 // ─── Error helper ─────────────────────────────────────────────────────────────

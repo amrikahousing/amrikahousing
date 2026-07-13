@@ -3,12 +3,14 @@ export const maxDuration = 120;
 import mammoth from "mammoth";
 import { put } from "@vercel/blob";
 import { NextRequest } from "next/server";
+import { prisma } from "@/lib/db";
 import { getBlobToken } from "@/lib/blob-token";
 import {
   buildLeaseTemplateReviewSystemPrompt,
   buildLeaseTemplateReviewUserPrompt,
   leaseTemplateReviewTool,
 } from "@/lib/lease-extract-prompt";
+import { reconcileReviewWithCanonical } from "@/lib/lease-canonical-clauses";
 import {
   getOrgPermissionContext,
   requirePropertyPermission,
@@ -90,13 +92,23 @@ async function handlePost(request: NextRequest, context: RouteContext) {
   const blob = await put(path, Buffer.from(buffer), { access: "private", token: getBlobToken() });
 
   const isDocx = file.type === "application/vnd.openxmlformats-officedocument.wordprocessingml.document";
+
+  // Every upload runs a fresh AI review — including re-uploads of an already-fixed
+  // template — so the reviewer actually re-checks the document and confirms whether
+  // the fixes hold, rather than replaying a stored result.
+
   let userContent: unknown[];
+  // Kept for the deterministic canonical-clause checklist after the AI review.
+  let docText = "";
 
   if (isDocx) {
     let extractedText: string;
     try {
       const result = await mammoth.extractRawText({ buffer });
-      extractedText = result.value.trim().slice(0, 16_000);
+      // Generous cap (~30k tokens): a 16k cap made the reviewer read only the first
+      // third of a normal lease, so it kept re-flagging provisions that exist further
+      // down (including clauses a previous auto-fix appended at the end).
+      extractedText = result.value.trim().slice(0, 120_000);
     } catch (err) {
       console.error("[lease-pre-review] DOCX text extraction failed:", err);
       return Response.json({ error: "Could not read this DOCX file. Try re-uploading or converting to PDF." }, { status: 422 });
@@ -104,6 +116,7 @@ async function handlePost(request: NextRequest, context: RouteContext) {
     if (!extractedText) {
       return Response.json({ error: "No readable text found in this DOCX file." }, { status: 422 });
     }
+    docText = extractedText;
     userContent = [
       {
         type: "text",
@@ -161,8 +174,20 @@ async function handlePost(request: NextRequest, context: RouteContext) {
     return Response.json({ error: "Could not extract review data from this document." }, { status: 422 });
   }
 
+  // Replace the AI's unreliable state-law / missing-standard-clause guesses with a
+  // deterministic checklist against the curated per-state clause library: covered
+  // topics are never flagged, absent ones are flagged identically every time.
+  let review = toolUse.input as Record<string, unknown>;
+  if (docText) {
+    const property = await prisma.properties.findFirst({
+      where: { id: propertyId, organization_id: ctx.orgDbId, deleted_at: null },
+      select: { state: true },
+    });
+    review = reconcileReviewWithCanonical(review, docText, property?.state) as Record<string, unknown>;
+  }
+
   return Response.json({
-    review: toolUse.input,
+    review,
     blobUrl: blob.url,
     contentType: file.type,
     fileName: file.name,

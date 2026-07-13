@@ -1094,13 +1094,7 @@ function LeaseCreationWorkflow({
   workflowStarted: boolean;
   onWorkflowStarted: (started: boolean) => void;
 }) {
-  // A fresh upload carries its analysis on `pendingUpload.review`. When updating an
-  // existing template there is no upload, so fall back to the template's stored AI
-  // review so clauses, missing provisions, state-law notes, and readability still show.
   const selectedTemplateReview = selectedTemplate?.reviewData as LeaseReview | null | undefined;
-  const review = pendingUpload?.review ?? selectedTemplateReview;
-  const reviewClauses = Array.isArray(review?.clauseSummaries) ? review.clauseSummaries : [];
-  const stateNotes = Array.isArray(review?.stateLawNotes) ? review.stateLawNotes : [];
 
   // The document preview can come from a fresh upload (pendingUpload) OR, when updating an
   // existing template, from regenerating that template's stored file. Treat both uniformly
@@ -1113,6 +1107,16 @@ function LeaseCreationWorkflow({
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [startPanel, setStartPanel] = useState<"choose" | "existing">("choose");
   const [startChoice, setStartChoice] = useState<"upload" | "existing" | null>(null);
+
+  // A fresh upload carries its analysis on `pendingUpload.review`. Fall back to the
+  // selected template's stored review ONLY in the "edit existing template" path —
+  // otherwise the template that auto-selects when the page opens would leak its old
+  // review (clauses, missing provisions, state-law notes) into the fresh-upload flow
+  // before the user has uploaded anything.
+  const review =
+    pendingUpload?.review ?? (startChoice === "existing" ? selectedTemplateReview : undefined);
+  const reviewClauses = Array.isArray(review?.clauseSummaries) ? review.clauseSummaries : [];
+  const stateNotes = Array.isArray(review?.stateLawNotes) ? review.stateLawNotes : [];
   const [expandedClauses, setExpandedClauses] = useState<Set<string>>(new Set());
   const [selectedFixes, setSelectedFixes] = useState<Set<string>>(new Set());
   const [clauseTab, setClauseTab] = useState<"clauses" | "missing" | "statelaw" | "readability">("clauses");
@@ -1753,7 +1757,12 @@ function LeaseCreationWorkflow({
       const sortedClauses = [...reviewClauses].sort((a, b) => (riskOrder[a.riskLevel] ?? 3) - (riskOrder[b.riskLevel] ?? 3));
       const missingConcepts = [...(Array.isArray(review?.missingConcepts) ? review.missingConcepts : [])].sort((a, b) => (importanceOrder[a.importance] ?? 3) - (importanceOrder[b.importance] ?? 3));
       const readabilitySuggestions = Array.isArray(review?.readabilitySuggestions) ? review.readabilitySuggestions : [];
-      const allNotes = [...(stateNotes.length ? stateNotes : property.stateClauses)].sort((a, b) => (riskOrder[a.risk] ?? 3) - (riskOrder[b.risk] ?? 3));
+      // Only the current review's own notes are shown. The stored per-property list
+      // (property.stateClauses, accumulated from PREVIOUS templates' reviews) is never
+      // used here: before an upload it showed stale "default points" with checkboxes
+      // that couldn't fix anything, and after fixes it refilled a deliberately empty
+      // tab. The fix route matches selections against the review's notes only.
+      const allNotes = [...stateNotes].sort((a, b) => (riskOrder[a.risk] ?? 3) - (riskOrder[b.risk] ?? 3));
 
       // Parse "..intro. (1) first item; (2) second item." into intro + numbered list
       const parsedSummary = (() => {
@@ -1966,7 +1975,11 @@ function LeaseCreationWorkflow({
 
             {clauseTab === "statelaw" && (
               allNotes.length === 0 ? (
-                <p className="ui-empty-state p-4 text-sm">Upload a lease to get state-law suggestions for {property.state}.</p>
+                <p className="ui-empty-state p-4 text-sm">
+                  {review
+                    ? `No open state-law items for ${property.state}.`
+                    : `Upload a lease to get state-law suggestions for ${property.state}.`}
+                </p>
               ) : (
                 <>
                 {selectAllBar("s:", allNotes.length)}
@@ -2129,7 +2142,7 @@ function LeaseCreationWorkflow({
           <div className="ui-panel-soft p-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">State improvements</p>
             <p className="mt-1 text-sm font-semibold text-slate-900">{acceptedSuggestions ? "Accepted" : "Not accepted"}</p>
-            <p className="text-sm text-slate-500">{stateNotes.length || property.stateClauses.length} notes reviewed</p>
+            <p className="text-sm text-slate-500">{stateNotes.length} notes reviewed</p>
           </div>
         </div>
         <div className="ui-panel overflow-hidden">
