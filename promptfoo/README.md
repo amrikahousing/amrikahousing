@@ -15,6 +15,7 @@ a passing run means the firewall's defenses are actually holding.
 promptfoo/
   configs/       one YAML per route (prompts + tests + assertions)
   prompts/       the chat prompt each config uses
+  fixtures/      synthetic golden documents (fictional leases) used as vars
   run-all.mjs    runs every config, fails if any assertion fails
 ```
 
@@ -28,15 +29,15 @@ promptfoo/
 | `renter/maintenance/parse` | `maintenance-parse.yaml` | free text → structured JSON; tag-wrapped input |
 | `ai-import` | `ai-import.yaml` | free text → properties JSON; tag-wrapped input |
 | `accounting/category-suggestions` | `accounting-categories.yaml` | injection via a malicious **vendor name** (notice-only defense — this route doesn't tag-wrap) |
+| `fill-lease.ts` extraction phase (`extractLeaseSchema`) | `fill-lease-extraction.yaml` | synthetic lease fixtures → golden substitution pairs; tag-wrapped document text |
 
 Each config has **functional** tests (the prompt still does its job) and
 **injection** tests (the firewall boundary holds).
 
 ### Not yet covered (and why)
 
-The document-ingesting routes — `renters/lease-parse`, the two
-`lease-templates/*review` routes, and the `fill-lease.ts` substitution phase —
-send **PDF/image document blocks** (or a very large extracted-text prompt) rather
+The remaining document-ingesting routes — `renters/lease-parse` and the two
+`lease-templates/*review` routes — send **PDF/image document blocks** rather
 than a short templatable string. Faithfully testing them at the prompt level
 needs binary document fixtures and near-verbatim copies of large prompts that
 drift from source. The right way to cover them is an **end-to-end HTTP eval**

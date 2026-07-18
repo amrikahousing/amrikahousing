@@ -149,7 +149,9 @@ function requiresEmailCodeChallenge(status: unknown) {
   return status === "needs_second_factor" || status === "needs_client_trust";
 }
 
-function supportsEmailCodeChallenge(signIn: NonNullable<ReturnType<typeof useSignIn>["signIn"]>) {
+function supportsEmailCodeChallenge(signIn: {
+  supportedSecondFactors?: { strategy: string }[] | null;
+}) {
   return signIn.supportedSecondFactors?.some((factor) => factor.strategy === "email_code") ?? false;
 }
 
@@ -702,10 +704,16 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
         return;
       }
 
-      if (requiresEmailCodeChallenge(signIn.status)) {
-        if (!supportsEmailCodeChallenge(signIn)) {
+      // `signIn` from useSignIn() is a per-render snapshot: after awaiting
+      // create() + password() within this handler, its .status can still hold
+      // the pre-create value, so a fast submit (password manager, automation)
+      // lands in the "additional step" branch even though the API already
+      // returned "complete". Flow-control must read the live client resource.
+      const liveSignIn = clerk.client?.signIn ?? signIn;
+      if (requiresEmailCodeChallenge(liveSignIn.status)) {
+        if (!supportsEmailCodeChallenge(liveSignIn)) {
           setClientError(
-            `Sign-in requires an additional step (${String(signIn.status)}), but email code is not available for this account.`,
+            `Sign-in requires an additional step (${String(liveSignIn.status)}), but email code is not available for this account.`,
           );
           setIsSubmitting(false);
           return;
@@ -726,8 +734,8 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
         return;
       }
 
-      if (signIn.status !== "complete") {
-        setClientError(`Sign-in requires an additional step (${String(signIn.status)}).`);
+      if (liveSignIn.status !== "complete") {
+        setClientError(`Sign-in requires an additional step (${String(liveSignIn.status)}).`);
         setIsSubmitting(false);
         return;
       }
