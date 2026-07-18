@@ -516,24 +516,38 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
 
   async function completeSignIn(options?: { suppressError?: boolean }) {
     let didNavigate = false;
-    const { error: finalizeError } = await withTimeout(
-      signIn.finalize({
-        navigate: async ({ session, decorateUrl }) => {
-          didNavigate = true;
-          const destination = await resolvePostSignInDestination();
-          let target = destination;
-          if (session.currentTask) {
-            const tasksUrl = new URL("/login/tasks", window.location.origin);
-            tasksUrl.searchParams.set("redirect_url", destination);
-            target = `${tasksUrl.pathname}${tasksUrl.search}`;
-          }
+    let finalizeError: unknown = null;
+    // clerk-js can briefly report "Cannot finalize sign-in without a created
+    // session" even after the API returned status "complete" — its internal
+    // state settles a moment after password()/verifyCode() resolves. Retry a
+    // couple of times before treating the failure as real.
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      if (attempt > 0) {
+        await new Promise((resolve) => setTimeout(resolve, 250));
+      }
+      const { error } = await withTimeout(
+        signIn.finalize({
+          navigate: async ({ session, decorateUrl }) => {
+            didNavigate = true;
+            const destination = await resolvePostSignInDestination();
+            let target = destination;
+            if (session.currentTask) {
+              const tasksUrl = new URL("/login/tasks", window.location.origin);
+              tasksUrl.searchParams.set("redirect_url", destination);
+              target = `${tasksUrl.pathname}${tasksUrl.search}`;
+            }
 
-          await gateAndNavigate(decorateUrl(target));
-        },
-      }),
-      10000,
-      "Finishing sign-in",
-    );
+            await gateAndNavigate(decorateUrl(target));
+          },
+        }),
+        10000,
+        "Finishing sign-in",
+      );
+      finalizeError = error;
+      if (!error) {
+        break;
+      }
+    }
     if (finalizeError) {
       if (!options?.suppressError) {
         setClientError(getErrorMessage(finalizeError, "We could not finish signing you in."));
