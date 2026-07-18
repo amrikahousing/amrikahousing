@@ -516,38 +516,54 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
 
   async function completeSignIn(options?: { suppressError?: boolean }) {
     let didNavigate = false;
-    let finalizeError: unknown = null;
-    // clerk-js can briefly report "Cannot finalize sign-in without a created
-    // session" even after the API returned status "complete" — its internal
-    // state settles a moment after password()/verifyCode() resolves. Retry a
-    // couple of times before treating the failure as real.
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      if (attempt > 0) {
-        await new Promise((resolve) => setTimeout(resolve, 250));
+    const navigateAfterActivation = async ({
+      session,
+      decorateUrl,
+    }: {
+      session: { currentTask?: unknown };
+      decorateUrl: (url: string) => string;
+    }) => {
+      didNavigate = true;
+      const destination = await resolvePostSignInDestination();
+      let target = destination;
+      if (session.currentTask) {
+        const tasksUrl = new URL("/login/tasks", window.location.origin);
+        tasksUrl.searchParams.set("redirect_url", destination);
+        target = `${tasksUrl.pathname}${tasksUrl.search}`;
       }
-      const { error } = await withTimeout(
-        signIn.finalize({
-          navigate: async ({ session, decorateUrl }) => {
-            didNavigate = true;
-            const destination = await resolvePostSignInDestination();
-            let target = destination;
-            if (session.currentTask) {
-              const tasksUrl = new URL("/login/tasks", window.location.origin);
-              tasksUrl.searchParams.set("redirect_url", destination);
-              target = `${tasksUrl.pathname}${tasksUrl.search}`;
-            }
 
-            await gateAndNavigate(decorateUrl(target));
-          },
-        }),
+      await gateAndNavigate(decorateUrl(target));
+    };
+
+    let finalizeError: unknown = (
+      await withTimeout(
+        signIn.finalize({ navigate: navigateAfterActivation }),
         10000,
         "Finishing sign-in",
-      );
-      finalizeError = error;
-      if (!error) {
-        break;
+      )
+    ).error;
+
+    // The signIn object from useSignIn() is a signal snapshot: right after
+    // password()/verifyCode() resolves, its internal createdSessionId can
+    // still be null, so finalize() throws "Cannot finalize sign-in without a
+    // created session" without ever hitting the network — even though the API
+    // already created the session. The live client does track that session,
+    // so fall back to activating it directly via clerk.setActive().
+    if (finalizeError) {
+      const client = clerk.client;
+      const pendingSessionId = client?.lastActiveSessionId ?? client?.sessions?.[0]?.id ?? null;
+      if (pendingSessionId) {
+        finalizeError = await withTimeout(
+          clerk
+            .setActive({ session: pendingSessionId, navigate: navigateAfterActivation })
+            .then(() => null)
+            .catch((error: unknown) => error),
+          10000,
+          "Finishing sign-in",
+        );
       }
     }
+
     if (finalizeError) {
       if (!options?.suppressError) {
         setClientError(getErrorMessage(finalizeError, "We could not finish signing you in."));
