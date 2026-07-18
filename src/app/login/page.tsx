@@ -145,16 +145,6 @@ function isConsumedInvitationError(error: unknown) {
   });
 }
 
-function requiresEmailCodeChallenge(status: unknown) {
-  return status === "needs_second_factor" || status === "needs_client_trust";
-}
-
-function supportsEmailCodeChallenge(signIn: {
-  supportedSecondFactors?: { strategy: string }[] | null;
-}) {
-  return signIn.supportedSecondFactors?.some((factor) => factor.strategy === "email_code") ?? false;
-}
-
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string) {
   let timeoutId: number | undefined;
   const timeout = new Promise<never>((_, reject) => {
@@ -524,7 +514,7 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     navigateToUrl(pendingRedirect ?? (await resolvePostSignInDestination()));
   }
 
-  async function completeSignIn() {
+  async function completeSignIn(options?: { suppressError?: boolean }) {
     let didNavigate = false;
     const { error: finalizeError } = await withTimeout(
       signIn.finalize({
@@ -545,24 +535,23 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
       "Finishing sign-in",
     );
     if (finalizeError) {
-      setClientError(getErrorMessage(finalizeError, "We could not finish signing you in."));
-      setIsSubmitting(false);
-      return;
+      if (!options?.suppressError) {
+        setClientError(getErrorMessage(finalizeError, "We could not finish signing you in."));
+        setIsSubmitting(false);
+      }
+      return "failed" as const;
     }
 
     if (!didNavigate) {
       await navigateAfterAuth(await resolvePostSignInDestination());
     }
+    return "done" as const;
   }
 
   async function sendSignInEmailCode() {
-    if (!supportsEmailCodeChallenge(signIn)) {
-      setClientError(
-        `Sign-in requires an additional step (${String(signIn.status)}), but email code is not available for this account.`,
-      );
-      return "failed" as const;
-    }
-
+    // No supportedSecondFactors pre-check here: the signIn snapshot can lag
+    // inside handlers, and sendEmailCode() itself errors cleanly when the
+    // account doesn't support an email-code challenge.
     try {
       const { error: sendError } = await withTimeout(
         signIn.mfa.sendEmailCode(),
@@ -704,43 +693,30 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
         return;
       }
 
-      // `signIn` from useSignIn() is a per-render snapshot: after awaiting
-      // create() + password() within this handler, its .status can still hold
-      // the pre-create value, so a fast submit (password manager, automation)
-      // lands in the "additional step" branch even though the API already
-      // returned "complete". Flow-control must read the live client resource.
-      const liveSignIn = clerk.client?.signIn ?? signIn;
-      if (requiresEmailCodeChallenge(liveSignIn.status)) {
-        if (!supportsEmailCodeChallenge(liveSignIn)) {
-          setClientError(
-            `Sign-in requires an additional step (${String(liveSignIn.status)}), but email code is not available for this account.`,
-          );
-          setIsSubmitting(false);
-          return;
+      // The `signIn` object from useSignIn() is a signal snapshot: inside this
+      // handler its .status/.supportedSecondFactors can lag the live resource,
+      // so no status read here is reliable (fast submits — password managers,
+      // automation — raced it into a bogus "additional step" error even after
+      // the API returned "complete"). finalize() is authoritative: it succeeds
+      // only when the sign-in is complete. Try it first, and treat a refusal
+      // as "a verification step is genuinely pending" → email-code challenge.
+      const finalizeOutcome = await completeSignIn({ suppressError: true });
+      if (finalizeOutcome === "done") {
+        return;
+      }
+
+      setVerificationCode("");
+      switchMode("signin_mfa");
+      setClientNotice("Enter the code from your email.");
+      setIsSubmitting(false);
+
+      void sendSignInEmailCode().then((sendResult) => {
+        if (sendResult === "sent") {
+          setClientNotice("We sent a verification code to your email.");
+        } else if (sendResult === "timed_out") {
+          setClientNotice("If you received a code, enter it below. Otherwise use Resend code.");
         }
-
-        setVerificationCode("");
-        switchMode("signin_mfa");
-        setClientNotice("Enter the code from your email.");
-        setIsSubmitting(false);
-
-        void sendSignInEmailCode().then((sendResult) => {
-          if (sendResult === "sent") {
-            setClientNotice("We sent a verification code to your email.");
-          } else if (sendResult === "timed_out") {
-            setClientNotice("If you received a code, enter it below. Otherwise use Resend code.");
-          }
-        });
-        return;
-      }
-
-      if (liveSignIn.status !== "complete") {
-        setClientError(`Sign-in requires an additional step (${String(liveSignIn.status)}).`);
-        setIsSubmitting(false);
-        return;
-      }
-
-      await completeSignIn();
+      });
     } catch (error) {
       setClientError(getErrorMessage(error, "Something went wrong. Please try again."));
       setIsSubmitting(false);
