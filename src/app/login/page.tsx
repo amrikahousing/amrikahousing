@@ -535,13 +535,22 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
       await gateAndNavigate(decorateUrl(target));
     };
 
-    let finalizeError: unknown = (
-      await withTimeout(
-        signIn.finalize({ navigate: navigateAfterActivation }),
-        10000,
-        "Finishing sign-in",
-      )
-    ).error;
+    // finalize() reports some failures as a returned { error } and throws
+    // others (e.g. "Cannot finalize sign-in without a created session" is a
+    // synchronous throw) — funnel both into finalizeError so the fallback
+    // below always gets a chance to run.
+    let finalizeError: unknown = null;
+    try {
+      finalizeError = (
+        await withTimeout(
+          signIn.finalize({ navigate: navigateAfterActivation }),
+          10000,
+          "Finishing sign-in",
+        )
+      ).error;
+    } catch (error) {
+      finalizeError = error;
+    }
 
     // The signIn object from useSignIn() is a signal snapshot: right after
     // password()/verifyCode() resolves, its internal createdSessionId can
@@ -570,14 +579,18 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
         }
       }
       if (pendingSessionId) {
-        finalizeError = await withTimeout(
-          clerk
-            .setActive({ session: pendingSessionId, navigate: navigateAfterActivation })
-            .then(() => null)
-            .catch((error: unknown) => error),
-          10000,
-          "Finishing sign-in",
-        );
+        try {
+          finalizeError = await withTimeout(
+            clerk
+              .setActive({ session: pendingSessionId, navigate: navigateAfterActivation })
+              .then(() => null)
+              .catch((error: unknown) => error),
+            10000,
+            "Finishing sign-in",
+          );
+        } catch (error) {
+          finalizeError = error;
+        }
       }
     }
 
