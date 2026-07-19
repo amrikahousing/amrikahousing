@@ -8,7 +8,7 @@ test.skip(
 test("accounts overview renders financial summary and charts", async ({ page }) => {
   await page.goto("/accounts");
 
-  await expect(page.getByRole("heading", { name: "Accounts" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Accounts", exact: true })).toBeVisible();
   await expect(page.getByRole("region", { name: "Financial summary" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Revenue vs Expenses" })).toBeVisible();
   await expect(page.getByRole("link", { name: "View all transactions" })).toBeVisible();
@@ -24,5 +24,5 @@ test("transactions ledger loads and links back to accounts", async ({ page }) =>
   // Back link returns to the accounts overview.
   await page.getByRole("link", { name: "Back to accounts" }).click();
   await page.waitForURL("**/accounts");
-  await expect(page.getByRole("heading", { name: "Accounts" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Accounts", exact: true })).toBeVisible();
 });

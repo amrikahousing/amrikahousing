@@ -22,7 +22,7 @@ test("payments page lists the schedule and history", async ({ page }) => {
 test("add payment method flow opens the Stripe form", async ({ page }) => {
   await page.goto("/renter/payment-methods");
 
-  await expect(page.getByRole("heading", { name: "Payment Methods" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Payment Methods", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Saved Payment Methods" })).toBeVisible();
 
   const addCard = page.getByRole("button", { name: "Add Card" });

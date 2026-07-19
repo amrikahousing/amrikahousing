@@ -27,6 +27,51 @@ function writeEmptyStorageState(filePath: string) {
   fs.writeFileSync(filePath, JSON.stringify({ cookies: [], origins: [] }, null, 2));
 }
 
+/**
+ * First sign-in on an account (or after a policy version bump) lands on the
+ * "One more step" policy-acceptance gate instead of navigating: the user must
+ * open the combined policy document, scroll it to the end, tick the consent
+ * checkbox, and press "Accept & continue" (src/app/login/page.tsx +
+ * policy-consent-modal.tsx). Acceptance is saved to the account, so this
+ * usually runs at most once per test user.
+ */
+async function acceptPolicyGateIfShown(page: Page) {
+  const gate = page.getByRole("heading", { name: "One more step" });
+  if (!(await gate.isVisible().catch(() => false))) return;
+
+  await page.getByRole("button", { name: "Privacy Policy" }).click();
+  const dialog = page.getByRole("dialog", { name: "Privacy Policy and Terms of Service" });
+  await dialog.waitFor({ timeout: 10_000 });
+
+  // The modal enables its confirm button only once the same-origin policy
+  // iframe is scrolled to the end. The iframe starts as about:blank, so keep
+  // scrolling on every poll tick until the modal's own aria-live feedback
+  // ("You've reached the end.") confirms the gate registered it.
+  const iframe = page.locator('iframe[title="Privacy Policy and Terms of Service"]');
+  await expect
+    .poll(
+      async () => {
+        await iframe.evaluate((el) => {
+          const frame = el as HTMLIFrameElement;
+          const doc = frame.contentDocument;
+          const scroller = doc?.scrollingElement ?? doc?.documentElement;
+          if (!doc || !scroller) return;
+          scroller.scrollTop = scroller.scrollHeight;
+          frame.contentWindow?.dispatchEvent(new Event("scroll"));
+        });
+        return dialog.getByText("You've reached the end.").isVisible();
+      },
+      { timeout: 15_000, message: "policy document never registered as read to the end" },
+    )
+    .toBe(true);
+
+  await dialog.getByRole("button", { name: "I have read this" }).click({ timeout: 10_000 });
+  await page
+    .getByLabel("I have read and agree to the Privacy Policy and Terms of Service")
+    .check();
+  await page.getByRole("button", { name: "Accept & continue" }).click();
+}
+
 async function signInAndSave(
   page: Page,
   {
@@ -43,7 +88,17 @@ async function signInAndSave(
 
   // The login page resolves the user's role and then hard-navigates renters to
   // /renter and managers to /dashboard, sometimes via an intermediate
-  // /login/tasks step (src/app/login/page.tsx). Wait for the final landing.
+  // /login/tasks step (src/app/login/page.tsx) — unless the one-time policy
+  // gate appears first. Wait for either, clear the gate if shown, then wait
+  // for the final landing.
+  await Promise.race([
+    page.waitForURL(landingPattern, { timeout: 30_000 }).catch(() => {}),
+    page
+      .getByRole("heading", { name: "One more step" })
+      .waitFor({ timeout: 30_000 })
+      .catch(() => {}),
+  ]);
+  await acceptPolicyGateIfShown(page);
   await page.waitForURL(landingPattern, { timeout: 45_000 });
 
   // Clerk sets the app-domain __session cookie asynchronously; saving storage

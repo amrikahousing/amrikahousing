@@ -20,6 +20,9 @@ export const RENTER_STORAGE_STATE = path.resolve(
 export default defineConfig({
   testDir: "./e2e",
   timeout: 60_000,
+  // Data-heavy pages (accounts, renter portal) fetch from Neon on cold
+  // serverless starts; the 5s default expect timeout flakes on first load.
+  expect: { timeout: 15_000 },
   retries: 1,
   reporter: "list",
   use: {

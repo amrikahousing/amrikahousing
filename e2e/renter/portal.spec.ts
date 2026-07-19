@@ -33,5 +33,5 @@ test("lease detail page opens from the portal", async ({ page }) => {
   await page.waitForURL("**/renter/lease");
   await expect(page.getByRole("heading", { name: "Lease", exact: true })).toBeVisible();
   await expect(page.getByText("Lease Status")).toBeVisible();
-  await expect(page.getByText("Current Lease Agreement")).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Current Lease Agreement" })).toBeVisible();
 });
