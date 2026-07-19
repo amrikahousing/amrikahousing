@@ -547,11 +547,28 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     // password()/verifyCode() resolves, its internal createdSessionId can
     // still be null, so finalize() throws "Cannot finalize sign-in without a
     // created session" without ever hitting the network — even though the API
-    // already created the session. The live client does track that session,
-    // so fall back to activating it directly via clerk.setActive().
+    // already created the session. The live client learns about the session a
+    // beat later (or after a reload), so poll it briefly and activate the
+    // session directly via clerk.setActive().
     if (finalizeError) {
-      const client = clerk.client;
-      const pendingSessionId = client?.lastActiveSessionId ?? client?.sessions?.[0]?.id ?? null;
+      let pendingSessionId: string | null = null;
+      const deadline = Date.now() + 4000;
+      while (Date.now() < deadline) {
+        const client = clerk.client;
+        pendingSessionId = client?.lastActiveSessionId ?? client?.sessions?.[0]?.id ?? null;
+        if (pendingSessionId) break;
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      }
+      if (!pendingSessionId && clerk.client) {
+        // Last resort: re-fetch the client from Clerk's API so the newly
+        // created session is definitely present.
+        try {
+          const reloaded = await clerk.client.reload();
+          pendingSessionId = reloaded.lastActiveSessionId ?? reloaded.sessions?.[0]?.id ?? null;
+        } catch {
+          // fall through to the original finalize error
+        }
+      }
       if (pendingSessionId) {
         finalizeError = await withTimeout(
           clerk
