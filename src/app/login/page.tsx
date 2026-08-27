@@ -145,14 +145,6 @@ function isConsumedInvitationError(error: unknown) {
   });
 }
 
-function requiresEmailCodeChallenge(status: unknown) {
-  return status === "needs_second_factor" || status === "needs_client_trust";
-}
-
-function supportsEmailCodeChallenge(signIn: NonNullable<ReturnType<typeof useSignIn>["signIn"]>) {
-  return signIn.supportedSecondFactors?.some((factor) => factor.strategy === "email_code") ?? false;
-}
-
 function withTimeout<T>(promise: Promise<T>, ms: number, label: string) {
   let timeoutId: number | undefined;
   const timeout = new Promise<never>((_, reject) => {
@@ -522,45 +514,104 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
     navigateToUrl(pendingRedirect ?? (await resolvePostSignInDestination()));
   }
 
-  async function completeSignIn() {
+  async function completeSignIn(options?: { suppressError?: boolean }) {
     let didNavigate = false;
-    const { error: finalizeError } = await withTimeout(
-      signIn.finalize({
-        navigate: async ({ session, decorateUrl }) => {
-          didNavigate = true;
-          const destination = await resolvePostSignInDestination();
-          let target = destination;
-          if (session.currentTask) {
-            const tasksUrl = new URL("/login/tasks", window.location.origin);
-            tasksUrl.searchParams.set("redirect_url", destination);
-            target = `${tasksUrl.pathname}${tasksUrl.search}`;
-          }
+    const navigateAfterActivation = async ({
+      session,
+      decorateUrl,
+    }: {
+      session: { currentTask?: unknown };
+      decorateUrl: (url: string) => string;
+    }) => {
+      didNavigate = true;
+      const destination = await resolvePostSignInDestination();
+      let target = destination;
+      if (session.currentTask) {
+        const tasksUrl = new URL("/login/tasks", window.location.origin);
+        tasksUrl.searchParams.set("redirect_url", destination);
+        target = `${tasksUrl.pathname}${tasksUrl.search}`;
+      }
 
-          await gateAndNavigate(decorateUrl(target));
-        },
-      }),
-      10000,
-      "Finishing sign-in",
-    );
+      await gateAndNavigate(decorateUrl(target));
+    };
+
+    // finalize() reports some failures as a returned { error } and throws
+    // others (e.g. "Cannot finalize sign-in without a created session" is a
+    // synchronous throw) — funnel both into finalizeError so the fallback
+    // below always gets a chance to run.
+    let finalizeError: unknown = null;
+    try {
+      finalizeError = (
+        await withTimeout(
+          signIn.finalize({ navigate: navigateAfterActivation }),
+          10000,
+          "Finishing sign-in",
+        )
+      ).error;
+    } catch (error) {
+      finalizeError = error;
+    }
+
+    // The signIn object from useSignIn() is a signal snapshot: right after
+    // password()/verifyCode() resolves, its internal createdSessionId can
+    // still be null, so finalize() throws "Cannot finalize sign-in without a
+    // created session" without ever hitting the network — even though the API
+    // already created the session. The live client learns about the session a
+    // beat later (or after a reload), so poll it briefly and activate the
+    // session directly via clerk.setActive().
     if (finalizeError) {
-      setClientError(getErrorMessage(finalizeError, "We could not finish signing you in."));
-      setIsSubmitting(false);
-      return;
+      let pendingSessionId: string | null = null;
+      const deadline = Date.now() + 4000;
+      while (Date.now() < deadline) {
+        const client = clerk.client;
+        pendingSessionId = client?.lastActiveSessionId ?? client?.sessions?.[0]?.id ?? null;
+        if (pendingSessionId) break;
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      }
+      if (!pendingSessionId && clerk.client) {
+        // Last resort: re-fetch the client from Clerk's API so the newly
+        // created session is definitely present.
+        try {
+          const reloaded = await clerk.client.reload();
+          pendingSessionId = reloaded.lastActiveSessionId ?? reloaded.sessions?.[0]?.id ?? null;
+        } catch {
+          // fall through to the original finalize error
+        }
+      }
+      if (pendingSessionId) {
+        try {
+          finalizeError = await withTimeout(
+            clerk
+              .setActive({ session: pendingSessionId, navigate: navigateAfterActivation })
+              .then(() => null)
+              .catch((error: unknown) => error),
+            10000,
+            "Finishing sign-in",
+          );
+        } catch (error) {
+          finalizeError = error;
+        }
+      }
+    }
+
+    if (finalizeError) {
+      if (!options?.suppressError) {
+        setClientError(getErrorMessage(finalizeError, "We could not finish signing you in."));
+        setIsSubmitting(false);
+      }
+      return "failed" as const;
     }
 
     if (!didNavigate) {
       await navigateAfterAuth(await resolvePostSignInDestination());
     }
+    return "done" as const;
   }
 
   async function sendSignInEmailCode() {
-    if (!supportsEmailCodeChallenge(signIn)) {
-      setClientError(
-        `Sign-in requires an additional step (${String(signIn.status)}), but email code is not available for this account.`,
-      );
-      return "failed" as const;
-    }
-
+    // No supportedSecondFactors pre-check here: the signIn snapshot can lag
+    // inside handlers, and sendEmailCode() itself errors cleanly when the
+    // account doesn't support an email-code challenge.
     try {
       const { error: sendError } = await withTimeout(
         signIn.mfa.sendEmailCode(),
@@ -702,37 +753,30 @@ export function AuthPage({ initialMode = "signin" }: { initialMode?: AuthMode })
         return;
       }
 
-      if (requiresEmailCodeChallenge(signIn.status)) {
-        if (!supportsEmailCodeChallenge(signIn)) {
-          setClientError(
-            `Sign-in requires an additional step (${String(signIn.status)}), but email code is not available for this account.`,
-          );
-          setIsSubmitting(false);
-          return;
+      // The `signIn` object from useSignIn() is a signal snapshot: inside this
+      // handler its .status/.supportedSecondFactors can lag the live resource,
+      // so no status read here is reliable (fast submits — password managers,
+      // automation — raced it into a bogus "additional step" error even after
+      // the API returned "complete"). finalize() is authoritative: it succeeds
+      // only when the sign-in is complete. Try it first, and treat a refusal
+      // as "a verification step is genuinely pending" → email-code challenge.
+      const finalizeOutcome = await completeSignIn({ suppressError: true });
+      if (finalizeOutcome === "done") {
+        return;
+      }
+
+      setVerificationCode("");
+      switchMode("signin_mfa");
+      setClientNotice("Enter the code from your email.");
+      setIsSubmitting(false);
+
+      void sendSignInEmailCode().then((sendResult) => {
+        if (sendResult === "sent") {
+          setClientNotice("We sent a verification code to your email.");
+        } else if (sendResult === "timed_out") {
+          setClientNotice("If you received a code, enter it below. Otherwise use Resend code.");
         }
-
-        setVerificationCode("");
-        switchMode("signin_mfa");
-        setClientNotice("Enter the code from your email.");
-        setIsSubmitting(false);
-
-        void sendSignInEmailCode().then((sendResult) => {
-          if (sendResult === "sent") {
-            setClientNotice("We sent a verification code to your email.");
-          } else if (sendResult === "timed_out") {
-            setClientNotice("If you received a code, enter it below. Otherwise use Resend code.");
-          }
-        });
-        return;
-      }
-
-      if (signIn.status !== "complete") {
-        setClientError(`Sign-in requires an additional step (${String(signIn.status)}).`);
-        setIsSubmitting(false);
-        return;
-      }
-
-      await completeSignIn();
+      });
     } catch (error) {
       setClientError(getErrorMessage(error, "Something went wrong. Please try again."));
       setIsSubmitting(false);

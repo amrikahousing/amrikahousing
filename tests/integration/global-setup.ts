@@ -27,6 +27,10 @@ import {
   DOC_OLD,
   DOC_CURRENT,
   DOC_B,
+  PAYMENT_STRIPE_SUCCEED,
+  PAYMENT_STRIPE_FAIL,
+  SIGNATURE_REQUEST_PENDING,
+  NOTIFICATION_SMS,
 } from "./fixtures";
 
 const FIXTURE_ORG_CLERK_IDS = [ORG_A.clerkOrgId, ORG_B.clerkOrgId];
@@ -52,6 +56,11 @@ export default async function setup() {
     });
     await prisma.leases.deleteMany({
       where: { units: { properties: { organizations: inFixtureOrgs } } },
+    });
+    // notifications_sent has no FK to organizations, so the org cascade never
+    // reaches it — wipe it explicitly by the fixed fixture org ids.
+    await prisma.notifications_sent.deleteMany({
+      where: { organization_id: { in: [ORG_A.id, ORG_B.id] } },
     });
     await prisma.organizations.deleteMany({ where: inFixtureOrgs });
 
@@ -237,6 +246,56 @@ export default async function setup() {
           created_at: DOC_B.createdAt,
         },
       ],
+    });
+
+    // Webhook fixtures: pending rent charges with in-flight Stripe attempts
+    // (consumed by webhooks-stripe), a DocuSeal request out for signature
+    // (webhooks-docuseal), and a sent SMS receipt (webhooks-twilio).
+    await prisma.payments.createMany({
+      data: [PAYMENT_STRIPE_SUCCEED, PAYMENT_STRIPE_FAIL].map((payment) => ({
+        id: payment.id,
+        lease_id: LEASE_DOCS.id,
+        tenant_id: TENANT_PRIMARY.id,
+        amount: payment.amount,
+        type: "rent",
+        status: "pending",
+        due_date: payment.dueDate,
+      })),
+    });
+    await prisma.payment_attempts.createMany({
+      data: [PAYMENT_STRIPE_SUCCEED, PAYMENT_STRIPE_FAIL].map((payment) => ({
+        id: payment.attemptId,
+        payment_id: payment.id,
+        tenant_id: TENANT_PRIMARY.id,
+        organization_id: ORG_A.id,
+        stripe_payment_intent_id: payment.paymentIntentId,
+        idempotency_key: payment.idempotencyKey,
+        amount: payment.amount,
+        status: "processing",
+      })),
+    });
+    await prisma.lease_signature_requests.create({
+      data: {
+        id: SIGNATURE_REQUEST_PENDING.id,
+        lease_id: LEASE_PENDING.id,
+        provider: "docuseal",
+        provider_document_id: SIGNATURE_REQUEST_PENDING.providerDocumentId,
+        status: "sent",
+        recipients: [],
+        sent_at: new Date("2026-06-01T00:00:00Z"),
+      },
+    });
+    await prisma.notifications_sent.create({
+      data: {
+        id: NOTIFICATION_SMS.id,
+        organization_id: ORG_A.id,
+        tenant_id: TENANT_PRIMARY.id,
+        channel: "sms",
+        to_phone: NOTIFICATION_SMS.toPhone,
+        body: "Integration test rent reminder",
+        provider_sid: NOTIFICATION_SMS.providerSid,
+        status: "sent",
+      },
     });
   } finally {
     await prisma.$disconnect();

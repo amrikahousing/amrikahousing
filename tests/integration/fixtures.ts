@@ -84,3 +84,37 @@ export const DOC_B = {
   fileName: "foreign-lease.pdf",
   createdAt: new Date("2026-01-15T00:00:00Z"),
 };
+
+// Pending rent payments on LEASE_DOCS, each with one in-flight Stripe attempt
+// keyed by a fixed PaymentIntent id. The Stripe webhook specs replay
+// payment_intent.succeeded / payment_intent.payment_failed events for them.
+export const PAYMENT_STRIPE_SUCCEED = {
+  id: "8a000000-0000-4000-8000-000000000001",
+  attemptId: "9a000000-0000-4000-8000-000000000001",
+  paymentIntentId: "pi_integration_webhook_succeed",
+  idempotencyKey: "integration:webhook:succeed",
+  amount: 1800,
+  dueDate: new Date("2026-07-01"),
+};
+export const PAYMENT_STRIPE_FAIL = {
+  id: "8a000000-0000-4000-8000-000000000002",
+  attemptId: "9a000000-0000-4000-8000-000000000002",
+  paymentIntentId: "pi_integration_webhook_fail",
+  idempotencyKey: "integration:webhook:fail",
+  amount: 1800,
+  dueDate: new Date("2026-08-01"),
+};
+
+// DocuSeal signature request for LEASE_PENDING (out for e-signature). The
+// DocuSeal webhook spec dispatches a form.declined event against it.
+export const SIGNATURE_REQUEST_PENDING = {
+  id: "aa000000-0000-4000-8000-000000000001",
+  providerDocumentId: "990001",
+};
+
+// Sent SMS receipt row the Twilio webhook specs update by provider_sid.
+export const NOTIFICATION_SMS = {
+  id: "ab000000-0000-4000-8000-000000000001",
+  providerSid: "SM0integration00000000000000000001",
+  toPhone: "+15555550100",
+};

@@ -71,7 +71,7 @@
     "prisma": "^7.8.0",
     "tailwindcss": "^4",
     "typescript": "^5",
-    "vercel": "^55.0.0",
+    "vercel": "^58.4.4",
     "vite-tsconfig-paths": "^6.1.1",
     "vitest": "^4.1.10"
   },
