@@ -108,11 +108,16 @@ try {
   assertDatabaseUrlHost(mainProductionEnv.values, NEON_PRODUCTION_HOST_PREFIX, "Production");
   run("npm", ["run", "build"], { cwd: mainWorktree, env: mainProductionEnv.values, hideLocalEnvFiles: true });
   console.log("Running LLM injection evals before promotion.");
-  // ANTHROPIC_API_KEY is a SENSITIVE var in Vercel: `vercel env pull` and
-  // `vercel env run` both return it empty (sensitive values are only decrypted
-  // inside Vercel deployments). Fall back to the developer's .env.local key.
+  // ANTHROPIC_API_KEY is a SENSITIVE var in Vercel: sensitive values are only
+  // decrypted inside Vercel deployments, never exposed via the CLI. Older Vercel
+  // CLIs returned an empty value from `vercel env pull`; newer ones (>=58) emit
+  // the literal mask "[SENSITIVE]" instead. Treat either — an empty string or a
+  // bracketed placeholder like "[SENSITIVE]"/"[REDACTED]" — as "no real value"
+  // and fall back to the developer's .env.local key.
   const evalEnv = { ...mainProductionEnv.values };
-  if (!evalEnv.ANTHROPIC_API_KEY) {
+  const anthropicKey = evalEnv.ANTHROPIC_API_KEY;
+  const isVercelMasked = typeof anthropicKey === "string" && /^\[[A-Z_]+\]$/.test(anthropicKey.trim());
+  if (!anthropicKey || isVercelMasked) {
     const localEnv = readFileSync(join(root, ".env.local"), "utf8").match(
       /^ANTHROPIC_API_KEY=["']?([^"'\r\n]+)["']?$/m,
     );
